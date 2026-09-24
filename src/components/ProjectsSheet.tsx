@@ -289,20 +289,39 @@ function JobDialog({
   );
 }
 
-/** Dialog to add a product (FG) directly under a job. */
+/** Dialog to add a product (FG) under a job — create new or attach an existing standalone product. */
 function AddProductToJobDialog({
   job,
   projectLabel,
+  standaloneProducts,
+  onOpenProduct,
   onClose,
 }: {
   job: JobDoc;
   projectLabel: string;
+  standaloneProducts: FgDoc[];
+  onOpenProduct: (fgId: Id<"finishedGoods">) => void;
   onClose: () => void;
 }) {
   const addFg = useMutation(api.costing.addFinishedGood);
+  const attachJobs = useMutation(api.costing.setFgJobs);
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("");
   const [saving, setSaving] = useState(false);
+  const [attachBusy, setAttachBusy] = useState<Id<"finishedGoods"> | null>(null);
+  const [existingSearch, setExistingSearch] = useState("");
+
+  const matchingExisting = useMemo(() => {
+    const q = existingSearch.trim().toLowerCase();
+    return standaloneProducts
+      .filter(
+        (f) =>
+          !q ||
+          f.name.toLowerCase().includes(q) ||
+          (f.code ?? "").toLowerCase().includes(q),
+      )
+      .slice(0, 5);
+  }, [standaloneProducts, existingSearch]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -327,6 +346,23 @@ function AddProductToJobDialog({
     }
   };
 
+  const handleAttach = async (fg: FgDoc) => {
+    setAttachBusy(fg._id);
+    try {
+      // Keep any job links the product already has, plus this job.
+      const current = (fg.jobIds ?? (fg.jobId ? [fg.jobId] : [])).filter(Boolean);
+      const next = Array.from(new Set([...current, job._id]));
+      await attachJobs({ id: fg._id, jobIds: next });
+      toast.success(`“${fg.name}” attached to job “${job.name}”.`);
+      onOpenProduct(fg._id);
+      onClose();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't attach the product.");
+    } finally {
+      setAttachBusy(null);
+    }
+  };
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-md">
@@ -338,10 +374,11 @@ function AddProductToJobDialog({
             Add product to “{job.name}”
           </DialogTitle>
           <DialogDescription className="text-xs">
-            The product attaches to this job under {projectLabel}. Its costing
-            sheet (BOM) opens next — add materials there.
+            Create a new product for this job, or attach an existing standalone
+            product under {projectLabel}. The same product can serve many jobs.
           </DialogDescription>
         </DialogHeader>
+
         <form onSubmit={handleSave} className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium">Product name *</label>
@@ -378,6 +415,57 @@ function AddProductToJobDialog({
             </Button>
           </DialogFooter>
         </form>
+
+        {/* attach an existing standalone product */}
+        <div className="space-y-2 rounded-xl border border-dashed bg-muted/20 p-3">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+            <SearchIcon className="size-3" />
+            Or attach an existing standalone product
+          </p>
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
+            <input
+              value={existingSearch}
+              onChange={(e) => setExistingSearch(e.target.value)}
+              placeholder="Search products…"
+              className="w-full rounded-lg border bg-background py-1.5 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          {standaloneProducts.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">
+              No standalone products yet — create one on the Products tab.
+            </p>
+          ) : matchingExisting.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">
+              Nothing matches “{existingSearch}”.
+            </p>
+          ) : (
+            <ul className="max-h-40 space-y-1 overflow-y-auto">
+              {matchingExisting.map((fg) => (
+                <li key={fg._id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-lg bg-card px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                    onClick={() => void handleAttach(fg)}
+                    disabled={attachBusy !== null}
+                  >
+                    <Package className="size-3.5 shrink-0 text-muted-foreground/70" />
+                    <span className="min-w-0 flex-1 truncate font-medium">{fg.name}</span>
+                    {fg.code && (
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                        {fg.code}
+                      </span>
+                    )}
+                    <Plus className="size-3 shrink-0 text-primary" />
+                    {attachBusy === fg._id && (
+                      <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -392,6 +480,7 @@ export default function ProjectsSheet({
   onNewProduct,
   onEditProject,
   onDeleteProject,
+  onOpenProduct,
 }: {
   finishedGoods: FgDoc[];
   loading: boolean;
@@ -400,6 +489,7 @@ export default function ProjectsSheet({
   onNewProduct?: (projectName: string) => void;
   onEditProject?: (project: ProjectDoc) => void;
   onDeleteProject?: (project: ProjectDoc) => void;
+  onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
 }) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -421,6 +511,18 @@ export default function ProjectsSheet({
   const removeJob = useMutation(api.jobs.removeJob);
   const updateJob = useMutation(api.jobs.updateJob);
   const { confirm } = useAppDialogs();
+
+  /** Products not linked to any project or job — attachable from the popup. */
+  const standaloneProducts = useMemo(
+    () =>
+      finishedGoods.filter(
+        (f) =>
+          f.projectName === undefined &&
+          f.jobId === undefined &&
+          (f.jobIds ?? []).length === 0,
+      ),
+    [finishedGoods],
+  );
 
   const costByFg = useMemo(() => {
     const map = new Map<Id<"finishedGoods">, number>();
@@ -803,14 +905,17 @@ export default function ProjectsSheet({
                           const meta = job.status
                             ? JOB_STATUS_META[job.status]
                             : undefined;
-                          const products = finishedGoods.filter(
-                            (f) => f.jobId === job._id,
-                          ).length;
+                          const jobProducts = finishedGoods.filter(
+                            (f) =>
+                              f.jobId === job._id ||
+                              (f.jobIds ?? []).includes(job._id),
+                          );
+                          const products = jobProducts.length;
                           return (
-                            <div
-                              key={job._id}
-                              className="group/job flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-card px-2 py-1.5 text-xs"
-                            >
+                            <div key={job._id} className="space-y-0.5">
+                              <div
+                                className="group/job flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-card px-2 py-1.5 text-xs"
+                              >
                               <Briefcase className="size-3 shrink-0 text-sky-500/80" />
                               <span className="font-medium">{job.name}</span>
                               {job.code && (
@@ -991,6 +1096,36 @@ export default function ProjectsSheet({
                                   <PackagePlus className="size-3" />
                                 </button>
                               </span>
+                              </div>
+
+                              {/* product lines under this job */}
+                              {jobProducts.map((fg) => (
+                                <button
+                                  key={fg._id}
+                                  type="button"
+                                  title="Open this product's costing sheet"
+                                  className="flex w-full items-center gap-2 rounded-lg bg-card px-2 py-1 pl-6 text-xs transition-colors hover:bg-accent"
+                                  onClick={() => onOpenProduct?.(fg._id)}
+                                >
+                                  <Package className="size-3 shrink-0 text-sky-500/80" />
+                                  <span className="min-w-0 flex-1 truncate text-left font-medium">
+                                    {fg.name}
+                                  </span>
+                                  {fg.code && (
+                                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                                      {fg.code}
+                                    </span>
+                                  )}
+                                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                                    {fg.currency ?? "$"}
+                                    {(costByFg.get(fg._id) ?? 0).toLocaleString(
+                                      undefined,
+                                      { maximumFractionDigits: 2 },
+                                    )}
+                                  </span>
+                                  <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
+                                </button>
+                              ))}
                             </div>
                           );
                         })
@@ -1048,6 +1183,8 @@ export default function ProjectsSheet({
         <AddProductToJobDialog
           job={addProductJob.job}
           projectLabel={addProductJob.projectLabel}
+          standaloneProducts={standaloneProducts}
+          onOpenProduct={(fgId) => onOpenProduct?.(fgId)}
           onClose={() => setAddProductJob(null)}
         />
       )}

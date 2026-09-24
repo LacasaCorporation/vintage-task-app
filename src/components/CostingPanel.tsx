@@ -549,6 +549,7 @@ export default function CostingPanel({
             onDeleteProject={
               canDeleteProject ? (p) => onDeleteProject?.(p) : undefined
             }
+            onOpenProduct={(fgId) => onSelectView({ kind: "fg", fgId })}
           />
         </div>
       ) : view?.kind === "fg" && activeFg ? (
