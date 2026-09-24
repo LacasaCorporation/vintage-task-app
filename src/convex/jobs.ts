@@ -227,6 +227,19 @@ export const reopenJob = mutation({
   },
 });
 
+/** Flag (or unflag) a job. Flagged jobs show all their products as subtasks. */
+export const setJobFlag = mutation({
+  args: { id: v.id("projectJobs"), flagged: v.boolean() },
+  handler: async (ctx, { id, flagged }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const job = await ctx.db.get(id);
+    if (job === null || job.ownerId !== userId)
+      throw new Error("That job no longer exists.");
+    await ctx.db.patch(id, { isFlagged: flagged || undefined });
+  },
+});
+
 /** Delete a job. Its products stay (they just lose the job link). */
 export const removeJob = mutation({
   args: { id: v.id("projectJobs") },

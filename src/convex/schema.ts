@@ -271,6 +271,8 @@ const schema = defineSchema(
       imageAlt: v.optional(v.string()), // original file name
       currency: v.optional(v.string()),
       markupPct: v.optional(v.number()),
+      // flagged products surface as a subtask under their job
+      isFlagged: v.optional(v.boolean()),
     }).index("by_owner", ["ownerId"]),
 
     // jobs (also called tasks) that live under a project; FG products
@@ -296,6 +298,8 @@ const schema = defineSchema(
       startedAt: v.optional(v.number()), // when work first started
       pausedAt: v.optional(v.number()), // when it was last paused
       completedAt: v.optional(v.number()), // when it was completed
+      // a flagged job shows all of its products as subtasks
+      isFlagged: v.optional(v.boolean()),
     })
       .index("by_owner", ["ownerId"])
       .index("by_project", ["projectId"]),

@@ -888,6 +888,24 @@ export const setFgJobs = mutation({
 });
 
 /**
+ * Flag (or unflag) a product. A flagged product surfaces as a subtask under
+ * its job; unflagging hides it from the flagged view again.
+ */
+export const setFgFlag = mutation({
+  args: { id: v.id("finishedGoods"), flagged: v.boolean() },
+  handler: async (ctx, { id, flagged }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(id);
+    if (fg === null || fg.ownerId !== userId)
+      throw new Error("That product no longer exists.");
+    if (flagged && fg.jobId === undefined && (fg.jobIds ?? []).length === 0)
+      throw new Error("Attach the product to a job before flagging it.");
+    await ctx.db.patch(id, { isFlagged: flagged || undefined });
+  },
+});
+
+/**
  * Clone an FG product: copies name (with " (copy)"), code (new FG code),
  * unit, category, note, currency, markup, image, and all costing lines.
  * Job/project links are NOT copied — the clone starts standalone.

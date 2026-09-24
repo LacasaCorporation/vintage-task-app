@@ -15,6 +15,7 @@ import {
   ChevronDown,
   CircleCheck,
   Download,
+  Flag,
   Folder,
   Loader2,
   Package,
@@ -504,6 +505,8 @@ export default function ProjectsSheet({
 }) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [flagFilter, setFlagFilter] = useState<"all" | "flagged">("all");
+  const [flagBusy, setFlagBusy] = useState<string | null>(null);
   const [jobDialog, setJobDialog] = useState<{
     projectId: Id<"projects">;
     projectLabel: string;
@@ -521,10 +524,38 @@ export default function ProjectsSheet({
   const completeJob = useMutation(api.jobs.completeJob);
   const removeJob = useMutation(api.jobs.removeJob);
   const updateJob = useMutation(api.jobs.updateJob);
+  const setJobFlag = useMutation(api.jobs.setJobFlag);
+  const setFgFlag = useMutation(api.costing.setFgFlag);
   const { confirm } = useAppDialogs();
 
   /** All FG products — the clone picker searches across every project. */
   const allProducts = finishedGoods;
+
+  /** Toggle the flag on a job (a flagged job shows all of its products). */
+  const toggleJobFlag = async (job: JobDoc) => {
+    setFlagBusy(`j:${job._id}`);
+    try {
+      await setJobFlag({ id: job._id, flagged: !job.isFlagged });
+      toast.success(job.isFlagged ? "Flag removed from job." : "Job flagged — all its products show as subtasks.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
+    } finally {
+      setFlagBusy(null);
+    }
+  };
+
+  /** Toggle the flag on a product (flagged products are subtasks of their job). */
+  const toggleFgFlag = async (fg: FgDoc) => {
+    setFlagBusy(`f:${fg._id}`);
+    try {
+      await setFgFlag({ id: fg._id, flagged: !fg.isFlagged });
+      toast.success(fg.isFlagged ? "Flag removed from product." : "Product flagged — it now shows under its job.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
+    } finally {
+      setFlagBusy(null);
+    }
+  };
 
   const costByFg = useMemo(() => {
     const map = new Map<Id<"finishedGoods">, number>();
@@ -585,16 +616,28 @@ export default function ProjectsSheet({
   }, [finishedGoods, projects, costByFg, allJobs]);
 
   const filtered = useMemo(() => {
+    let list = rows;
+    if (flagFilter === "flagged") {
+      // only projects that have something flagged in them
+      list = list.filter((p) => {
+        return (
+          p.jobs.some((j) => j.isFlagged) ||
+          finishedGoods.some(
+            (f) => f.isFlagged && f.projectName === p.name,
+          )
+        );
+      });
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
+    if (!q) return list;
+    return list.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         (p.code ?? "").toLowerCase().includes(q) ||
         (p.project?.client ?? "").toLowerCase().includes(q) ||
         (p.project?.assignee ?? "").toLowerCase().includes(q),
     );
-  }, [rows, search]);
+  }, [rows, search, flagFilter, finishedGoods]);
 
   const totals = useMemo(
     () => ({
@@ -682,6 +725,17 @@ export default function ProjectsSheet({
                 className="w-40 rounded-lg border bg-background py-1 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
               />
             </div>
+            <select
+              value={flagFilter}
+              onChange={(e) =>
+                setFlagFilter(e.target.value as "all" | "flagged")
+              }
+              aria-label="Show flagged items"
+              className="rounded-lg border bg-background py-1 px-1.5 text-xs outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <option value="all">All items</option>
+              <option value="flagged">⚑ Flagged</option>
+            </select>
             {filtered.length > 0 && (
               <Button
                 type="button"
@@ -907,12 +961,28 @@ export default function ProjectsSheet({
                           const meta = job.status
                             ? JOB_STATUS_META[job.status]
                             : undefined;
-                          const jobProducts = finishedGoods.filter(
+                          const allJobProducts = finishedGoods.filter(
                             (f) =>
                               f.jobId === job._id ||
                               (f.jobIds ?? []).includes(job._id),
                           );
-                          const products = jobProducts.length;
+                          // Flagged view: a flagged job shows ALL its
+                          // products; a normal job shows only its flagged
+                          // products (as subtasks under the job line).
+                          const jobProducts =
+                            flagFilter === "flagged"
+                              ? job.isFlagged
+                                ? allJobProducts
+                                : allJobProducts.filter((f) => f.isFlagged)
+                              : allJobProducts;
+                          const products = allJobProducts.length;
+                          // in flagged view hide normal jobs with nothing flagged
+                          if (
+                            flagFilter === "flagged" &&
+                            !job.isFlagged &&
+                            !allJobProducts.some((f) => f.isFlagged)
+                          )
+                            return null;
                           return (
                             <div key={job._id} className="space-y-0.5">
                               <div
@@ -962,6 +1032,38 @@ export default function ProjectsSheet({
                               <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                                 {products} product{products === 1 ? "" : "s"}
                               </span>
+                              <button
+                                type="button"
+                                title={
+                                  job.isFlagged
+                                    ? "Remove flag (products stay)"
+                                    : "Flag this job — show all its products as subtasks"
+                                }
+                                aria-label={
+                                  job.isFlagged
+                                    ? "Remove flag from job"
+                                    : "Flag job"
+                                }
+                                className={cn(
+                                  "flex size-5 shrink-0 items-center justify-center rounded-md transition-colors",
+                                  job.isFlagged
+                                    ? "text-amber-500"
+                                    : "text-muted-foreground/40 hover:text-amber-500",
+                                )}
+                                onClick={() => void toggleJobFlag(job)}
+                                disabled={flagBusy !== null}
+                              >
+                                {flagBusy === `j:${job._id}` ? (
+                                  <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                  <Flag
+                                    className={cn(
+                                      "size-3",
+                                      job.isFlagged && "fill-current",
+                                    )}
+                                  />
+                                )}
+                              </button>
 
                               <span className="ml-auto flex shrink-0 items-center gap-0.5">
                                 {(job.status === "planning" ||
@@ -1102,31 +1204,67 @@ export default function ProjectsSheet({
 
                               {/* product lines under this job */}
                               {jobProducts.map((fg) => (
-                                <button
+                                <div
                                   key={fg._id}
-                                  type="button"
-                                  title="Open this product's costing sheet"
-                                  className="flex w-full items-center gap-2 rounded-lg bg-card px-2 py-1 pl-6 text-xs transition-colors hover:bg-accent"
-                                  onClick={() => onOpenProduct?.(fg._id)}
+                                  className="flex w-full items-center gap-2 rounded-lg bg-card px-2 py-1 pl-6 pr-1.5 text-xs transition-colors hover:bg-accent"
                                 >
-                                  <Package className="size-3 shrink-0 text-sky-500/80" />
-                                  <span className="min-w-0 flex-1 truncate text-left font-medium">
-                                    {fg.name}
-                                  </span>
-                                  {fg.code && (
-                                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                                      {fg.code}
+                                  <button
+                                    type="button"
+                                    title="Open this product's costing sheet"
+                                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                    onClick={() => onOpenProduct?.(fg._id)}
+                                  >
+                                    <Package className="size-3 shrink-0 text-sky-500/80" />
+                                    <span className="min-w-0 flex-1 truncate font-medium">
+                                      {fg.name}
                                     </span>
-                                  )}
-                                  <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                                    {fg.currency ?? "$"}
-                                    {(costByFg.get(fg._id) ?? 0).toLocaleString(
-                                      undefined,
-                                      { maximumFractionDigits: 2 },
+                                    {fg.code && (
+                                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                                        {fg.code}
+                                      </span>
                                     )}
-                                  </span>
-                                  <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
-                                </button>
+                                    <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                                      {fg.currency ?? "$"}
+                                      {(costByFg.get(fg._id) ?? 0).toLocaleString(
+                                        undefined,
+                                        { maximumFractionDigits: 2 },
+                                      )}
+                                    </span>
+                                    <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title={
+                                      fg.isFlagged
+                                        ? "Remove flag from product"
+                                        : "Flag product — show it under its job"
+                                    }
+                                    aria-label={
+                                      fg.isFlagged
+                                        ? "Remove flag from product"
+                                        : "Flag product"
+                                    }
+                                    className={cn(
+                                      "grid size-5 shrink-0 place-items-center rounded-md transition-colors",
+                                      fg.isFlagged
+                                        ? "text-amber-500"
+                                        : "text-muted-foreground/40 hover:text-amber-500",
+                                    )}
+                                    onClick={() => void toggleFgFlag(fg)}
+                                    disabled={flagBusy !== null}
+                                  >
+                                    {flagBusy === `f:${fg._id}` ? (
+                                      <Loader2 className="size-3 animate-spin" />
+                                    ) : (
+                                      <Flag
+                                        className={cn(
+                                          "size-3",
+                                          fg.isFlagged && "fill-current",
+                                        )}
+                                      />
+                                    )}
+                                  </button>
+                                </div>
                               ))}
                             </div>
                           );
