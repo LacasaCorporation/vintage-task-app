@@ -434,7 +434,9 @@ export default function Dashboard() {
   const addProjectM = useMutation(api.costing.addProject);
   const updateProjectM = useMutation(api.costing.updateProject);
   const removeProjectM = useMutation(api.costing.removeProject);
-  const [costingView, setCostingView] = useState<CostingView>(null);
+  const [costingView, setCostingView] = useState<CostingView>({
+    kind: "projects",
+  });
   const [projectDialog, setProjectDialog] = useState<
     | { mode: "create" }
     | { mode: "edit"; project: Doc<"projects"> }
@@ -737,9 +739,9 @@ export default function Dashboard() {
     },
     {
       id: "costing",
-      label: "Costing sheet",
+      label: "Projects",
       icon: Calculator,
-      description: "Job cost calculator",
+      description: "Projects, products & materials",
     },
     ...(canOpenSettings
       ? [

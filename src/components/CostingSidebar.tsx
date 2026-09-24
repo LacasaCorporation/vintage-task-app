@@ -60,8 +60,26 @@ export default function CostingSidebar({
     return Array.from(map.entries());
   }, [finishedGoods]);
 
-  /** Top-level navigation: raw materials, products, projects. */
+  /** Top-level navigation: projects · products · raw materials. */
   const navItems = [
+    {
+      id: "projects" as const,
+      label: "Projects",
+      icon: Folder,
+      count: projects.length,
+      unit: "project",
+      active: view?.kind === "projects" || view === null,
+      onClick: () => onSelectView({ kind: "projects" }),
+    },
+    {
+      id: "products" as const,
+      label: "Products",
+      icon: Package,
+      count: finishedGoods.length,
+      unit: "product",
+      active: view?.kind === "products",
+      onClick: () => onSelectView({ kind: "products" }),
+    },
     ...(showMaterials
       ? [
           {
@@ -75,24 +93,6 @@ export default function CostingSidebar({
           },
         ]
       : []),
-    {
-      id: "products" as const,
-      label: "Products",
-      icon: Package,
-      count: finishedGoods.length,
-      unit: "product",
-      active: view?.kind === "products" || view === null,
-      onClick: () => onSelectView({ kind: "products" }),
-    },
-    {
-      id: "projects" as const,
-      label: "Projects",
-      icon: Folder,
-      count: projects.length,
-      unit: "project",
-      active: view?.kind === "projects",
-      onClick: () => onSelectView({ kind: "projects" }),
-    },
   ];
 
   return (

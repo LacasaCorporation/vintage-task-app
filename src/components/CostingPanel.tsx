@@ -530,7 +530,7 @@ export default function CostingPanel({
             canImport={canImport}
           />
         </div>
-      ) : view?.kind === "projects" ? (
+      ) : view === null || view?.kind === "projects" ? (
         <div className="mt-4">
           <ProjectsSheet
             finishedGoods={finishedGoods}
