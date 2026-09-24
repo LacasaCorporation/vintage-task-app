@@ -18,6 +18,7 @@ import {
   Folder,
   Loader2,
   Package,
+  PackagePlus,
   Pause,
   Pencil,
   Play,
@@ -288,6 +289,100 @@ function JobDialog({
   );
 }
 
+/** Dialog to add a product (FG) directly under a job. */
+function AddProductToJobDialog({
+  job,
+  projectLabel,
+  onClose,
+}: {
+  job: JobDoc;
+  projectLabel: string;
+  onClose: () => void;
+}) {
+  const addFg = useMutation(api.costing.addFinishedGood);
+  const [name, setName] = useState("");
+  const [unit, setUnit] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = name.trim();
+    if (!clean) {
+      toast.error("Give the product a name.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await addFg({
+        jobId: job._id,
+        name: clean,
+        unit: unit.trim() || undefined,
+      });
+      toast.success(`“${clean}” added to job “${job.name}”.`);
+      onClose();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't add the product.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+              <PackagePlus className="size-4" />
+            </span>
+            Add product to “{job.name}”
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            The product attaches to this job under {projectLabel}. Its costing
+            sheet (BOM) opens next — add materials there.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSave} className="space-y-3">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium">Product name *</label>
+            <Input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Oak door panel"
+              className={inputCls}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium">Sold per (unit)</label>
+            <Input
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              placeholder="e.g. pcs, m², set"
+              className={inputCls}
+            />
+          </div>
+          <DialogFooter className="pt-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-lg"
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" className="rounded-lg" disabled={saving}>
+              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+              Add product
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Projects listing sheet — one row per project with its jobs and details. */
 export default function ProjectsSheet({
   finishedGoods,
@@ -312,6 +407,10 @@ export default function ProjectsSheet({
     projectId: Id<"projects">;
     projectLabel: string;
     job: JobDoc | null;
+  } | null>(null);
+  const [addProductJob, setAddProductJob] = useState<{
+    job: JobDoc;
+    projectLabel: string;
   } | null>(null);
   const projects = useQuery(api.costing.listProjects);
   const allItems = useQuery(api.costing.listAllItems);
@@ -879,12 +978,17 @@ export default function ProjectsSheet({
                                 </button>
                                 <button
                                   type="button"
-                                  title="New product under this job"
-                                  aria-label="New product under this job"
+                                  title="Add product to this job"
+                                  aria-label="Add product to this job"
                                   className="grid size-5 place-items-center rounded-md text-muted-foreground hover:text-primary"
-                                  onClick={() => onOpenProject(p.name)}
+                                  onClick={() =>
+                                    setAddProductJob({
+                                      job,
+                                      projectLabel: p.name,
+                                    })
+                                  }
                                 >
-                                  <Sigma className="size-3" />
+                                  <PackagePlus className="size-3" />
                                 </button>
                               </span>
                             </div>
@@ -937,6 +1041,14 @@ export default function ProjectsSheet({
           projectLabel={jobDialog.projectLabel}
           job={jobDialog.job}
           onClose={() => setJobDialog(null)}
+        />
+      )}
+
+      {addProductJob && (
+        <AddProductToJobDialog
+          job={addProductJob.job}
+          projectLabel={addProductJob.projectLabel}
+          onClose={() => setAddProductJob(null)}
         />
       )}
     </div>
