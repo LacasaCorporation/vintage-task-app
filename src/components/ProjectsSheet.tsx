@@ -19,6 +19,7 @@ import {
   Loader2,
   Package,
   PackagePlus,
+  Copy,
   Pause,
   Pencil,
   Play,
@@ -512,17 +513,8 @@ export default function ProjectsSheet({
   const updateJob = useMutation(api.jobs.updateJob);
   const { confirm } = useAppDialogs();
 
-  /** Products not linked to any project or job — attachable from the popup. */
-  const standaloneProducts = useMemo(
-    () =>
-      finishedGoods.filter(
-        (f) =>
-          f.projectName === undefined &&
-          f.jobId === undefined &&
-          (f.jobIds ?? []).length === 0,
-      ),
-    [finishedGoods],
-  );
+  /** All FG products — the clone picker searches across every project. */
+  const allProducts = finishedGoods;
 
   const costByFg = useMemo(() => {
     const map = new Map<Id<"finishedGoods">, number>();
@@ -1183,7 +1175,7 @@ export default function ProjectsSheet({
         <AddProductToJobDialog
           job={addProductJob.job}
           projectLabel={addProductJob.projectLabel}
-          standaloneProducts={standaloneProducts}
+          allProducts={allProducts}
           onOpenProduct={(fgId) => onOpenProduct?.(fgId)}
           onClose={() => setAddProductJob(null)}
         />
