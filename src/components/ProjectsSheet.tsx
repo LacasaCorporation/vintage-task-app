@@ -290,39 +290,42 @@ function JobDialog({
   );
 }
 
-/** Dialog to add a product (FG) under a job — create new or attach an existing standalone product. */
+/** Dialog to add a product (FG) under a job — create new, or clone an existing product from any project. */
 function AddProductToJobDialog({
   job,
   projectLabel,
-  standaloneProducts,
+  allProducts,
   onOpenProduct,
   onClose,
 }: {
   job: JobDoc;
   projectLabel: string;
-  standaloneProducts: FgDoc[];
+  allProducts: FgDoc[];
   onOpenProduct: (fgId: Id<"finishedGoods">) => void;
   onClose: () => void;
 }) {
   const addFg = useMutation(api.costing.addFinishedGood);
+  const cloneFg = useMutation(api.costing.cloneFinishedGood);
   const attachJobs = useMutation(api.costing.setFgJobs);
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("");
   const [saving, setSaving] = useState(false);
-  const [attachBusy, setAttachBusy] = useState<Id<"finishedGoods"> | null>(null);
+  const [cloneBusy, setCloneBusy] = useState<Id<"finishedGoods"> | null>(null);
   const [existingSearch, setExistingSearch] = useState("");
 
+  /** Every other product (any project/job/standalone) matching the search. */
   const matchingExisting = useMemo(() => {
     const q = existingSearch.trim().toLowerCase();
-    return standaloneProducts
+    return allProducts
       .filter(
         (f) =>
           !q ||
           f.name.toLowerCase().includes(q) ||
-          (f.code ?? "").toLowerCase().includes(q),
+          (f.code ?? "").toLowerCase().includes(q) ||
+          (f.projectName ?? "").toLowerCase().includes(q),
       )
-      .slice(0, 5);
-  }, [standaloneProducts, existingSearch]);
+      .slice(0, 6);
+  }, [allProducts, existingSearch]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -347,20 +350,21 @@ function AddProductToJobDialog({
     }
   };
 
-  const handleAttach = async (fg: FgDoc) => {
-    setAttachBusy(fg._id);
+  /** Clone the chosen product and attach the clone to this job. */
+  const handleClone = async (fg: FgDoc) => {
+    setCloneBusy(fg._id);
     try {
-      // Keep any job links the product already has, plus this job.
-      const current = (fg.jobIds ?? (fg.jobId ? [fg.jobId] : [])).filter(Boolean);
-      const next = Array.from(new Set([...current, job._id]));
-      await attachJobs({ id: fg._id, jobIds: next });
-      toast.success(`“${fg.name}” attached to job “${job.name}”.`);
-      onOpenProduct(fg._id);
+      const cloneId = await cloneFg({ id: fg._id });
+      await attachJobs({ id: cloneId, jobIds: [job._id] });
+      toast.success(
+        `“${fg.name}” cloned and attached to job “${job.name}” — all BOM lines copied.`,
+      );
+      onOpenProduct(cloneId);
       onClose();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't attach the product.");
+      toast.error(error instanceof Error ? error.message : "Couldn't clone the product.");
     } finally {
-      setAttachBusy(null);
+      setCloneBusy(null);
     }
   };
 
@@ -375,8 +379,9 @@ function AddProductToJobDialog({
             Add product to “{job.name}”
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Create a new product for this job, or attach an existing standalone
-            product under {projectLabel}. The same product can serve many jobs.
+            Create a new product for this job, or search any existing product
+            (from another project or standalone) and clone it here — its whole
+            BOM comes along. The clone belongs to {projectLabel}.
           </DialogDescription>
         </DialogHeader>
 
@@ -417,48 +422,53 @@ function AddProductToJobDialog({
           </DialogFooter>
         </form>
 
-        {/* attach an existing standalone product */}
+        {/* search & clone an existing product (from any project) */}
         <div className="space-y-2 rounded-xl border border-dashed bg-muted/20 p-3">
           <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
             <SearchIcon className="size-3" />
-            Or attach an existing standalone product
+            Or clone an existing product (any project)
           </p>
           <div className="relative">
             <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
             <input
               value={existingSearch}
               onChange={(e) => setExistingSearch(e.target.value)}
-              placeholder="Search products…"
+              placeholder="Search name, code, or project…"
               className="w-full rounded-lg border bg-background py-1.5 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
             />
           </div>
-          {standaloneProducts.length === 0 ? (
+          {allProducts.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">
-              No standalone products yet — create one on the Products tab.
+              No products exist yet — create the first one above.
             </p>
           ) : matchingExisting.length === 0 ? (
             <p className="text-[11px] text-muted-foreground">
               Nothing matches “{existingSearch}”.
             </p>
           ) : (
-            <ul className="max-h-40 space-y-1 overflow-y-auto">
+            <ul className="max-h-44 space-y-1 overflow-y-auto">
               {matchingExisting.map((fg) => (
                 <li key={fg._id}>
                   <button
                     type="button"
                     className="flex w-full items-center gap-2 rounded-lg bg-card px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
-                    onClick={() => void handleAttach(fg)}
-                    disabled={attachBusy !== null}
+                    onClick={() => void handleClone(fg)}
+                    disabled={cloneBusy !== null}
                   >
                     <Package className="size-3.5 shrink-0 text-muted-foreground/70" />
-                    <span className="min-w-0 flex-1 truncate font-medium">{fg.name}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{fg.name}</span>
+                      <span className="block truncate text-[10px] text-muted-foreground/80">
+                        From: {fg.projectName ?? "Standalone"}
+                      </span>
+                    </span>
                     {fg.code && (
                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                         {fg.code}
                       </span>
                     )}
-                    <Plus className="size-3 shrink-0 text-primary" />
-                    {attachBusy === fg._id && (
+                    <Copy className="size-3 shrink-0 text-primary" />
+                    {cloneBusy === fg._id && (
                       <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
                     )}
                   </button>
