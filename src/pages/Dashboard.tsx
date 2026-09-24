@@ -430,6 +430,7 @@ export default function Dashboard() {
   const finishedGoods = useQuery(api.costing.listFinishedGoods);
   const addFgM = useMutation(api.costing.addFinishedGood);
   const updateFgM = useMutation(api.costing.updateFinishedGood);
+  const detachJobsM = useMutation(api.costing.setFgJobs);
   const removeFgM = useMutation(api.costing.removeFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
   const updateProjectM = useMutation(api.costing.updateProject);
@@ -660,7 +661,7 @@ export default function Dashboard() {
       columns: 2,
       confirmLabel: "Save changes",
       fields: [
-        { key: "project", label: "Project", initial: fg.projectName, required: true },
+        { key: "project", label: "Project (optional — blank = standalone)", initial: fg.projectName ?? "" },
         { key: "name", label: "Product name", initial: fg.name, required: true },
         { key: "code", label: "Code / SKU", initial: fg.code ?? "" },
         { key: "unit", label: "Sold per (unit)", initial: fg.unit ?? "pcs" },
@@ -684,9 +685,14 @@ export default function Dashboard() {
       return;
     }
     try {
+      const newProject = result.project.trim();
+      if (!newProject && fg.projectName !== undefined) {
+        // blank project on an attached product → detach back to standalone
+        await detachJobsM({ id: fg._id, jobIds: [] });
+      }
       await updateFgM({
         id: fg._id,
-        projectName: result.project.trim() || fg.projectName,
+        ...(newProject ? { projectName: newProject } : {}),
         name: result.name.trim() || fg.name,
         code: result.code,
         unit: result.unit,

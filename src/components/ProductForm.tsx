@@ -193,8 +193,8 @@ export default function ProductForm({
     const isNewProject = project === NEW_PROJECT;
     const cleanProject = (isNewProject ? newProjectName : project).trim();
     const cleanName = name.trim();
-    if (!cleanProject) {
-      toast.error(isNewProject ? "Name the new project." : "Pick a project.");
+    if (isNewProject && !cleanProject) {
+      toast.error("Name the new project.");
       return;
     }
     if (!cleanName) {
@@ -217,7 +217,7 @@ export default function ProductForm({
         }
       }
       const id = await addFg({
-        projectName: cleanProject,
+        projectName: cleanProject || undefined,
         jobId: jobId !== "" ? (jobId as Id<"projectJobs">) : undefined,
         name: cleanName,
         code: code.trim() || undefined,
@@ -299,7 +299,7 @@ export default function ProductForm({
         className="flex w-full items-center gap-1.5 rounded-xl border border-dashed bg-card/60 px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         <Plus className="size-3.5" />
-        New product (FG) — project, name, code, unit, margin…
+        New product (FG) — name, code, unit, margin… project is optional
       </button>
 
       {/* new-product popup — the master-data manager lives INSIDE it, never
@@ -315,8 +315,8 @@ export default function ProductForm({
               New product (FG)
             </DialogTitle>
             <DialogDescription className="text-xs">
-              The FG code is assigned automatically. Cost and sales price come
-              from the costing sheet, not from typing.
+              Products are standalone — no project or job needed to start. Code
+              is auto-assigned; cost and sales price come from the BOM sheet.
             </DialogDescription>
           </DialogHeader>
 
@@ -324,7 +324,10 @@ export default function ProductForm({
             <form id="new-product-form" onSubmit={handleCreate} className="space-y-5">
                 <Group title="Product">
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Project" required>
+                    <Field
+                      label="Project"
+                      hint="Optional — leave empty for a standalone product; attach to a project later"
+                    >
                       <select
                         value={project}
                         onChange={(e) => {
@@ -335,7 +338,7 @@ export default function ProductForm({
                         aria-label="Project"
                         className={selectCls}
                       >
-                        <option value="">Select a project…</option>
+                        <option value="">Standalone (no project)</option>
                         {projects.map((p) => (
                           <option key={p} value={p}>
                             {p}
@@ -346,13 +349,7 @@ export default function ProductForm({
                     </Field>
                     <Field
                       label="Job / task"
-                      hint={
-                        project === "" || project === NEW_PROJECT
-                          ? "Pick a project first"
-                          : projectJobs.length === 0
-                            ? "No jobs in this project yet — create one on the Projects tab"
-                            : undefined
-                      }
+                      hint="Optional — pick a project first to choose a job"
                     >
                       <select
                         value={jobId}
