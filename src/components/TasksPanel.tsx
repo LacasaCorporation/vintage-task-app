@@ -48,6 +48,121 @@ type FgDoc = Doc<"finishedGoods">;
 type ProjectDoc = Doc<"projects">;
 
 const PRIORITY_RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
+
+const tagChip =
+  "shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground";
+
+/** Flagged jobs & products (from the Projects section) with their labels. */
+type FlaggedData = {
+  jobs: JobDoc[];
+  fgs: FgDoc[];
+  projectNameOf: (job: JobDoc) => string;
+};
+
+/**
+ * Flagged items rendered as task rows: a flagged job is the main task with all
+ * of its products as subtasks; a flagged product shows its job as the main line.
+ * `showTags` adds explicit project & job name tag chips (used in the main list).
+ */
+function FlaggedItemsList({
+  data,
+  allJobs,
+  allFgs,
+  showTags = false,
+}: {
+  data: FlaggedData;
+  allJobs: JobDoc[];
+  allFgs: FgDoc[];
+  showTags?: boolean;
+}) {
+  return (
+    <ul className="divide-y divide-border/70">
+      {/* flagged jobs: main task — all their products listed as subtasks */}
+      {data.jobs.map((job) => {
+        const jobProducts = allFgs.filter(
+          (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
+        );
+        return (
+          <li key={job._id} className="px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Flag className="size-3.5 shrink-0 fill-amber-400 text-amber-500" />
+              <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                {job.name}
+              </span>
+              <span className={tagChip}>{data.projectNameOf(job)}</span>
+            </div>
+            {jobProducts.length > 0 && (
+              <ul className="mt-1.5 space-y-1">
+                {jobProducts.map((fg) => (
+                  <li
+                    key={fg._id}
+                    className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs"
+                  >
+                    <Package className="size-3 shrink-0 text-sky-500/70" />
+                    <span className="min-w-0 flex-1 truncate">{fg.name}</span>
+                    {fg.code && (
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                        {fg.code}
+                      </span>
+                    )}
+                    {showTags && (
+                      <>
+                        <span className={tagChip}>{data.projectNameOf(job)}</span>
+                        <span className={tagChip}>{job.name}</span>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+      {/* flagged products whose job is not flagged: job shown as main, product as subtask */}
+      {data.fgs
+        .filter((f) => {
+          const jobs = f.jobIds ?? (f.jobId ? [f.jobId] : []);
+          return !jobs.some((jid) => data.jobs.some((j) => j._id === jid));
+        })
+        .map((fg) => {
+          const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
+          const parentJob = allJobs.find((j) => jobIds.includes(j._id));
+          return (
+            <li key={fg._id} className="px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {parentJob ? (
+                  <>
+                    <Briefcase className="size-3.5 shrink-0 text-sky-500/70" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground">
+                      {parentJob.name}
+                    </span>
+                    <span className={tagChip}>{data.projectNameOf(parentJob)}</span>
+                  </>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                    Unassigned job
+                  </span>
+                )}
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs">
+                <Package className="size-3 shrink-0 text-sky-500/70" />
+                <span className="min-w-0 flex-1 truncate font-medium">
+                  {fg.name}
+                </span>
+                {fg.code && (
+                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                    {fg.code}
+                  </span>
+                )}
+                {showTags && parentJob && <span className={tagChip}>{parentJob.name}</span>}
+              </div>
+            </li>
+          );
+        })}
+    </ul>
+  );
+}
 const PRIORITY_META: Record<Priority, { dot: string; chip: string }> = {
   high: { dot: "bg-rose-500", chip: "bg-rose-500/10 text-rose-700 dark:text-rose-400" },
   medium: { dot: "bg-amber-500", chip: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
@@ -173,17 +288,17 @@ export default function TasksPanel({
 
   const activeList = lists.find((l) => l._id === activeView) ?? null;
 
-  /** Flagged jobs (with their project) and flagged products, for the Flagged view. */
-  const flaggedItems = useMemo(() => {
-    if (activeView !== "flagged") return null;
+  /** Flagged jobs (with their project) and flagged products. */
+  const flaggedItems = useMemo<FlaggedData | null>(() => {
     const jobs = (flaggedJobs ?? []).filter((j) => j.isFlagged);
     const fgs = (flaggedFgs ?? []).filter((f) => f.isFlagged);
+    if (jobs.length === 0 && fgs.length === 0) return null;
     const projectNameOf = (job: JobDoc): string => {
       const project = (flaggedProjects ?? []).find((p) => p._id === job.projectId);
       return project?.name ?? "Project";
     };
     return { jobs, fgs, projectNameOf };
-  }, [activeView, flaggedJobs, flaggedFgs, flaggedProjects]);
+  }, [flaggedJobs, flaggedFgs, flaggedProjects]);
 
   const handleAdd = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -341,14 +456,12 @@ export default function TasksPanel({
       {/* ── Flagged jobs & products (from Projects) ─────────────────── */}
       {activeView === "flagged" && (
         <section className="mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm">
-          {flaggedItems === null ||
-          flaggedJobs === undefined ||
-          flaggedFgs === undefined ? (
+          {flaggedJobs === undefined || flaggedFgs === undefined ? (
             <div className="flex items-center justify-center gap-2 px-5 py-14 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
               Loading flagged items…
             </div>
-          ) : flaggedItems.jobs.length === 0 && flaggedItems.fgs.length === 0 ? (
+          ) : flaggedItems === null ? (
             <div className="px-6 py-14 text-center">
               <Flag className="mx-auto size-8 text-amber-500/40" />
               <p className="mt-3 font-medium">Nothing flagged</p>
@@ -357,92 +470,11 @@ export default function TasksPanel({
               </p>
             </div>
           ) : (
-            <ul className="divide-y divide-border/70">
-              {/* flagged jobs: main task — all their products listed as subtasks */}
-              {flaggedItems.jobs.map((job) => {
-                const jobProducts = (flaggedFgs ?? []).filter(
-                  (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
-                );
-                return (
-                  <li key={job._id} className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Flag className="size-3.5 shrink-0 fill-amber-400 text-amber-500" />
-                      <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                        {job.name}
-                      </span>
-                      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        {flaggedItems.projectNameOf(job)}
-                      </span>
-                    </div>
-                    {jobProducts.length > 0 && (
-                      <ul className="mt-1.5 space-y-1">
-                        {jobProducts.map((fg) => (
-                          <li
-                            key={fg._id}
-                            className="flex items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs"
-                          >
-                            <Package className="size-3 shrink-0 text-sky-500/70" />
-                            <span className="min-w-0 flex-1 truncate">{fg.name}</span>
-                            {fg.code && (
-                              <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                                {fg.code}
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </li>
-                );
-              })}
-              {/* flagged products whose job is not flagged: job shown as main, product as subtask */}
-              {flaggedItems.fgs
-                .filter((f) => {
-                  const jobs = f.jobIds ?? (f.jobId ? [f.jobId] : []);
-                  return !jobs.some((jid) =>
-                    flaggedItems.jobs.some((j) => j._id === jid),
-                  );
-                })
-                .map((fg) => {
-                  const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
-                  const parentJob = (flaggedJobs ?? []).find((j) =>
-                    jobIds.includes(j._id),
-                  );
-                  return (
-                    <li key={fg._id} className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        {parentJob ? (
-                          <>
-                            <Briefcase className="size-3.5 shrink-0 text-sky-500/70" />
-                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground">
-                              {parentJob.name}
-                            </span>
-                            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                              {flaggedItems.projectNameOf(parentJob)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                            Unassigned job
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs">
-                        <Package className="size-3 shrink-0 text-sky-500/70" />
-                        <span className="min-w-0 flex-1 truncate font-medium">
-                          {fg.name}
-                        </span>
-                        {fg.code && (
-                          <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                            {fg.code}
-                          </span>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-            </ul>
+            <FlaggedItemsList
+              data={flaggedItems}
+              allJobs={flaggedJobs ?? []}
+              allFgs={flaggedFgs ?? []}
+            />
           )}
         </section>
       )}
@@ -455,7 +487,28 @@ export default function TasksPanel({
             <Loader2 className="size-4 animate-spin" />
             Loading your tasks…
           </div>
-        ) : tasks.length === 0 ? (
+        ) : (
+          <>
+          {/* flagged jobs & products from the Projects section (main list only),
+              with project & job name tags */}
+          {activeView === null &&
+            flaggedItems !== null &&
+            flaggedJobs !== undefined &&
+            flaggedFgs !== undefined && (
+              <div className="border-b border-amber-500/20 bg-amber-500/[0.04]">
+                <p className="flex items-center gap-1.5 px-4 pt-3 pb-1 text-[11px] font-semibold tracking-widest text-amber-700/80 uppercase dark:text-amber-400/80">
+                  <Flag className="size-3 fill-current" />
+                  Flagged from projects
+                </p>
+                <FlaggedItemsList
+                  data={flaggedItems}
+                  allJobs={flaggedJobs}
+                  allFgs={flaggedFgs}
+                  showTags
+                />
+              </div>
+            )}
+          {tasks.length === 0 ? (
           <div className="px-6 py-14 text-center">
             <Inbox className="mx-auto size-8 text-muted-foreground/40" />
             <p className="mt-3 font-medium">Nothing here</p>
@@ -471,6 +524,7 @@ export default function TasksPanel({
           </div>
         ) : (
           <div className="grid lg:grid-cols-[1fr_auto]">
+            <div>
             <ul className="divide-y divide-border/70">
               <AnimatePresence initial={false}>
                 {tasks.map((task) => {
@@ -670,7 +724,10 @@ export default function TasksPanel({
                 onClose={() => setOpenTaskId(null)}
               />
             )}
+            </div>
           </div>
+        )}
+          </>
         )}
       </section>
       )}
