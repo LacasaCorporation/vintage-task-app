@@ -334,9 +334,11 @@ export default function ProjectsSheet({
 
   /** Merge the project entity (details) with its FG aggregation (numbers). */
   const rows = useMemo<ProjectRow[]>(() => {
-    // Aggregate FGs by project name.
+    // Aggregate FGs by project name. Standalone products (no project) are
+    // ignored here — they live in the Products tab only.
     const agg = new Map<string, ProjectRow>();
     for (const fg of finishedGoods) {
+      if (fg.projectName === undefined) continue;
       const row = agg.get(fg.projectName) ?? {
         key: `n:${fg.projectName}`,
         name: fg.projectName,

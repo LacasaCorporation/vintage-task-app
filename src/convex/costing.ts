@@ -684,11 +684,13 @@ export const listFinishedGoods = query({
   },
 });
 
-/** Create an FG product under a project name, with optional details. */
+/** Create an FG product. projectName is optional — standalone products have
+ *  no project; jobs can be attached later. */
 export const addFinishedGood = mutation({
   args: {
-    projectName: v.string(),
-    jobId: v.optional(v.id("projectJobs")), // the job this product belongs to
+    projectName: v.optional(v.string()),
+    jobId: v.optional(v.id("projectJobs")), // single job (convenience)
+    jobIds: v.optional(v.array(v.id("projectJobs"))), // several jobs at once
     name: v.string(),
     code: v.optional(v.string()),
     unit: v.optional(v.string()),
@@ -701,37 +703,47 @@ export const addFinishedGood = mutation({
   handler: async (ctx, opts) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
-    const cleanProject = opts.projectName.trim();
+    const cleanProject = opts.projectName?.trim() ?? "";
     const cleanName = opts.name.trim();
-    if (cleanProject.length === 0) throw new Error("Give the project a name.");
     if (cleanName.length === 0) throw new Error("Give the product a name.");
     if (cleanName.length > MAX_NAME_LENGTH) throw new Error("That name is too long.");
-    // The job, when given, must exist and belong to the user.
-    let jobId: Id<"projectJobs"> | undefined;
-    if (opts.jobId !== undefined) {
-      const job = await ctx.db.get(opts.jobId);
+    // Validate every job this product should be attached to.
+    const jobSet = new Set<Id<"projectJobs">>();
+    if (opts.jobId !== undefined) jobSet.add(opts.jobId);
+    for (const jid of opts.jobIds ?? []) jobSet.add(jid);
+    for (const jid of jobSet) {
+      const job = await ctx.db.get(jid);
       if (job === null || job.ownerId !== userId)
-        throw new Error("That job no longer exists.");
-      jobId = opts.jobId;
+        throw new Error("One of the chosen jobs no longer exists.");
     }
+    const jobList = Array.from(jobSet);
     // Auto codes: FG0001 for the product; PR0001 shared per project name.
     const fgCode = await nextCode(ctx, userId, "FG");
     let projectCode: string | undefined;
-    const siblings = await ctx.db
-      .query("finishedGoods")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    const existing = siblings.find((s) => s.projectName === cleanProject);
-    if (existing?.projectCode) {
-      projectCode = existing.projectCode;
-    } else {
-      projectCode = await nextCode(ctx, userId, "PR");
+    if (cleanProject) {
+      const siblings = await ctx.db
+        .query("finishedGoods")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+      const existing = siblings.find((s) => s.projectName === cleanProject);
+      projectCode =
+        existing?.projectCode ?? (await nextCode(ctx, userId, "PR"));
+    }
+    // A job implies its project — fill projectName in from the first job.
+    let projectName: string | undefined;
+    if (cleanProject) {
+      projectName = cleanProject.slice(0, MAX_NAME_LENGTH);
+    } else if (jobList.length > 0) {
+      const job = await ctx.db.get(jobList[0]!);
+      const project = job ? await ctx.db.get(job.projectId) : null;
+      if (project) projectName = project.name.slice(0, MAX_NAME_LENGTH);
     }
     return await ctx.db.insert("finishedGoods", {
       ownerId: userId,
-      projectName: cleanProject.slice(0, MAX_NAME_LENGTH),
+      projectName,
       projectCode,
-      jobId,
+      jobId: jobList[0],
+      jobIds: jobList.length > 0 ? jobList : undefined,
       name: cleanName.slice(0, MAX_NAME_LENGTH),
       code: opts.code?.trim() || fgCode,
       unit: opts.unit?.trim() || undefined,
@@ -751,6 +763,7 @@ export const updateFinishedGood = mutation({
     projectName: v.optional(v.string()),
     projectCode: v.optional(v.string()), // usually auto-assigned on project change
     jobId: v.optional(v.id("projectJobs")),
+    jobIds: v.optional(v.array(v.id("projectJobs"))),
     name: v.optional(v.string()),
     code: v.optional(v.string()),
     unit: v.optional(v.string()),
@@ -792,6 +805,17 @@ export const updateFinishedGood = mutation({
       if (job === null || job.ownerId !== userId)
         throw new Error("That job no longer exists.");
     }
+    if (patch.jobIds !== undefined) {
+      for (const jid of patch.jobIds) {
+        const job = await ctx.db.get(jid);
+        if (job === null || job.ownerId !== userId)
+          throw new Error("One of the chosen jobs no longer exists.");
+      }
+      const unique = Array.from(new Set(patch.jobIds));
+      patch.jobIds = unique.length > 0 ? unique : undefined;
+      // keep the legacy single link in sync with the first job
+      patch.jobId = unique[0];
+    }
     if (patch.code !== undefined) patch.code = patch.code.trim() || undefined;
     if (patch.unit !== undefined) patch.unit = patch.unit.trim() || undefined;
     if (patch.category !== undefined)
@@ -821,6 +845,95 @@ export const removeFinishedGood = mutation({
       .collect();
     for (const item of items) await ctx.db.delete(item._id);
     await ctx.db.delete(id);
+  },
+});
+
+/**
+ * Attach (or detach) a product to/from a job. A product can be attached to
+ * several jobs at the same time. projectName follows the first job's project.
+ */
+export const setFgJobs = mutation({
+  args: {
+    id: v.id("finishedGoods"),
+    jobIds: v.array(v.id("projectJobs")), // full new list (empty = detach all)
+  },
+  handler: async (ctx, { id, jobIds }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(id);
+    if (fg === null) throw new Error("That product no longer exists.");
+    if (fg.ownerId !== userId) throw new Error("Not your product.");
+    const unique = Array.from(new Set(jobIds));
+    for (const jid of unique) {
+      const job = await ctx.db.get(jid);
+      if (job === null || job.ownerId !== userId)
+        throw new Error("One of the chosen jobs no longer exists.");
+    }
+    let projectName: string | undefined;
+    if (unique.length > 0) {
+      const job = await ctx.db.get(unique[0]!);
+      const project = job ? await ctx.db.get(job.projectId) : null;
+      if (project) projectName = project.name.slice(0, MAX_NAME_LENGTH);
+    } else {
+      // fully detached → back to standalone; clear the project group too
+      projectName = undefined;
+    }
+    await ctx.db.patch(id, {
+      jobIds: unique.length > 0 ? unique : undefined,
+      jobId: unique[0],
+      projectName,
+      projectCode: unique.length > 0 ? fg.projectCode : undefined,
+    });
+  },
+});
+
+/**
+ * Clone an FG product: copies name (with " (copy)"), code (new FG code),
+ * unit, category, note, currency, markup, image, and all costing lines.
+ * Job/project links are NOT copied — the clone starts standalone.
+ */
+export const cloneFinishedGood = mutation({
+  args: { id: v.id("finishedGoods") },
+  handler: async (ctx, { id }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(id);
+    if (fg === null) throw new Error("That product no longer exists.");
+    if (fg.ownerId !== userId) throw new Error("Not your product.");
+    const fgCode = await nextCode(ctx, userId, "FG");
+    const cloneId = await ctx.db.insert("finishedGoods", {
+      ownerId: userId,
+      name: `${fg.name.slice(0, MAX_NAME_LENGTH - 7)} (copy)`.slice(
+        0,
+        MAX_NAME_LENGTH,
+      ),
+      code: fgCode,
+      unit: fg.unit,
+      category: fg.category,
+      subCategory: fg.subCategory,
+      note: fg.note,
+      imageUrl: fg.imageUrl,
+      imageAlt: fg.imageAlt,
+      currency: fg.currency ?? "$",
+      markupPct: fg.markupPct ?? 0,
+    });
+    // copy every costing line
+    const items = await ctx.db
+      .query("costingItems")
+      .withIndex("by_fg", (q) => q.eq("fgId", id))
+      .collect();
+    for (const item of items) {
+      await ctx.db.insert("costingItems", {
+        ownerId: userId,
+        fgId: cloneId,
+        materialId: item.materialId,
+        label: item.label,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        unit: item.unit,
+      });
+    }
+    return cloneId;
   },
 });
 

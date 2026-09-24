@@ -624,7 +624,11 @@ export default function Dashboard() {
     }
   };
 
-  const handleRenameFg = async (fg: { _id: FgId; name: string; projectName: string }) => {
+  const handleRenameFg = async (fg: {
+    _id: FgId;
+    name: string;
+    projectName?: string;
+  }) => {
     const name = await prompt({
       title: "Rename product",
       label: "Product name",
@@ -643,7 +647,7 @@ export default function Dashboard() {
 
   const handleEditFg = async (fg: {
     _id: FgId;
-    projectName: string;
+    projectName?: string;
     name: string;
     code?: string;
     unit?: string;

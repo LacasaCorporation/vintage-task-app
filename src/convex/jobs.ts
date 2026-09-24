@@ -236,13 +236,25 @@ export const removeJob = mutation({
     const job = await ctx.db.get(id);
     if (job === null) return;
     if (job.ownerId !== userId) throw new Error("Not your job.");
-    // detach any products that point at this job
+    // detach any products that point at this job (single or multi-link)
     const fgs = await ctx.db
       .query("finishedGoods")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
     for (const fg of fgs) {
-      if (fg.jobId === id) await ctx.db.patch(fg._id, { jobId: undefined });
+      if (fg.jobId === id) {
+        const rest = (fg.jobIds ?? []).filter((j) => j !== id);
+        await ctx.db.patch(fg._id, {
+          jobId: rest[0],
+          jobIds: rest.length > 0 ? rest : undefined,
+        });
+      } else if (fg.jobIds?.includes(id)) {
+        const rest = fg.jobIds.filter((j) => j !== id);
+        await ctx.db.patch(fg._id, {
+          jobIds: rest.length > 0 ? rest : undefined,
+          jobId: rest[0],
+        });
+      }
     }
     await ctx.db.delete(id);
   },
@@ -267,8 +279,16 @@ export const removeJobsOfProject = mutation({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
     for (const fg of fgs) {
-      if (fg.jobId !== undefined && jobIds.has(fg.jobId))
-        await ctx.db.patch(fg._id, { jobId: undefined });
+      const linked =
+        (fg.jobId !== undefined && jobIds.has(fg.jobId)) ||
+        fg.jobIds?.some((j) => jobIds.has(j));
+      if (linked) {
+        const rest = (fg.jobIds ?? []).filter((j) => !jobIds.has(j));
+        await ctx.db.patch(fg._id, {
+          jobId: rest[0],
+          jobIds: rest.length > 0 ? rest : undefined,
+        });
+      }
     }
     for (const j of jobs) await ctx.db.delete(j._id);
   },

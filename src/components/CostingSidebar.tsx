@@ -53,9 +53,10 @@ export default function CostingSidebar({
   const projects = useMemo(() => {
     const map = new Map<string, FgDoc[]>();
     for (const fg of finishedGoods) {
-      const list = map.get(fg.projectName) ?? [];
+      const key = fg.projectName ?? "Standalone";
+      const list = map.get(key) ?? [];
       list.push(fg);
-      map.set(fg.projectName, list);
+      map.set(key, list);
     }
     return Array.from(map.entries());
   }, [finishedGoods]);

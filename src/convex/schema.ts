@@ -255,9 +255,12 @@ const schema = defineSchema(
     // finished goods (FG) — the product being costed, grouped by project
     finishedGoods: defineTable({
       ownerId: v.id("users"),
-      projectName: v.string(), // group label shown in the sidebar
+      projectName: v.optional(v.string()), // group label; undefined = standalone product
       projectCode: v.optional(v.string()), // auto code for the project, e.g. PR0001
-      jobId: v.optional(v.id("projectJobs")), // the job/task this product belongs to
+      jobId: v.optional(v.id("projectJobs")), // legacy single-job link (deprecated)
+      // jobs this product is attached to — a product can serve several jobs
+      // at once; undefined/empty = standalone product (no project, no job)
+      jobIds: v.optional(v.array(v.id("projectJobs"))),
       name: v.string(), // FG product name, e.g. "Wooden chair"
       code: v.optional(v.string()), // product code / SKU, auto e.g. FG0001
       unit: v.optional(v.string()), // sold per: pcs, box, set…

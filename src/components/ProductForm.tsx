@@ -145,7 +145,9 @@ export default function ProductForm({
   const projects = useMemo(() => {
     const names = new Set<string>();
     for (const p of projectDocs ?? []) names.add(p.name);
-    for (const f of finishedGoods) names.add(f.projectName);
+    for (const f of finishedGoods) {
+      if (f.projectName !== undefined) names.add(f.projectName);
+    }
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [projectDocs, finishedGoods]);
 
@@ -175,14 +177,14 @@ export default function ProductForm({
         if (!q) return true;
         return (
           f.name.toLowerCase().includes(q) ||
-          f.projectName.toLowerCase().includes(q) ||
+          (f.projectName ?? "").toLowerCase().includes(q) ||
           (f.code ?? "").toLowerCase().includes(q)
         );
       })
       .sort((a, b) =>
         a.projectName === b.projectName
           ? a.name.localeCompare(b.name)
-          : a.projectName.localeCompare(b.projectName),
+          : (a.projectName ?? "").localeCompare(b.projectName ?? ""),
       );
   }, [finishedGoods, search, projectFilter]);
 
@@ -269,7 +271,7 @@ export default function ProductForm({
         const total = cost * (1 + (f.markupPct ?? 0) / 100);
         return [
           `"${(f.projectCode ?? "").replace(/"/g, '""')}"`,
-          `"${f.projectName.replace(/"/g, '""')}"`,
+          `"${(f.projectName ?? "Standalone").replace(/"/g, '""')}"`,
           `"${(f.code ?? "").replace(/"/g, '""')}"`,
           `"${f.name.replace(/"/g, '""')}"`,
           f.unit ?? "",
@@ -656,7 +658,9 @@ export default function ProductForm({
                       <td className="px-3 py-1.5">
                         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                           <Folder className="size-3 shrink-0 text-sky-500/80" />
-                          <span className="truncate">{f.projectName}</span>
+                          <span className="truncate">
+                            {f.projectName ?? "Standalone"}
+                          </span>
                         </span>
                       </td>
                       <td className="px-3 py-1.5">

@@ -459,7 +459,7 @@ export default function CostingPanel({
       <div class="brand">${withAmounts ? "COSTING SHEET" : "PRODUCTION SHEET"}</div>
       <h1>${escapeHtml(activeFg.name)}</h1>
       <div class="meta">
-        Project: ${escapeHtml(activeFg.projectName)}${codeLine ? ` &nbsp;·&nbsp; ${escapeHtml(codeLine)}` : ""}<br />
+        Project: ${escapeHtml(activeFg.projectName ?? "Standalone")}${codeLine ? ` &nbsp;·&nbsp; ${escapeHtml(codeLine)}` : ""}<br />
         ${activeFg.unit ? `Sold per: ${escapeHtml(activeFg.unit)}${withAmounts ? ` &nbsp;·&nbsp; Margin: ${markupPct}%` : ""}` : ""}
       </div>
     </div>
