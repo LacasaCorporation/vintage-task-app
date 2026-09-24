@@ -1,5 +1,5 @@
 import { api } from "@/convex/_generated/api";
-import type { Id } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -20,6 +20,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlarmClock,
+  Briefcase,
   CalendarDays,
   ChevronDown,
   Clock,
@@ -28,6 +29,7 @@ import {
   History,
   Inbox,
   Loader2,
+  Package,
   Paperclip,
   Plus,
   Repeat,
@@ -41,6 +43,9 @@ import { cn } from "@/lib/utils";
 
 type ListId = Id<"taskLists">;
 type SortMode = "manual" | "due" | "priority" | "created";
+type JobDoc = Doc<"projectJobs">;
+type FgDoc = Doc<"finishedGoods">;
+type ProjectDoc = Doc<"projects">;
 
 const PRIORITY_RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
 const PRIORITY_META: Record<Priority, { dot: string; chip: string }> = {
@@ -77,6 +82,11 @@ export default function TasksPanel({
   const toggleTask = useMutation(api.tasks.toggle);
   const removeTask = useMutation(api.tasks.remove);
   const updateTask = useMutation(api.tasks.update);
+
+  // flagged jobs & products (from the Projects section) for the Flagged view
+  const flaggedJobs = useQuery(api.jobs.listJobs);
+  const flaggedFgs = useQuery(api.costing.listFinishedGoods);
+  const flaggedProjects = useQuery(api.costing.listProjects);
 
   const [draft, setDraft] = useState("");
   const [isAdding, setIsAdding] = useState(false);
@@ -118,9 +128,11 @@ export default function TasksPanel({
       ? "Today"
       : activeView === "starred"
         ? "Starred"
-        : activeView
-          ? (lists.find((l) => l._id === activeView)?.name ?? "List")
-          : "All tasks";
+        : activeView === "flagged"
+          ? "Flagged"
+          : activeView
+            ? (lists.find((l) => l._id === activeView)?.name ?? "List")
+            : "All tasks";
 
   const tasks = useMemo(() => {
     let out: TaskDoc[] = allTasks ?? [];
@@ -161,6 +173,18 @@ export default function TasksPanel({
 
   const activeList = lists.find((l) => l._id === activeView) ?? null;
 
+  /** Flagged jobs (with their project) and flagged products, for the Flagged view. */
+  const flaggedItems = useMemo(() => {
+    if (activeView !== "flagged") return null;
+    const jobs = (flaggedJobs ?? []).filter((j) => j.isFlagged);
+    const fgs = (flaggedFgs ?? []).filter((f) => f.isFlagged);
+    const projectNameOf = (job: JobDoc): string => {
+      const project = (flaggedProjects ?? []).find((p) => p._id === job.projectId);
+      return project?.name ?? "Project";
+    };
+    return { jobs, fgs, projectNameOf };
+  }, [activeView, flaggedJobs, flaggedFgs, flaggedProjects]);
+
   const handleAdd = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const raw = draft.trim();
@@ -172,9 +196,13 @@ export default function TasksPanel({
       await addTask({
         text,
         tags: tags.length > 0 ? tags : undefined,
-        listId: typeof activeView === "string" && activeView !== "today" && activeView !== "starred"
-          ? (activeView as ListId)
-          : undefined,
+        listId:
+          typeof activeView === "string" &&
+          activeView !== "today" &&
+          activeView !== "starred" &&
+          activeView !== "flagged"
+            ? (activeView as ListId)
+            : undefined,
       });
       setDraft("");
     } catch (error) {
@@ -222,7 +250,13 @@ export default function TasksPanel({
       {/* ── Stats ───────────────────────────────────────────────────── */}
       <section className="grid grid-cols-3 gap-3">
         {[
-          { label: viewLabel, value: tasks.length },
+          {
+            label: viewLabel,
+            value:
+              activeView === "flagged"
+                ? (flaggedItems?.jobs.length ?? 0) + (flaggedItems?.fgs.length ?? 0)
+                : tasks.length,
+          },
           { label: "Completed", value: doneCount },
           { label: "Open", value: tasks.length },
         ].map((stat) => (
@@ -304,7 +338,117 @@ export default function TasksPanel({
         </button>
       </div>
 
+      {/* ── Flagged jobs & products (from Projects) ─────────────────── */}
+      {activeView === "flagged" && (
+        <section className="mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm">
+          {flaggedItems === null ||
+          flaggedJobs === undefined ||
+          flaggedFgs === undefined ? (
+            <div className="flex items-center justify-center gap-2 px-5 py-14 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading flagged items…
+            </div>
+          ) : flaggedItems.jobs.length === 0 && flaggedItems.fgs.length === 0 ? (
+            <div className="px-6 py-14 text-center">
+              <Flag className="mx-auto size-8 text-amber-500/40" />
+              <p className="mt-3 font-medium">Nothing flagged</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Flag a job or product in the Projects page and it will show up here.
+              </p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-border/70">
+              {/* flagged jobs: main task — all their products listed as subtasks */}
+              {flaggedItems.jobs.map((job) => {
+                const jobProducts = (flaggedFgs ?? []).filter(
+                  (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
+                );
+                return (
+                  <li key={job._id} className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Flag className="size-3.5 shrink-0 fill-amber-400 text-amber-500" />
+                      <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                        {job.name}
+                      </span>
+                      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        {flaggedItems.projectNameOf(job)}
+                      </span>
+                    </div>
+                    {jobProducts.length > 0 && (
+                      <ul className="mt-1.5 space-y-1">
+                        {jobProducts.map((fg) => (
+                          <li
+                            key={fg._id}
+                            className="flex items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs"
+                          >
+                            <Package className="size-3 shrink-0 text-sky-500/70" />
+                            <span className="min-w-0 flex-1 truncate">{fg.name}</span>
+                            {fg.code && (
+                              <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                                {fg.code}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
+              {/* flagged products whose job is not flagged: job shown as main, product as subtask */}
+              {flaggedItems.fgs
+                .filter((f) => {
+                  const jobs = f.jobIds ?? (f.jobId ? [f.jobId] : []);
+                  return !jobs.some((jid) =>
+                    flaggedItems.jobs.some((j) => j._id === jid),
+                  );
+                })
+                .map((fg) => {
+                  const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
+                  const parentJob = (flaggedJobs ?? []).find((j) =>
+                    jobIds.includes(j._id),
+                  );
+                  return (
+                    <li key={fg._id} className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {parentJob ? (
+                          <>
+                            <Briefcase className="size-3.5 shrink-0 text-sky-500/70" />
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground">
+                              {parentJob.name}
+                            </span>
+                            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              {flaggedItems.projectNameOf(parentJob)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                            Unassigned job
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs">
+                        <Package className="size-3 shrink-0 text-sky-500/70" />
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          {fg.name}
+                        </span>
+                        {fg.code && (
+                          <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                            {fg.code}
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+            </ul>
+          )}
+        </section>
+      )}
+
       {/* ── Task list ───────────────────────────────────────────────── */}
+      {activeView !== "flagged" && (
       <section className="mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm">
         {allTasks === undefined ? (
           <div className="flex items-center justify-center gap-2 px-5 py-14 text-sm text-muted-foreground">
@@ -529,8 +673,9 @@ export default function TasksPanel({
           </div>
         )}
       </section>
+      )}
 
-      {doneCount > 0 && !showDone && (
+      {doneCount > 0 && !showDone && activeView !== "flagged" && (
         <p className="mt-3 text-center text-xs text-muted-foreground">
           {doneCount} completed {doneCount === 1 ? "task" : "tasks"} hidden — “Show completed” to
           review them.

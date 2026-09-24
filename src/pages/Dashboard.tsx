@@ -428,6 +428,7 @@ export default function Dashboard() {
   // ── Costing (raw materials + sheets) ─────────────────────────────
   const materials = useQuery(api.costing.listMaterials);
   const finishedGoods = useQuery(api.costing.listFinishedGoods);
+  const allJobs = useQuery(api.jobs.listJobs);
   const addFgM = useMutation(api.costing.addFinishedGood);
   const updateFgM = useMutation(api.costing.updateFinishedGood);
   const detachJobsM = useMutation(api.costing.setFgJobs);
@@ -804,6 +805,10 @@ export default function Dashboard() {
               loading={taskLists === undefined}
               activeView={activeTaskView}
               onSelectView={setActiveTaskView}
+              flaggedCount={
+                (finishedGoods ?? []).filter((f) => f.isFlagged).length +
+                ((allJobs ?? []) as { isFlagged?: boolean }[]).filter((j) => j.isFlagged).length
+              }
               onNewList={canDoItem("taskLists", "create") ? handleNewList : undefined}
               onRenameList={canDoItem("taskLists", "edit") ? handleRenameList : undefined}
               onDeleteList={canDoItem("taskLists", "delete") ? handleDeleteList : undefined}

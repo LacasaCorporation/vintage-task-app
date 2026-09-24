@@ -6,6 +6,7 @@ import {
   CalendarDays,
   CheckSquare,
   ChevronRight,
+  Flag,
   Folder,
   FolderInput,
   Inbox,
@@ -19,8 +20,8 @@ import {
 type ListId = Id<"taskLists">;
 type FolderId = Id<"taskFolders">;
 
-/** null = All tasks; "today" / "starred" are smart views; otherwise a list id. */
-export type ActiveTaskView = ListId | "today" | "starred" | null;
+/** null = All tasks; "today" / "starred" / "flagged" are smart views; otherwise a list id. */
+export type ActiveTaskView = ListId | "today" | "starred" | "flagged" | null;
 
 /** Sidebar: smart views, folders, and task lists — shown while Tasks is active. */
 export default function TasksSidebar({
@@ -36,6 +37,7 @@ export default function TasksSidebar({
   onMoveListToFolder,
   onNewFolder,
   onDeleteFolder,
+  flaggedCount = 0,
 }: {
   lists: Doc<"taskLists">[];
   folders: Doc<"taskFolders">[];
@@ -49,6 +51,8 @@ export default function TasksSidebar({
   onMoveListToFolder: (list: Doc<"taskLists">) => void;
   onNewFolder?: () => void;
   onDeleteFolder?: (folder: Doc<"taskFolders">) => void;
+  /** Count of flagged jobs/products (from the Projects section). */
+  flaggedCount?: number;
 }) {
   const openTasks = tasks.filter((t) => !t.isCompleted);
   const todayCount = openTasks.filter((t) => isDueToday(t) || isOverdue(t)).length;
@@ -221,6 +225,41 @@ export default function TasksSidebar({
       </button>
       {smartRow("today", "Today", CalendarDays, todayCount)}
       {smartRow("starred", "Starred", Star, starredCount)}
+
+      {/* flagged jobs & products from the Projects section */}
+      <button
+        type="button"
+        onClick={() => onSelectView("flagged")}
+        aria-current={activeView === "flagged" ? "true" : undefined}
+        className={cn(
+          "flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
+          activeView === "flagged"
+            ? "bg-primary/10 text-primary"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+        )}
+      >
+        <Flag
+          className={cn(
+            "size-4 shrink-0",
+            activeView === "flagged"
+              ? "text-amber-500 fill-amber-400"
+              : "text-muted-foreground/70",
+          )}
+        />
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-sm",
+            activeView === "flagged" ? "font-medium text-primary" : "text-foreground/85",
+          )}
+        >
+          Flagged
+        </span>
+        {flaggedCount > 0 && (
+          <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium tabular-nums text-amber-700 dark:text-amber-400">
+            {flaggedCount}
+          </span>
+        )}
+      </button>
 
       {/* folders + their lists */}
       {folders.length > 0 && (
