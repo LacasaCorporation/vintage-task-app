@@ -41,6 +41,7 @@ import {
   GripVertical,
   History,
   Inbox,
+  List,
   Loader2,
   Package,
   Paperclip,
@@ -329,7 +330,7 @@ function FlaggedProductsList({
         <p className="mt-1 text-xs text-muted-foreground">
           {statusFilter === "all"
             ? "Flag a product in the Projects page and it will show up here."
-            : `Switch the status filter to “${statusFilter === "open" ? "Done" : "To do”}” to see the rest.`}
+            : `Switch the status filter to “${statusFilter === "open" ? "Done" : "To do"}” to see the rest.`}
         </p>
       </div>
     );
@@ -618,10 +619,10 @@ function FlaggedBoard({
     if (jobCard) {
       if (col === "completed") {
         // keep the same guard as the list: complete only when products are done
-        onToggleJob(jobCard.job);
+        if (jobCard.job.status !== "completed") onToggleJob(jobCard.job);
       } else if (col === "in_progress") {
         onSetJobStatus(jobCard.job, "in_progress");
-      } else {
+      } else if (jobCard.job.status === "completed") {
         onSetJobStatus(jobCard.job, "todo");
       }
     } else {
@@ -637,7 +638,8 @@ function FlaggedBoard({
     <div className="grid gap-3 md:grid-cols-3">
       {BOARD_COLUMNS.map((col) => {
         const cards = colCards(col.key);
-        const droppable = dragging !== null && dropTargetsFor(col.key, dragging) && true;
+        const droppable =
+          dragging !== null && dropTargetsFor(col.key, dragging);
         return (
           <section
             key={col.key}
@@ -956,7 +958,14 @@ export default function TasksPanel({
     setFlaggedBusy(`j:${job._id}`);
     try {
       if (status === "completed") {
-        if (!allProductsDone) return;
+        if (!allProductsDone) {
+          toast.error(
+            products.length === 0
+              ? "Flag the job's products first, then complete them."
+              : "Complete all flagged products under this job first.",
+          );
+          return;
+        }
         await updateJobM({ id: job._id, status: "completed" });
       } else if (status === "in_progress") {
         if (job.status !== "in_progress") {
