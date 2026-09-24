@@ -45,7 +45,6 @@ type ListId = Id<"taskLists">;
 type SortMode = "manual" | "due" | "priority" | "created";
 type JobDoc = Doc<"projectJobs">;
 type FgDoc = Doc<"finishedGoods">;
-type ProjectDoc = Doc<"projects">;
 
 const PRIORITY_RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
 
@@ -260,7 +259,6 @@ const PRIORITY_META: Record<Priority, { dot: string; chip: string }> = {
 export default function TasksPanel({
   activeView,
   lists,
-  onSelectView,
   canCreate = true,
   canEdit = true,
   canDelete = true,
