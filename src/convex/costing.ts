@@ -889,7 +889,8 @@ export const setFgJobs = mutation({
 
 /**
  * Flag (or unflag) a product. A flagged product surfaces as a subtask under
- * its job; unflagging hides it from the flagged view again.
+ * its job; flagging a product also turns the job's flag on so the job shows
+ * as the main task in the todo list. Unflagging only clears the product.
  */
 export const setFgFlag = mutation({
   args: { id: v.id("finishedGoods"), flagged: v.boolean() },
@@ -902,13 +903,23 @@ export const setFgFlag = mutation({
     if (flagged && fg.jobId === undefined && (fg.jobIds ?? []).length === 0)
       throw new Error("Attach the product to a job before flagging it.");
     await ctx.db.patch(id, { isFlagged: flagged || undefined });
+    if (flagged) {
+      // cascade up: the job of a flagged product is flagged as well
+      const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
+      for (const jid of jobIds) {
+        const job = await ctx.db.get(jid);
+        if (job !== null && job.ownerId === userId && job.isFlagged !== true) {
+          await ctx.db.patch(jid, { isFlagged: true });
+        }
+      }
+    }
   },
 });
 
 /**
  * Check off (or un-check) a flagged product in the todo list.
- * Also used to derive a job's done state: a job is complete when all of its
- * flagged products are completed.
+ * When every flagged product of a job is completed, the job itself is marked
+ * completed (status → "completed"); un-checking reopens it (→ "in_progress").
  */
 export const setFgCompleted = mutation({
   args: { id: v.id("finishedGoods"), completed: v.boolean() },
@@ -922,6 +933,32 @@ export const setFgCompleted = mutation({
       isCompleted: completed || undefined,
       completedAt: completed ? Date.now() : undefined,
     });
+
+    // update each job the product belongs to: complete it when all of its
+    // flagged products are done, reopen it otherwise
+    const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
+    for (const jid of jobIds) {
+      const job = await ctx.db.get(jid);
+      if (job === null || job.ownerId !== userId || job.isFlagged !== true)
+        continue;
+      const all = await ctx.db
+        .query("finishedGoods")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+      const products = all.filter(
+        (f) => f.isFlagged && (f.jobId === jid || (f.jobIds ?? []).includes(jid)),
+      );
+      if (products.length === 0) continue;
+      const everyDone = products.every((f) => f.isCompleted === true);
+      if (everyDone && job.status !== "completed") {
+        await ctx.db.patch(jid, { status: "completed", completedAt: Date.now() });
+      } else if (!everyDone && job.status === "completed") {
+        await ctx.db.patch(jid, {
+          status: "in_progress",
+          completedAt: undefined,
+        });
+      }
+    }
   },
 });
 

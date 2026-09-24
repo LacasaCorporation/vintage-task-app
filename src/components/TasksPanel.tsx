@@ -116,7 +116,12 @@ function FlaggedItemsList({
                 }
                 className={checkCls}
               />
-              <Flag className="size-3.5 shrink-0 fill-amber-400 text-amber-500" />
+              <Flag
+                className={cn(
+                  "size-3.5 shrink-0",
+                  done ? "fill-emerald-400 text-emerald-500" : "fill-amber-400 text-amber-500",
+                )}
+              />
               <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
               <span
                 className={cn(
@@ -435,8 +440,8 @@ export default function TasksPanel({
 
   /**
    * Mark a flagged job as done — only possible when every flagged product
-   * under it is completed. Completing the job also flags it as done in
-   * Projects (status → completed); unchecking reopens it.
+   * under it is completed. Completing the job flips its status to completed
+   * (its flag shows green in the project list); unchecking reopens it.
    */
   const handleToggleFlaggedJob = async (job: JobDoc) => {
     const products = (flaggedFgs ?? []).filter(

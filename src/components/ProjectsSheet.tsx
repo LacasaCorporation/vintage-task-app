@@ -536,7 +536,11 @@ export default function ProjectsSheet({
     setFlagBusy(`j:${job._id}`);
     try {
       await setJobFlag({ id: job._id, flagged: !job.isFlagged });
-      toast.success(job.isFlagged ? "Flag removed from job." : "Job flagged — all its products show as subtasks.");
+      toast.success(
+        job.isFlagged
+          ? "Flag removed from job and all its products."
+          : "Job flagged — all its products were flagged too.",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
     } finally {
@@ -549,7 +553,11 @@ export default function ProjectsSheet({
     setFlagBusy(`f:${fg._id}`);
     try {
       await setFgFlag({ id: fg._id, flagged: !fg.isFlagged });
-      toast.success(fg.isFlagged ? "Flag removed from product." : "Product flagged — it now shows under its job.");
+      toast.success(
+        fg.isFlagged
+          ? "Flag removed from product."
+          : "Product flagged — its job is flagged too.",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
     } finally {
@@ -1035,9 +1043,11 @@ export default function ProjectsSheet({
                               <button
                                 type="button"
                                 title={
-                                  job.isFlagged
-                                    ? "Remove flag (products stay)"
-                                    : "Flag this job — show all its products as subtasks"
+                                  job.status === "completed"
+                                    ? "Completed — all flagged products are done"
+                                    : job.isFlagged
+                                      ? "Remove flag (products stay)"
+                                      : "Flag this job — flags all its products too"
                                 }
                                 aria-label={
                                   job.isFlagged
@@ -1046,9 +1056,11 @@ export default function ProjectsSheet({
                                 }
                                 className={cn(
                                   "flex size-5 shrink-0 items-center justify-center rounded-md transition-colors",
-                                  job.isFlagged
-                                    ? "text-amber-500"
-                                    : "text-muted-foreground/40 hover:text-amber-500",
+                                  job.isFlagged && job.status === "completed"
+                                    ? "text-emerald-600"
+                                    : job.isFlagged
+                                      ? "text-amber-500"
+                                      : "text-muted-foreground/40 hover:text-amber-500",
                                 )}
                                 onClick={() => void toggleJobFlag(job)}
                                 disabled={flagBusy !== null}
@@ -1059,7 +1071,10 @@ export default function ProjectsSheet({
                                   <Flag
                                     className={cn(
                                       "size-3",
-                                      job.isFlagged && "fill-current",
+                                      job.isFlagged &&
+                                        (job.status === "completed"
+                                          ? "fill-current text-emerald-600"
+                                          : "fill-current"),
                                     )}
                                   />
                                 )}

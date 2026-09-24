@@ -227,7 +227,11 @@ export const reopenJob = mutation({
   },
 });
 
-/** Flag (or unflag) a job. Flagged jobs show all their products as subtasks. */
+/**
+ * Flag (or unflag) a job. Flagging cascades: every product attached to the job
+ * is flagged too, so the whole job shows in the todo list. Unflagging removes
+ * the flag from the job and all of its products.
+ */
 export const setJobFlag = mutation({
   args: { id: v.id("projectJobs"), flagged: v.boolean() },
   handler: async (ctx, { id, flagged }) => {
@@ -237,6 +241,18 @@ export const setJobFlag = mutation({
     if (job === null || job.ownerId !== userId)
       throw new Error("That job no longer exists.");
     await ctx.db.patch(id, { isFlagged: flagged || undefined });
+    // cascade to every product attached to this job (single or multi-link)
+    const fgs = await ctx.db
+      .query("finishedGoods")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    for (const fg of fgs) {
+      const linked =
+        fg.jobId === id || (fg.jobIds ?? []).includes(id);
+      if (linked) {
+        await ctx.db.patch(fg._id, { isFlagged: flagged || undefined });
+      }
+    }
   },
 });
 
