@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Briefcase,
   Download,
   Folder,
   Loader2,
@@ -107,6 +108,7 @@ export default function ProductForm({
     return allCategories.filter((c) => c.parentId === parent._id);
   };
   const [project, setProject] = useState("");
+  const [jobId, setJobId] = useState<string>("");
   const [newProjectName, setNewProjectName] = useState("");
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -146,6 +148,24 @@ export default function ProductForm({
     for (const f of finishedGoods) names.add(f.projectName);
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [projectDocs, finishedGoods]);
+
+  // jobs under the currently selected project (for the job dropdown)
+  const allJobs = useQuery(api.jobs.listJobs);
+  const selectedProjectId = useMemo(
+    () => (projectDocs ?? []).find((p) => p.name === project)?._id,
+    [projectDocs, project],
+  );
+  const projectJobs = useMemo(
+    () =>
+      selectedProjectId === undefined
+        ? []
+        : (allJobs ?? []).filter((j) => j.projectId === selectedProjectId),
+    [allJobs, selectedProjectId],
+  );
+  const jobNameOf = (id: Id<"projectJobs"> | undefined) => {
+    if (id === undefined) return undefined;
+    return (allJobs ?? []).find((j) => j._id === id)?.name;
+  };
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -196,6 +216,7 @@ export default function ProductForm({
       }
       const id = await addFg({
         projectName: cleanProject,
+        jobId: jobId !== "" ? (jobId as Id<"projectJobs">) : undefined,
         name: cleanName,
         code: code.trim() || undefined,
         unit: unit.trim() || undefined,
@@ -214,6 +235,7 @@ export default function ProductForm({
       setNote("");
       setMarkup("0");
       setProject(cleanProject);
+      setJobId("");
       setNewProjectName("");
       setShowForm(false);
     } catch (error) {
@@ -305,6 +327,7 @@ export default function ProductForm({
                         value={project}
                         onChange={(e) => {
                           setProject(e.target.value);
+                          setJobId(""); // job list depends on the project
                           if (e.target.value !== NEW_PROJECT) setNewProjectName("");
                         }}
                         aria-label="Project"
@@ -317,6 +340,35 @@ export default function ProductForm({
                           </option>
                         ))}
                         <option value={NEW_PROJECT}>＋ New project…</option>
+                      </select>
+                    </Field>
+                    <Field
+                      label="Job / task"
+                      hint={
+                        project === "" || project === NEW_PROJECT
+                          ? "Pick a project first"
+                          : projectJobs.length === 0
+                            ? "No jobs in this project yet — create one on the Projects tab"
+                            : undefined
+                      }
+                    >
+                      <select
+                        value={jobId}
+                        onChange={(e) => setJobId(e.target.value)}
+                        aria-label="Job"
+                        disabled={
+                          project === "" ||
+                          project === NEW_PROJECT ||
+                          projectJobs.length === 0
+                        }
+                        className={selectCls}
+                      >
+                        <option value="">No specific job</option>
+                        {projectJobs.map((j) => (
+                          <option key={j._id} value={j._id}>
+                            {j.name}
+                          </option>
+                        ))}
                       </select>
                     </Field>
                     <Field label="Product name" required>
@@ -561,6 +613,7 @@ export default function ProductForm({
                 <th className="w-10 px-3 py-2 font-semibold">#</th>
                 <th className="w-40 px-3 py-2 font-semibold">Project</th>
                 <th className="px-3 py-2 font-semibold">Product</th>
+                <th className="w-32 px-3 py-2 font-semibold">Job</th>
                 <th className="w-24 px-3 py-2 font-semibold">Code</th>
                 <th className="w-16 px-3 py-2 font-semibold">Unit</th>
                 <th className="w-28 px-3 py-2 font-semibold">Category</th>
@@ -573,14 +626,14 @@ export default function ProductForm({
             <tbody className="divide-y divide-border/60">
               {allItems === undefined || finishedGoods === undefined ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading products…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                     {search || projectFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No products yet — create your first FG above."}
@@ -604,6 +657,20 @@ export default function ProductForm({
                         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                           <Folder className="size-3 shrink-0 text-sky-500/80" />
                           <span className="truncate">{f.projectName}</span>
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          {f.jobId !== undefined ? (
+                            <>
+                              <Briefcase className="size-3 shrink-0 text-sky-500/80" />
+                              <span className="truncate">
+                                {jobNameOf(f.jobId) ?? "—"}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground/50">—</span>
+                          )}
                         </span>
                       </td>
                       <td className="px-3 py-1.5">

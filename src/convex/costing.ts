@@ -688,6 +688,7 @@ export const listFinishedGoods = query({
 export const addFinishedGood = mutation({
   args: {
     projectName: v.string(),
+    jobId: v.optional(v.id("projectJobs")), // the job this product belongs to
     name: v.string(),
     code: v.optional(v.string()),
     unit: v.optional(v.string()),
@@ -705,6 +706,14 @@ export const addFinishedGood = mutation({
     if (cleanProject.length === 0) throw new Error("Give the project a name.");
     if (cleanName.length === 0) throw new Error("Give the product a name.");
     if (cleanName.length > MAX_NAME_LENGTH) throw new Error("That name is too long.");
+    // The job, when given, must exist and belong to the user.
+    let jobId: Id<"projectJobs"> | undefined;
+    if (opts.jobId !== undefined) {
+      const job = await ctx.db.get(opts.jobId);
+      if (job === null || job.ownerId !== userId)
+        throw new Error("That job no longer exists.");
+      jobId = opts.jobId;
+    }
     // Auto codes: FG0001 for the product; PR0001 shared per project name.
     const fgCode = await nextCode(ctx, userId, "FG");
     let projectCode: string | undefined;
@@ -722,6 +731,7 @@ export const addFinishedGood = mutation({
       ownerId: userId,
       projectName: cleanProject.slice(0, MAX_NAME_LENGTH),
       projectCode,
+      jobId,
       name: cleanName.slice(0, MAX_NAME_LENGTH),
       code: opts.code?.trim() || fgCode,
       unit: opts.unit?.trim() || undefined,
@@ -740,6 +750,7 @@ export const updateFinishedGood = mutation({
     id: v.id("finishedGoods"),
     projectName: v.optional(v.string()),
     projectCode: v.optional(v.string()), // usually auto-assigned on project change
+    jobId: v.optional(v.id("projectJobs")),
     name: v.optional(v.string()),
     code: v.optional(v.string()),
     unit: v.optional(v.string()),
@@ -775,6 +786,11 @@ export const updateFinishedGood = mutation({
       const clean = patch.name.trim();
       if (clean.length === 0) throw new Error("Give the product a name.");
       patch.name = clean.slice(0, MAX_NAME_LENGTH);
+    }
+    if (patch.jobId !== undefined) {
+      const job = await ctx.db.get(patch.jobId);
+      if (job === null || job.ownerId !== userId)
+        throw new Error("That job no longer exists.");
     }
     if (patch.code !== undefined) patch.code = patch.code.trim() || undefined;
     if (patch.unit !== undefined) patch.unit = patch.unit.trim() || undefined;

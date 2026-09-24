@@ -363,13 +363,11 @@ export const inviteMember = mutation({
     }
     const cleanEmail = email.trim().toLowerCase();
 
-    // the manager must already be a member of this organisation
+    // the manager must already be a member of this organisation (the invited
+    // user doesn't exist yet, so no cycle is possible here)
     if (managerId !== undefined) {
       if (!settingsDoc.members.some((m) => m.userId === managerId)) {
         throw new Error("The chosen manager isn't a member yet.");
-      }
-      if (wouldCycle(settingsDoc, managerId, managerId)) {
-        throw new Error("That manager assignment would loop.");
       }
     }
 

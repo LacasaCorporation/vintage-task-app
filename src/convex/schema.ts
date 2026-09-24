@@ -257,6 +257,7 @@ const schema = defineSchema(
       ownerId: v.id("users"),
       projectName: v.string(), // group label shown in the sidebar
       projectCode: v.optional(v.string()), // auto code for the project, e.g. PR0001
+      jobId: v.optional(v.id("projectJobs")), // the job/task this product belongs to
       name: v.string(), // FG product name, e.g. "Wooden chair"
       code: v.optional(v.string()), // product code / SKU, auto e.g. FG0001
       unit: v.optional(v.string()), // sold per: pcs, box, set…
@@ -268,6 +269,33 @@ const schema = defineSchema(
       currency: v.optional(v.string()),
       markupPct: v.optional(v.number()),
     }).index("by_owner", ["ownerId"]),
+
+    // jobs (also called tasks) that live under a project; FG products
+    // belong to a job, so the real hierarchy is Project → Job → Product
+    projectJobs: defineTable({
+      ownerId: v.id("users"),
+      projectId: v.id("projects"), // the project this job belongs to
+      name: v.string(),
+      code: v.optional(v.string()), // auto code, e.g. JB0001
+      description: v.optional(v.string()),
+      assignee: v.optional(v.string()), // person responsible
+      dueAt: v.optional(v.number()), // deadline timestamp (ms)
+      status: v.optional(
+        v.union(
+          v.literal("planning"),
+          v.literal("in_progress"),
+          v.literal("paused"),
+          v.literal("completed"),
+          v.literal("cancelled"),
+        ),
+      ),
+      priority: v.optional(taskPriorityValidator),
+      startedAt: v.optional(v.number()), // when work first started
+      pausedAt: v.optional(v.number()), // when it was last paused
+      completedAt: v.optional(v.number()), // when it was completed
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_project", ["projectId"]),
 
     // projects — full project information the FG products belong to
     projects: defineTable({
