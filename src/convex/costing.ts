@@ -906,6 +906,26 @@ export const setFgFlag = mutation({
 });
 
 /**
+ * Check off (or un-check) a flagged product in the todo list.
+ * Also used to derive a job's done state: a job is complete when all of its
+ * flagged products are completed.
+ */
+export const setFgCompleted = mutation({
+  args: { id: v.id("finishedGoods"), completed: v.boolean() },
+  handler: async (ctx, { id, completed }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(id);
+    if (fg === null || fg.ownerId !== userId)
+      throw new Error("That product no longer exists.");
+    await ctx.db.patch(id, {
+      isCompleted: completed || undefined,
+      completedAt: completed ? Date.now() : undefined,
+    });
+  },
+});
+
+/**
  * Clone an FG product: copies name (with " (copy)"), code (new FG code),
  * unit, category, note, currency, markup, image, and all costing lines.
  * Job/project links are NOT copied — the clone starts standalone.

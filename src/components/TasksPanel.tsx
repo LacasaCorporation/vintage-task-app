@@ -60,8 +60,8 @@ type FlaggedData = {
 };
 
 /**
- * Flagged items rendered as task rows: a flagged job is the main task with all
- * of its products as subtasks; a flagged product shows its job as the main line.
+ * Flagged items rendered as real todo rows: products get a checkbox, and a job
+ * can only be checked off once every flagged product under it is completed.
  * `showTags` adds explicit project & job name tag chips (used in the main list).
  */
 function FlaggedItemsList({
@@ -69,27 +69,76 @@ function FlaggedItemsList({
   allJobs,
   allFgs,
   showTags = false,
+  onToggleFg,
+  onToggleJob,
+  busyKey,
 }: {
   data: FlaggedData;
   allJobs: JobDoc[];
   allFgs: FgDoc[];
   showTags?: boolean;
+  onToggleFg: (fg: FgDoc) => void;
+  onToggleJob: (job: JobDoc) => void;
+  busyKey: string | null;
 }) {
+  const checkCls =
+    "size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3";
+
   return (
     <ul className="divide-y divide-border/70">
-      {/* flagged jobs: main task — all their products listed as subtasks */}
+      {/* flagged jobs: main task — their flagged products as completable subtasks */}
       {data.jobs.map((job) => {
         const jobProducts = allFgs.filter(
           (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
         );
+        const done = job.status === "completed";
+        const allProductsDone =
+          jobProducts.length > 0 && jobProducts.every((f) => f.isCompleted);
+        const disabled = busyKey !== null || (!done && !allProductsDone);
         return (
-          <li key={job._id} className="px-4 py-3">
+          <li key={job._id} className={cn("px-4 py-3", done && "opacity-60")}>
             <div className="flex flex-wrap items-center gap-2">
+              <Checkbox
+                checked={done}
+                disabled={disabled}
+                onCheckedChange={() => onToggleJob(job)}
+                aria-label={
+                  done
+                    ? `Reopen job “${job.name}”`
+                    : `Mark job “${job.name}” as done`
+                }
+                title={
+                  !done && !allProductsDone
+                    ? jobProducts.length === 0
+                      ? "No flagged products to complete yet"
+                      : "Complete all products first"
+                    : undefined
+                }
+                className={checkCls}
+              />
               <Flag className="size-3.5 shrink-0 fill-amber-400 text-amber-500" />
               <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-sm font-medium",
+                  done && "text-muted-foreground line-through",
+                )}
+              >
                 {job.name}
               </span>
+              {jobProducts.length > 0 && (
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                    done
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                  title="Flagged products completed"
+                >
+                  {jobProducts.filter((f) => f.isCompleted).length}/{jobProducts.length}
+                </span>
+              )}
               <span className={tagChip}>{data.projectNameOf(job)}</span>
             </div>
             {jobProducts.length > 0 && (
@@ -99,8 +148,26 @@ function FlaggedItemsList({
                     key={fg._id}
                     className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs"
                   >
+                    <Checkbox
+                      checked={fg.isCompleted ?? false}
+                      disabled={busyKey !== null}
+                      onCheckedChange={() => onToggleFg(fg)}
+                      aria-label={
+                        fg.isCompleted
+                          ? `Reopen product “${fg.name}”`
+                          : `Mark product “${fg.name}” as done`
+                      }
+                      className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
+                    />
                     <Package className="size-3 shrink-0 text-sky-500/70" />
-                    <span className="min-w-0 flex-1 truncate">{fg.name}</span>
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate",
+                        fg.isCompleted && "text-muted-foreground line-through",
+                      )}
+                    >
+                      {fg.name}
+                    </span>
                     {fg.code && (
                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                         {fg.code}
@@ -119,7 +186,7 @@ function FlaggedItemsList({
           </li>
         );
       })}
-      {/* flagged products whose job is not flagged: job shown as main, product as subtask */}
+      {/* flagged products whose job is not flagged: job shown as main, product as the completable subtask */}
       {data.fgs
         .filter((f) => {
           const jobs = f.jobIds ?? (f.jobId ? [f.jobId] : []);
@@ -129,7 +196,7 @@ function FlaggedItemsList({
           const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
           const parentJob = allJobs.find((j) => jobIds.includes(j._id));
           return (
-            <li key={fg._id} className="px-4 py-3">
+            <li key={fg._id} className={cn("px-4 py-3", fg.isCompleted && "opacity-60")}>
               <div className="flex flex-wrap items-center gap-2">
                 {parentJob ? (
                   <>
@@ -146,8 +213,24 @@ function FlaggedItemsList({
                 )}
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs">
+                <Checkbox
+                  checked={fg.isCompleted ?? false}
+                  disabled={busyKey !== null}
+                  onCheckedChange={() => onToggleFg(fg)}
+                  aria-label={
+                    fg.isCompleted
+                      ? `Reopen product “${fg.name}”`
+                      : `Mark product “${fg.name}” as done`
+                  }
+                  className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
+                />
                 <Package className="size-3 shrink-0 text-sky-500/70" />
-                <span className="min-w-0 flex-1 truncate font-medium">
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate font-medium",
+                    fg.isCompleted && "text-muted-foreground line-through",
+                  )}
+                >
                   {fg.name}
                 </span>
                 {fg.code && (
@@ -202,6 +285,9 @@ export default function TasksPanel({
   const flaggedJobs = useQuery(api.jobs.listJobs);
   const flaggedFgs = useQuery(api.costing.listFinishedGoods);
   const flaggedProjects = useQuery(api.costing.listProjects);
+  const setFgCompletedM = useMutation(api.costing.setFgCompleted);
+  const updateJobM = useMutation(api.jobs.updateJob);
+  const [flaggedBusy, setFlaggedBusy] = useState<string | null>(null);
 
   const [draft, setDraft] = useState("");
   const [isAdding, setIsAdding] = useState(false);
@@ -332,6 +418,43 @@ export default function TasksPanel({
       await toggleTask({ id });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update that task.");
+    }
+  };
+
+  /** Check off (or reopen) a flagged product in the todo list. */
+  const handleToggleFlaggedFg = async (fg: FgDoc) => {
+    setFlaggedBusy(`f:${fg._id}`);
+    try {
+      await setFgCompletedM({ id: fg._id, completed: !fg.isCompleted });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the product.");
+    } finally {
+      setFlaggedBusy(null);
+    }
+  };
+
+  /**
+   * Mark a flagged job as done — only possible when every flagged product
+   * under it is completed. Completing the job also flags it as done in
+   * Projects (status → completed); unchecking reopens it.
+   */
+  const handleToggleFlaggedJob = async (job: JobDoc) => {
+    const products = (flaggedFgs ?? []).filter(
+      (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
+    );
+    const allDone = products.length > 0 && products.every((f) => f.isCompleted);
+    if (!allDone) return;
+    setFlaggedBusy(`j:${job._id}`);
+    try {
+      if (job.status === "completed") {
+        await updateJobM({ id: job._id, status: "in_progress" });
+      } else {
+        await updateJobM({ id: job._id, status: "completed" });
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the job.");
+    } finally {
+      setFlaggedBusy(null);
     }
   };
 
@@ -474,6 +597,9 @@ export default function TasksPanel({
               data={flaggedItems}
               allJobs={flaggedJobs ?? []}
               allFgs={flaggedFgs ?? []}
+              onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
+              onToggleJob={(job) => void handleToggleFlaggedJob(job)}
+              busyKey={flaggedBusy}
             />
           )}
         </section>
@@ -505,6 +631,9 @@ export default function TasksPanel({
                   allJobs={flaggedJobs}
                   allFgs={flaggedFgs}
                   showTags
+                  onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
+                  onToggleJob={(job) => void handleToggleFlaggedJob(job)}
+                  busyKey={flaggedBusy}
                 />
               </div>
             )}

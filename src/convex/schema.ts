@@ -273,6 +273,9 @@ const schema = defineSchema(
       markupPct: v.optional(v.number()),
       // flagged products surface as a subtask under their job
       isFlagged: v.optional(v.boolean()),
+      // a flagged product can be checked off in the todo list
+      isCompleted: v.optional(v.boolean()),
+      completedAt: v.optional(v.number()),
     }).index("by_owner", ["ownerId"]),
 
     // jobs (also called tasks) that live under a project; FG products
