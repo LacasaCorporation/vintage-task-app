@@ -521,10 +521,16 @@ export default function ProjectsSheet({
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     <button
                       type="button"
-                      onClick={() => onOpenProject(p.name)}
+                      onClick={() => setExpanded(expanded === p.key ? null : p.key)}
                       className="flex min-w-0 items-center gap-2 text-left"
-                      title="Open its products"
+                      title="Show / hide jobs & products"
                     >
+                      <ChevronDown
+                        className={cn(
+                          "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                          expanded === p.key && "rotate-180",
+                        )}
+                      />
                       <Folder className="size-4 shrink-0 text-sky-500/80" />
                       <span className="truncate text-sm font-medium hover:text-primary">
                         {p.name}
@@ -921,8 +927,8 @@ export default function ProjectsSheet({
 
       <p className="mt-3 text-xs text-muted-foreground">
         A project groups jobs, and jobs group finished goods — its cost and
-        total are the sum of all its products. Click a project name to see its
-        products.
+        total are the sum of all its products. Click a project name to expand
+        its jobs, or the package icon to open its products.
       </p>
 
       {jobDialog && (
