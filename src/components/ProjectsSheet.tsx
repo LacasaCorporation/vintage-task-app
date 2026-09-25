@@ -778,6 +778,16 @@ export default function ProjectsSheet({
                 ? STATUS_META[detail.status]
                 : undefined;
               const due = detail?.dueAt !== undefined ? dueLabel(detail.dueAt) : null;
+              // products booked to this project that hang off none of its jobs
+              const looseProducts = finishedGoods.filter((f) => {
+                if ((f.projectName ?? "").trim().toLowerCase() !== p.name.trim().toLowerCase())
+                  return false;
+                const inAJob = p.jobs.some(
+                  (j) => f.jobId === j._id || (f.jobIds ?? []).includes(j._id),
+                );
+                if (inAJob) return false;
+                return flagFilter === "flagged" ? f.isFlagged === true : true;
+              });
               return (
                 <li
                   key={p.key}
@@ -844,8 +854,7 @@ export default function ProjectsSheet({
 
                     {/* actions */}
                     <span className="ml-auto flex shrink-0 items-center gap-1">
-                      {detail && (
-                        <button
+                      <button
                           type="button"
                           aria-label={`Jobs of “${p.name}”`}
                           title="Show / hide jobs"
@@ -866,7 +875,6 @@ export default function ProjectsSheet({
                             )}
                           />
                         </button>
-                      )}
                       <span className="hidden items-center gap-1 text-xs tabular-nums text-muted-foreground group-hover/row:inline-flex sm:inline-flex">
                         {detail?.budget !== undefined && (
                           <span
@@ -957,7 +965,7 @@ export default function ProjectsSheet({
                   )}
 
                   {/* jobs of this project */}
-                  {expanded === p.key && detail && (
+                  {expanded === p.key && (
                     <div className="mt-2 ml-6 space-y-1 rounded-xl border border-dashed bg-muted/20 p-2">
                       {p.jobs.length === 0 ? (
                         <p className="px-1 py-1.5 text-[11px] text-muted-foreground">
@@ -1162,13 +1170,14 @@ export default function ProjectsSheet({
                                   title="Edit job"
                                   aria-label="Edit job"
                                   className="hidden size-5 place-items-center rounded-md text-muted-foreground hover:text-primary group-hover/job:grid"
-                                  onClick={() =>
+                                  onClick={() => {
+                                    if (!detail) return;
                                     setJobDialog({
                                       projectId: detail._id,
                                       projectLabel: p.name,
                                       job,
-                                    })
-                                  }
+                                    });
+                                  }}
                                 >
                                   <Pencil className="size-3" />
                                 </button>
@@ -1285,20 +1294,85 @@ export default function ProjectsSheet({
                           );
                         })
                       )}
-                      <button
-                        type="button"
-                        className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        onClick={() =>
-                          setJobDialog({
-                            projectId: detail._id,
-                            projectLabel: p.name,
-                            job: null,
-                          })
-                        }
-                      >
-                        <Plus className="size-3" />
-                        New job under “{p.name}”
-                      </button>
+                      {/* products of this project that belong to no job */}
+                      {looseProducts.map((fg) => (
+                        <div
+                          key={fg._id}
+                          className="flex w-full items-center gap-2 rounded-lg bg-card px-2 py-1 pl-6 pr-1.5 text-xs transition-colors hover:bg-accent"
+                        >
+                          <button
+                            type="button"
+                            title="Open this product's costing sheet"
+                            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                            onClick={() => onOpenProduct?.(fg._id)}
+                          >
+                            <Package className="size-3 shrink-0 text-sky-500/80" />
+                            <span className="min-w-0 flex-1 truncate font-medium">
+                              {fg.name}
+                            </span>
+                            {fg.code && (
+                              <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                                {fg.code}
+                              </span>
+                            )}
+                            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                              {fg.currency ?? "$"}
+                              {(costByFg.get(fg._id) ?? 0).toLocaleString(undefined, {
+                                maximumFractionDigits: 2,
+                              })}
+                            </span>
+                            <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
+                          </button>
+                          <button
+                            type="button"
+                            title={
+                              fg.isFlagged
+                                ? "Remove flag from product"
+                                : "Flag product — show it under its job"
+                            }
+                            aria-label={
+                              fg.isFlagged
+                                ? "Remove flag from product"
+                                : "Flag product"
+                            }
+                            className={cn(
+                              "grid size-5 shrink-0 place-items-center rounded-md transition-colors",
+                              fg.isFlagged
+                                ? "text-amber-500"
+                                : "text-muted-foreground/40 hover:text-amber-500",
+                            )}
+                            onClick={() => void toggleFgFlag(fg)}
+                            disabled={flagBusy !== null}
+                          >
+                            {flagBusy === `f:${fg._id}` ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <Flag
+                                className={cn(
+                                  "size-3",
+                                  fg.isFlagged && "fill-current",
+                                )}
+                              />
+                            )}
+                          </button>
+                        </div>
+                      ))}
+                      {detail && (
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={() =>
+                            setJobDialog({
+                              projectId: detail._id,
+                              projectLabel: p.name,
+                              job: null,
+                            })
+                          }
+                        >
+                          <Plus className="size-3" />
+                          New job under “{p.name}”
+                        </button>
+                      )}
                     </div>
                   )}
                 </li>
