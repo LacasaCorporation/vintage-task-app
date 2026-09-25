@@ -115,6 +115,23 @@ function fgProjectStatus(fg: FgDoc, statuses: string[]): ProjectStatus {
   return fg.isCompleted ? PROJECT_STATUS_FINISH : PROJECT_STATUS_START;
 }
 
+/** Days left until a due date: "Due in 3d" / "Due today" / "2d overdue". */
+function daysLeftLabel(ts: number): { text: string; overdue: boolean } {
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const d = new Date(ts);
+  const startOfDue = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDue - startOfToday) / 86_400_000);
+  if (days === 0) return { text: "Due today", overdue: false };
+  if (days === 1) return { text: "Due tomorrow", overdue: false };
+  if (days > 1) return { text: `Due in ${days}d`, overdue: false };
+  return { text: `${Math.abs(days)}d overdue`, overdue: true };
+}
+
 /** Which flagged item's detail pane is open. */
 type FlaggedSel =
   | { kind: "job"; id: Id<"projectJobs"> }
@@ -351,6 +368,27 @@ function FlaggedItemsList({
                         {fg.code}
                       </span>
                     )}
+                    {fg.dueAt !== undefined && (
+                      <>
+                        <span
+                          className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+                          title={`Due ${formatDueLabel(fg.dueAt)}`}
+                        >
+                          {formatDueLabel(fg.dueAt)}
+                        </span>
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                            daysLeftLabel(fg.dueAt).overdue
+                              ? "bg-destructive/10 text-destructive"
+                              : "bg-primary/10 text-primary",
+                          )}
+                          title="Time left to complete this product"
+                        >
+                          {daysLeftLabel(fg.dueAt).text}
+                        </span>
+                      </>
+                    )}
                     {showTags && (
                       <>
                         <span className={tagChip}>{data.projectNameOf(job)}</span>
@@ -430,6 +468,27 @@ function FlaggedItemsList({
                   </span>
                 )}
                 {showTags && parentJob && <span className={tagChip}>{parentJob.name}</span>}
+                {fg.dueAt !== undefined && (
+                  <>
+                    <span
+                      className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+                      title={`Due ${formatDueLabel(fg.dueAt)}`}
+                    >
+                      {formatDueLabel(fg.dueAt)}
+                    </span>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                        daysLeftLabel(fg.dueAt).overdue
+                          ? "bg-destructive/10 text-destructive"
+                          : "bg-primary/10 text-primary",
+                      )}
+                      title="Time left to complete this product"
+                    >
+                      {daysLeftLabel(fg.dueAt).text}
+                    </span>
+                  </>
+                )}
               </div>
             </li>
           );
