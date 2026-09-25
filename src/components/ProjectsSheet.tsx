@@ -895,6 +895,25 @@ export default function ProjectsSheet({
                             )}
                           />
                         </button>
+                      {detail && (
+                        <button
+                          type="button"
+                          aria-label={`New job under “${p.name}”`}
+                          title="Create a job (task) under this project"
+                          className="flex items-center gap-1 rounded-full border border-dashed border-primary/40 px-1.5 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10"
+                          onClick={() => {
+                            setExpanded(p.key);
+                            setJobDialog({
+                              projectId: detail._id,
+                              projectLabel: p.name,
+                              job: null,
+                            });
+                          }}
+                        >
+                          <Plus className="size-3" />
+                          Job
+                        </button>
+                      )}
                       <span className="hidden items-center gap-1 text-xs tabular-nums text-muted-foreground group-hover/row:inline-flex sm:inline-flex">
                         {detail?.budget !== undefined && (
                           <span
@@ -1335,6 +1354,19 @@ export default function ProjectsSheet({
                                   </button>
                                 </div>
                               ))}
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                onClick={() =>
+                                  setAddProductJob({
+                                    job,
+                                    projectLabel: p.name,
+                                  })
+                                }
+                              >
+                                <PackagePlus className="size-3" />
+                                Add product to “{job.name}”
+                              </button>
                             </div>
                           );
                         })
