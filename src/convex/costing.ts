@@ -906,7 +906,8 @@ export const setFgFlag = mutation({
       throw new Error("That product no longer exists.");
     if (flagged && fg.jobId === undefined && (fg.jobIds ?? []).length === 0)
       throw new Error("Attach the product to a job before flagging it.");
-    await ctx.db.patch(id, { isFlagged: flagged || undefined });
+    const flaggedAt = flagged ? Date.now() : undefined;
+    await ctx.db.patch(id, { isFlagged: flagged || undefined, flaggedAt });
     if (flagged) {
       // inherit due date & priority from the parent job at flag time
       const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
@@ -919,7 +920,7 @@ export const setFgFlag = mutation({
       for (const jid of jobIds) {
         const job = await ctx.db.get(jid);
         if (job !== null && job.ownerId === userId && job.isFlagged !== true) {
-          await ctx.db.patch(jid, { isFlagged: true });
+          await ctx.db.patch(jid, { isFlagged: true, flaggedAt });
         }
       }
     }

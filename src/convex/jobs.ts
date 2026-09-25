@@ -240,8 +240,10 @@ export const setJobFlag = mutation({
     const job = await ctx.db.get(id);
     if (job === null || job.ownerId !== userId)
       throw new Error("That job no longer exists.");
+    const flaggedAt = flagged ? Date.now() : undefined;
     await ctx.db.patch(id, {
       isFlagged: flagged || undefined,
+      flaggedAt,
       // snapshot for products to inherit when flagged
       fgDueAt: job.dueAt,
       fgPriority: job.priority,
@@ -257,6 +259,7 @@ export const setJobFlag = mutation({
       if (linked) {
         await ctx.db.patch(fg._id, {
           isFlagged: flagged || undefined,
+          flaggedAt,
           // products inherit the job's due date & priority so board cards and
           // details start in sync (they can be edited per product afterwards)
           dueAt: flagged ? (job.fgDueAt ?? job.dueAt) : undefined,

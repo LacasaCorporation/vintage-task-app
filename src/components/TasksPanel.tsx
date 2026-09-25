@@ -865,6 +865,15 @@ function FlaggedDetail({
               )}
 
               <div className="mt-4">
+                <DetailRow icon={CalendarDays} label="Start date">
+                  <p className="rounded-lg border bg-card px-2.5 py-1.5 text-sm">
+                    {formatDueLabel(job.flaggedAt ?? job.startedAt ?? job._creationTime)}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Date this job was added to Projects
+                  </p>
+                </DetailRow>
+
                 <DetailRow icon={CalendarDays} label="Due date">
                   <input
                     type="datetime-local"
@@ -952,6 +961,15 @@ function FlaggedDetail({
               </p>
 
               <div className="mt-4">
+                <DetailRow icon={CalendarDays} label="Start date">
+                  <p className="rounded-lg border bg-card px-2.5 py-1.5 text-sm">
+                    {formatDueLabel(fg.flaggedAt ?? fg._creationTime)}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Date this product was added to Projects
+                  </p>
+                </DetailRow>
+
                 <DetailRow icon={CalendarDays} label="Due date">
                   <input
                     type="datetime-local"
@@ -1079,6 +1097,11 @@ export default function TasksPanel({
   const [flagSelection, setFlagSelection] = useState<FlaggedSel>(null);
   const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
   const [flagBoardMode, setFlagBoardMode] = useState(false);
+
+  // Projects should always open as a list when selected from the sidebar.
+  useEffect(() => {
+    if (activeView === "flagged") setFlagBoardMode(false);
+  }, [activeView]);
 
   // ── reminder notifications (in-app while the app is open) ──────────
   useEffect(() => {

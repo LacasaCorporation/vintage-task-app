@@ -278,6 +278,8 @@ const schema = defineSchema(
       isFlagged: v.optional(v.boolean()),
       // a flagged product can be checked off in the todo list
       isCompleted: v.optional(v.boolean()),
+      // timestamp when the product was added to the flagged todo list
+      flaggedAt: v.optional(v.number()),
       // its own due date & priority on the flagged board (defaults copied
       // from the parent job when the product is flagged)
       dueAt: v.optional(v.number()),
@@ -314,6 +316,8 @@ const schema = defineSchema(
       completedAt: v.optional(v.number()), // when it was completed
       // a flagged job shows all of its products as subtasks
       isFlagged: v.optional(v.boolean()),
+      // timestamp when the job was added to the flagged todo list
+      flaggedAt: v.optional(v.number()),
     })
       .index("by_owner", ["ownerId"])
       .index("by_project", ["projectId"]),
