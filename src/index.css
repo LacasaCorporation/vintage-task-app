@@ -1,5 +1,16 @@
 /* DO NOT CHANGE */
 @import "tailwindcss";
+
+/* Projects status editor opens as a centered popup above the task toolbar. */
+.mx-3.mb-2.rounded-xl.border.bg-card.p-3.shadow-sm {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 60;
+  width: min(22rem, calc(100vw - 2rem));
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 9999px rgb(15 23 42 / 0.08), 0 20px 50px rgb(15 23 42 / 0.18);
+}
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 
