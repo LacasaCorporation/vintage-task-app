@@ -38,6 +38,7 @@ import {
   Columns3,
   FileText,
   Flag,
+  Folder,
   GanttChartSquare,
   GripVertical,
   History,
@@ -172,6 +173,17 @@ function FlaggedItemsList({
   );
   const checkCls =
     "size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3";
+  /** Projects whose job list is folded away; a project header opens/closes it. */
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleProject = (key: string) =>
+    setCollapsedProjects((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   const visibleJobs = productsOnly
     ? []
     : sortJobs(data.jobs, sortMode).filter((job) =>
@@ -200,31 +212,47 @@ function FlaggedItemsList({
           allFlaggedProducts.length > 0 &&
           allFlaggedProducts.every((f) => f.isCompleted);
         const disabled = busyKey !== null || (!done && !allProductsDone);
+        const projectCollapsed = collapsedProjects.has(job.projectId);
+        const projectJobs = visibleJobs.filter(
+          (item) => item.projectId === job.projectId,
+        );
         return (
           <li
             key={job._id}
             className={cn(
               "px-4 py-3 transition-colors",
               done && "opacity-60",
+              !isFirstJobForProject && projectCollapsed && "hidden",
               selection?.kind === "job" && selection.id === job._id && "bg-primary/[0.04]",
             )}
           >
             {isFirstJobForProject && (
-              <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-primary/[0.06] px-2 py-1.5 text-sm">
-                <ChevronDown className="size-3.5 text-primary" />
-                <Briefcase className="size-4 text-sky-500/80" />
-                <span className="font-semibold">{data.projectNameOf(job)}</span>
-                {project?.code && <span className="font-mono text-[10px] text-muted-foreground/70">{project.code}</span>}
-                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">Planning</span>
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => onSelect?.({ kind: "job", id: job._id })}
-                className="min-w-0 flex-1 basis-full cursor-pointer truncate text-left"
-                title="Open details"
+                onClick={() => toggleProject(job.projectId)}
+                aria-expanded={!projectCollapsed}
+                className="mb-2 flex w-full flex-wrap items-center gap-2 rounded-lg bg-primary/[0.06] px-2 py-1.5 text-left text-sm"
               >
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 shrink-0 text-primary transition-transform",
+                    !projectCollapsed && "rotate-180",
+                  )}
+                />
+                <Folder className="size-4 shrink-0 text-sky-500/80" />
+                <span className="font-semibold">{data.projectNameOf(job)}</span>
+                {project?.code && <span className="font-mono text-[10px] text-muted-foreground/70">{project.code}</span>}
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                  {projectJobs.length} job{projectJobs.length === 1 ? "" : "s"}
+                </span>
+              </button>
+            )}
+            <div
+              className={cn(
+                "ml-4 flex flex-wrap items-center gap-2 border-l border-border/60 pl-3",
+                projectCollapsed && "hidden",
+              )}
+            >
               <Checkbox
                 checked={done}
                 disabled={disabled}
@@ -243,13 +271,19 @@ function FlaggedItemsList({
                 }
                 className={checkCls}
               />
-              <Flag
-                className={cn(
-                  "size-3.5 shrink-0",
-                  done ? "fill-emerald-400 text-emerald-500" : "fill-amber-400 text-amber-500",
-                )}
-              />
-              <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
+              <button
+                type="button"
+                onClick={() => onSelect?.({ kind: "job", id: job._id })}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                title="Open details"
+              >
+                <Flag
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    done ? "fill-emerald-400 text-emerald-500" : "fill-amber-400 text-amber-500",
+                  )}
+                />
+                <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate text-sm font-medium",
@@ -276,7 +310,12 @@ function FlaggedItemsList({
               <span className={tagChip}>{jobProjectStatus(job, projectStatuses)}</span>
             </div>
             {jobProducts.length > 0 && (
-              <ul className="mt-1.5 space-y-1">
+              <ul
+                className={cn(
+                  "ml-4 mt-1.5 space-y-1 border-l border-border/60 pl-3",
+                  projectCollapsed && "hidden",
+                )}
+              >
                 {jobProducts.map((fg) => (
                   <li
                     key={fg._id}
