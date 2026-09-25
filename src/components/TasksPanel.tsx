@@ -1455,7 +1455,7 @@ export default function TasksPanel({
 
       {/* ── Flagged jobs & products (from Projects) ─────────────────── */}
       {activeView === "flagged" && (
-        <>
+        <div className="grid items-start lg:grid-cols-[1fr_auto]">
         <section className="mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm">
           {/* filter bar: scope, status, and list/board presentation */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
@@ -1600,7 +1600,7 @@ export default function TasksPanel({
             />
           </div>
         )}
-        </>
+        </div>
       )}
 
       {/* ── Task list ───────────────────────────────────────────────── */}
