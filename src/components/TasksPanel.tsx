@@ -128,6 +128,7 @@ const tagChip =
 type FlaggedData = {
   jobs: JobDoc[];
   fgs: FgDoc[];
+  projects: Doc<"projects">[];
   projectNameOf: (job: JobDoc) => string;
 };
 
@@ -171,11 +172,23 @@ function FlaggedItemsList({
   );
   const checkCls =
     "size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3";
+  const visibleJobs = productsOnly
+    ? []
+    : sortJobs(data.jobs, sortMode).filter((job) =>
+        matchesStatusFilter(
+          statusFilter ?? "all",
+          jobProjectStatus(job, projectStatuses),
+          job.status === "completed",
+        ),
+      );
 
   return (
     <ul className="divide-y divide-border/70">
       {/* flagged jobs: main task — their flagged products as completable subtasks */}
-      {!productsOnly && sortJobs(data.jobs, sortMode).filter((job) => matchesStatusFilter(statusFilter ?? "all", jobProjectStatus(job, projectStatuses), job.status === "completed")).map((job) => {
+      {visibleJobs.map((job, jobIndex) => {
+        const project = data.projects.find((item) => item._id === job.projectId);
+        const isFirstJobForProject =
+          visibleJobs.findIndex((item) => item.projectId === job.projectId) === jobIndex;
         const jobProducts = allFgs
           .filter((f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id))
           .filter((f) => matchesStatusFilter(statusFilter ?? "all", fgProjectStatus(f, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]), f.isCompleted ?? false));
@@ -196,6 +209,15 @@ function FlaggedItemsList({
               selection?.kind === "job" && selection.id === job._id && "bg-primary/[0.04]",
             )}
           >
+            {isFirstJobForProject && (
+              <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-primary/[0.06] px-2 py-1.5 text-sm">
+                <ChevronDown className="size-3.5 text-primary" />
+                <Briefcase className="size-4 text-sky-500/80" />
+                <span className="font-semibold">{data.projectNameOf(job)}</span>
+                {project?.code && <span className="font-mono text-[10px] text-muted-foreground/70">{project.code}</span>}
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">Planning</span>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -1245,7 +1267,7 @@ export default function TasksPanel({
       const project = (flaggedProjects ?? []).find((p) => p._id === job.projectId);
       return project?.name ?? "Project";
     };
-    return { jobs, fgs, projectNameOf };
+    return { jobs, fgs, projects: flaggedProjects ?? [], projectNameOf };
   }, [flaggedJobs, flaggedFgs, flaggedProjects]);
 
   const handleAdd = async (event: React.FormEvent<HTMLFormElement>) => {
