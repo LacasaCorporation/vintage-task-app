@@ -225,7 +225,9 @@ const schema = defineSchema(
       taskId: v.id("tasks"),
       text: v.string(),
       isCompleted: v.boolean(),
-    }).index("by_task", ["taskId"]),
+    })
+      .index("by_task", ["taskId"])
+      .index("by_owner", ["ownerId"]),
 
     // folders that group task lists
     taskFolders: defineTable({
