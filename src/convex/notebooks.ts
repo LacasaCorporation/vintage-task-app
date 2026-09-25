@@ -1,3 +1,4 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import type { Id } from "./_generated/dataModel";
@@ -39,17 +40,27 @@ const MAX_TITLE_LENGTH = 120;
 const MAX_PAGE_TITLE_LENGTH = 160;
 const MAX_BODY_LENGTH = 20000;
 
-/** All notebooks for the signed-in user, newest first. */
+/**
+ * All notebooks the caller can see, newest first.
+ * scope "mine" (default) → notebooks created by the caller; "all" → the
+ * whole workspace's notebooks. Used by the Mine / ALL filter in Notes.
+ */
 export const listNotebooks = query({
-  args: {},
-  handler: async (ctx) => {
-    const userId = await scopeUserId(ctx);
+  args: { scope: v.optional(v.union(v.literal("mine"), v.literal("all"))) },
+  handler: async (ctx, { scope }) => {
+    const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) return [];
     const notebooks = await ctx.db
       .query("notebooks")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
       .collect();
-    return notebooks.sort((a, b) => b._creationTime - a._creationTime);
+    const visible =
+      scope === "all"
+        ? notebooks
+        : notebooks.filter((nb) => (nb.createdBy ?? nb.ownerId) === userId);
+    return visible.sort((a, b) => b._creationTime - a._creationTime);
   },
 });
 
@@ -155,17 +166,26 @@ export const listPages = query({
   },
 });
 
-/** All pages for the signed-in user (for the sidebar tree), ordered. */
+/**
+ * All pages the caller can see (for the sidebar tree), ordered.
+ * scope "mine" (default) → pages the caller created; "all" → workspace-wide.
+ */
 export const listAllPages = query({
-  args: {},
-  handler: async (ctx) => {
-    const userId = await scopeUserId(ctx);
+  args: { scope: v.optional(v.union(v.literal("mine"), v.literal("all"))) },
+  handler: async (ctx, { scope }) => {
+    const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) return [];
     const pages = await ctx.db
       .query("notePages")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
       .collect();
-    return pages.sort(
+    const visible =
+      scope === "all"
+        ? pages
+        : pages.filter((p) => (p.createdBy ?? p.ownerId) === userId);
+    return visible.sort(
       (a, b) =>
         (a.order ?? a._creationTime) - (b.order ?? b._creationTime),
     );

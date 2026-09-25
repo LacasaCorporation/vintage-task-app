@@ -51,10 +51,15 @@ export default function NotesSidebar({
   onRenamePage,
   onDeleteNotebook,
   onDeletePage,
+  taskScope,
+  onScopeChange,
 }: {
   notebooks: Doc<"notebooks">[];
   allPages: Doc<"notePages">[] | undefined;
   loading: boolean;
+  /** Mine / ALL scope filter value (shared with the tasks view). */
+  taskScope: "mine" | "all";
+  onScopeChange: (scope: "mine" | "all") => void;
   activeNotebookId: NotebookId | null;
   activePageId: PageId | null;
   onSelectNotebook: (id: NotebookId) => void;
@@ -102,6 +107,31 @@ export default function NotesSidebar({
             <Plus className="size-3.5" />
           </button>
         )}
+      </div>
+
+      {/* Mine / ALL scope filter ("mine" is the default) */}
+      <div className="flex items-center gap-1 px-2 pb-1.5 text-xs text-muted-foreground">
+        <span className="mr-0.5">Show</span>
+        {(
+          [
+            ["mine", "Mine"],
+            ["all", "ALL"],
+          ] as ["mine" | "all", string][]
+        ).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => onScopeChange(mode)}
+            className={cn(
+              "rounded-full border px-2 py-0.5 transition-colors",
+              taskScope === mode
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border bg-card hover:bg-accent hover:text-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {loading && (

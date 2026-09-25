@@ -741,6 +741,8 @@ export default function TasksPanel({
   canCreateSteps = true,
   canEditSteps = true,
   canDeleteSteps = true,
+  taskScope,
+  onScopeChange,
 }: {
   activeView: ActiveTaskView;
   lists: { _id: ListId; name: string }[];
@@ -752,9 +754,13 @@ export default function TasksPanel({
   canCreateSteps?: boolean;
   canEditSteps?: boolean;
   canDeleteSteps?: boolean;
+  /** Mine / ALL scope filter value shared with the sidebar. */
+  taskScope: "mine" | "all";
+  onScopeChange: (scope: "mine" | "all") => void;
 }) {
-  const allTasks = useQuery(api.tasks.list);
-  const allPages = useQuery(api.notebooks.listAllPages);
+  // Mine / ALL filter shown above the task list ("mine" is the default).
+  const allTasks = useQuery(api.tasks.list, { scope: taskScope });
+  const allPages = useQuery(api.notebooks.listAllPages, { scope: taskScope });
   const addTask = useMutation(api.tasks.add);
   const toggleTask = useMutation(api.tasks.toggle);
   const removeTask = useMutation(api.tasks.remove);
@@ -1058,9 +1064,31 @@ export default function TasksPanel({
         </p>
       )}
 
-      {/* ── Sort / filter controls ──────────────────────────────────── */}
+      {/* ── Scope / sort / filter controls ───────────────────────────── */}
       <div className="mt-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span className="mr-1">Show</span>
+          {(
+            [
+              ["mine", "Mine"],
+              ["all", "ALL"],
+            ] as ["mine" | "all", string][]
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onScopeChange(mode)}
+              className={cn(
+                "rounded-full border px-2.5 py-1 transition-colors",
+                taskScope === mode
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-card hover:bg-accent hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="mx-1 h-4 w-px bg-border" />
           <span className="mr-1">Sort</span>
           {(
             [

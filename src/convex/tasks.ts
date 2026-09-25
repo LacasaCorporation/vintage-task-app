@@ -1,3 +1,4 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { v } from "convex/values";
@@ -163,19 +164,33 @@ export const removeList = mutation({
 
 // ── Tasks ───────────────────────────────────────────────────────────────
 
-/** All tasks for the signed-in user, newest first (filtered client-side). */
+/**
+ * All tasks for the signed-in user, newest first (filtered client-side).
+ * scope "mine" (default) → only the caller's own tasks; "all" → the whole
+ * workspace's tasks (org-scoped rows). Used by the Mine / ALL filter.
+ */
 export const list = query({
-  args: {},
-  handler: async (ctx) => {
-    const userId = await scopeUserId(ctx);
-    if (userId === null) {
-      return [];
+  args: { scope: v.optional(v.union(v.literal("mine"), v.literal("all"))) },
+  handler: async (ctx, { scope }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) return [];
+    if (scope === "all") {
+      const all = await ctx.db
+        .query("tasks")
+        .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
+        .collect();
+      return all.sort((a, b) => b._creationTime - a._creationTime);
     }
-    const tasks = await ctx.db
+    const mine = await ctx.db
       .query("tasks")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
       .collect();
-    return tasks.sort((a, b) => b._creationTime - a._creationTime);
+    // legacy rows created before assignment existed belong to their creator
+    return mine
+      .filter((t) => (t.assigneeId ?? t.ownerId) === userId)
+      .sort((a, b) => b._creationTime - a._creationTime);
   },
 });
 
@@ -230,6 +245,7 @@ export const add = mutation({
     const tags = extra.tags?.map((t) => t.trim().replace(/^#/, "")).filter(Boolean) ?? [];
     return await ctx.db.insert("tasks", {
       ownerId: userId,
+      assigneeId: userId,
       text: trimmed,
       isCompleted: false,
       listId,

@@ -93,8 +93,11 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myAccess]);
 
+  // ── Mine / ALL scope filter (tasks & notes default to the user's own) ─
+  const [dataScope, setDataScope] = useState<"mine" | "all">("mine");
+
   // ── Notes tree state (rendered inside the side menu) ───────────────
-  const notebooks = useQuery(api.notebooks.listNotebooks);
+  const notebooks = useQuery(api.notebooks.listNotebooks, { scope: dataScope });
   const addNotebook = useMutation(api.notebooks.addNotebook);
   const renameNotebook = useMutation(api.notebooks.renameNotebook);
   const removeNotebook = useMutation(api.notebooks.removeNotebook);
@@ -107,7 +110,7 @@ export default function Dashboard() {
   // ── Task lists (rendered inside the side menu on Tasks) ────────────
   const taskLists = useQuery(api.tasks.listLists);
   const taskFolders = useQuery(api.tasks.listFolders);
-  const allTasks = useQuery(api.tasks.list);
+  const allTasks = useQuery(api.tasks.list, { scope: dataScope });
   const addList = useMutation(api.tasks.addList);
   const renameList = useMutation(api.tasks.renameList);
   const removeList = useMutation(api.tasks.removeList);
@@ -128,7 +131,7 @@ export default function Dashboard() {
     api.notebooks.listPages,
     notebookId ? { notebookId } : "skip",
   );
-  const allPages = useQuery(api.notebooks.listAllPages);
+  const allPages = useQuery(api.notebooks.listAllPages, { scope: dataScope });
 
   // ── First-run seeding: "My Workbook" + an untitled page ────────────
   const seededOnce = useRef(false);
@@ -821,6 +824,8 @@ export default function Dashboard() {
             notebooks={nbList}
             allPages={allPages}
             loading={notebooks === undefined || allPages === undefined}
+            taskScope={dataScope}
+            onScopeChange={setDataScope}
             activeNotebookId={notebookId}
             activePageId={activePage?._id ?? null}
             onSelectNotebook={handleSelectNotebook}
@@ -980,6 +985,8 @@ export default function Dashboard() {
               canCreateSteps={canDoItem("taskSteps", "create")}
               canEditSteps={canDoItem("taskSteps", "edit")}
               canDeleteSteps={canDoItem("taskSteps", "delete")}
+              taskScope={dataScope}
+              onScopeChange={setDataScope}
             />
           ) : (
             <NotesPanel

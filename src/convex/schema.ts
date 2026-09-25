@@ -196,7 +196,8 @@ const schema = defineSchema(
 
     // the student's task ledger. one row per task entry.
     tasks: defineTable({
-      ownerId: v.id("users"), // the student who wrote the entry
+      ownerId: v.id("users"), // the workspace this entry belongs to
+      assigneeId: v.optional(v.id("users")), // who the task belongs to (defaults to its creator)
       text: v.string(), // the task itself, e.g. "Read Ch. 4 of Biology"
       isCompleted: v.boolean(), // false until the task is checked off
       listId: v.optional(v.id("taskLists")), // which named list it belongs to
@@ -362,6 +363,7 @@ const schema = defineSchema(
     // notebooks: the top level of the notes workspace (OneNote-style)
     notebooks: defineTable({
       ownerId: v.id("users"),
+      createdBy: v.optional(v.id("users")), // who created it (workspace-wide rows stay shared)
       title: v.string(),
       color: v.optional(noteColorValidator), // accent color for the notebook
     }).index("by_owner", ["ownerId"]),
@@ -369,6 +371,7 @@ const schema = defineSchema(
     // pages inside a notebook; rendered like sheets of paper
     notePages: defineTable({
       ownerId: v.id("users"),
+      createdBy: v.optional(v.id("users")), // who created it (workspace-wide rows stay shared)
       notebookId: v.id("notebooks"),
       title: v.string(),
       body: v.string(),
