@@ -3,6 +3,7 @@ import type { TaskDoc } from "@/lib/task-utils";
 import { isDueToday, isOverdue } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
 import {
+  Briefcase,
   CalendarDays,
   CheckSquare,
   ChevronRight,
@@ -226,7 +227,7 @@ export default function TasksSidebar({
       {smartRow("today", "Today", CalendarDays, todayCount)}
       {smartRow("starred", "Starred", Star, starredCount)}
 
-      {/* flagged jobs & products from the Projects section */}
+      {/* Projects: flagged jobs & products, worked start → complete */}
       <button
         type="button"
         onClick={() => onSelectView("flagged")}
@@ -238,12 +239,10 @@ export default function TasksSidebar({
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
         )}
       >
-        <Flag
+        <Briefcase
           className={cn(
             "size-4 shrink-0",
-            activeView === "flagged"
-              ? "text-amber-500 fill-amber-400"
-              : "text-muted-foreground/70",
+            activeView === "flagged" ? "text-sky-500" : "text-muted-foreground/70",
           )}
         />
         <span
@@ -252,7 +251,7 @@ export default function TasksSidebar({
             activeView === "flagged" ? "font-medium text-primary" : "text-foreground/85",
           )}
         >
-          Flagged
+          Projects
         </span>
         {flaggedCount > 0 && (
           <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium tabular-nums text-amber-700 dark:text-amber-400">

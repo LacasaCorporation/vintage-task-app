@@ -1078,7 +1078,7 @@ export default function TasksPanel({
   const [flagFilter, setFlagFilter] = useState<FlagFilter>("all");
   const [flagSelection, setFlagSelection] = useState<FlaggedSel>(null);
   const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
-  const [flagBoardMode, setFlagBoardMode] = useState(false);
+  const [flagBoardMode, setFlagBoardMode] = useState(true);
 
   // ── reminder notifications (in-app while the app is open) ──────────
   useEffect(() => {
@@ -1115,7 +1115,7 @@ export default function TasksPanel({
       : activeView === "starred"
         ? "Starred"
         : activeView === "flagged"
-          ? "Flagged"
+          ? "Projects"
           : activeView
             ? (lists.find((l) => l._id === activeView)?.name ?? "List")
             : "All tasks";
@@ -1249,38 +1249,6 @@ export default function TasksPanel({
    * guard as the list: only when every flagged product under it is done (the
    * unguarded path is onToggleFlaggedJob, which also flips flag colors).
    */
-  const handleBoardJobStatus = async (job: JobDoc, status: BoardColumn) => {
-    const products = (flaggedFgs ?? []).filter(
-      (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
-    );
-    const allProductsDone =
-      products.length > 0 && products.every((f) => f.isCompleted);
-    setFlaggedBusy(`j:${job._id}`);
-    try {
-      if (status === "completed") {
-        if (!allProductsDone) {
-          toast.error(
-            products.length === 0
-              ? "Flag the job's products first, then complete them."
-              : "Complete all flagged products under this job first.",
-          );
-          return;
-        }
-        await updateJobM({ id: job._id, status: "completed" });
-      } else if (status === "in_progress") {
-        if (job.status !== "in_progress") {
-          await updateJobM({ id: job._id, status: "in_progress" });
-        }
-      } else if (job.status === "completed") {
-        await updateJobM({ id: job._id, status: "in_progress" });
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't move the job.");
-    } finally {
-      setFlaggedBusy(null);
-    }
-  };
-
   const handleDelete = async (id: Id<"tasks">) => {
     try {
       await removeTask({ id });
@@ -1580,31 +1548,6 @@ export default function TasksPanel({
           </div>
         ) : (
           <>
-          {/* flagged jobs & products from the Projects section (main list only),
-              with project & job name tags */}
-          {activeView === null &&
-            flaggedItems !== null &&
-            flaggedJobs !== undefined &&
-            flaggedFgs !== undefined && (
-              <div className="border-b border-amber-500/20 bg-amber-500/[0.04]">
-                <p className="flex items-center gap-1.5 px-4 pt-3 pb-1 text-[11px] font-semibold tracking-widest text-amber-700/80 uppercase dark:text-amber-400/80">
-                  <Flag className="size-3 fill-current" />
-                  Flagged from projects
-                </p>
-                <FlaggedItemsList
-                  data={flaggedItems}
-                  allJobs={flaggedJobs}
-                  allFgs={flaggedFgs}
-                  showTags
-                  onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
-                  onToggleJob={(job) => void handleToggleFlaggedJob(job)}
-                  busyKey={flaggedBusy}
-                  sortMode={sortMode}
-                  selection={flagSelection}
-                  onSelect={setFlagSelection}
-                />
-              </div>
-            )}
           {tasks.length === 0 ? (
           <div className="px-6 py-14 text-center">
             <Inbox className="mx-auto size-8 text-muted-foreground/40" />
