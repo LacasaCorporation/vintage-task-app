@@ -1464,6 +1464,7 @@ export default function TasksPanel({
                 })}
               </AnimatePresence>
             </ul>
+            </div>
 
             {/* detail editor (slides in beside the list on wide screens) */}
             {openTask && (
@@ -1478,7 +1479,6 @@ export default function TasksPanel({
                 onClose={() => setOpenTaskId(null)}
               />
             )}
-            </div>
           </div>
         )}
           </>
