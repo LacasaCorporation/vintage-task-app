@@ -526,7 +526,27 @@ export default function ProjectsSheet({
   const updateJob = useMutation(api.jobs.updateJob);
   const setJobFlag = useMutation(api.jobs.setJobFlag);
   const setFgFlag = useMutation(api.costing.setFgFlag);
+  const addProjectM = useMutation(api.costing.addProject);
+  const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const { confirm } = useAppDialogs();
+
+  /**
+   * Promote a name-only project (one that only exists as a projectName on its
+   * products) into a real project record, so jobs can be attached to it.
+   */
+  const createProjectRecord = async (name: string) => {
+    setCreatingProject(name);
+    try {
+      await addProjectM({ name });
+      toast.success(`Project “${name}” created — you can add jobs to it now.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't create the project.",
+      );
+    } finally {
+      setCreatingProject(null);
+    }
+  };
 
   /** All FG products — the clone picker searches across every project. */
   const allProducts = finishedGoods;
@@ -968,10 +988,35 @@ export default function ProjectsSheet({
                   {expanded === p.key && (
                     <div className="mt-2 ml-6 space-y-1 rounded-xl border border-dashed bg-muted/20 p-2">
                       {p.jobs.length === 0 ? (
-                        <p className="px-1 py-1.5 text-[11px] text-muted-foreground">
-                          No jobs yet — a job is a task inside this project; its
-                          products hang off the job.
-                        </p>
+                        <div className="px-1 py-1.5 text-[11px] text-muted-foreground">
+                          {detail ? (
+                            <p>
+                              No jobs yet — a job is a task inside this project; its
+                              products hang off the job.
+                            </p>
+                          ) : (
+                            <p>
+                              This project only exists as a name on its products, so it
+                              has no jobs yet. Create the project record and jobs can
+                              be added to it.
+                            </p>
+                          )}
+                          {!detail && (
+                            <button
+                              type="button"
+                              className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-dashed px-2 py-1 font-medium text-foreground transition-colors hover:bg-accent"
+                              onClick={() => void createProjectRecord(p.name)}
+                              disabled={creatingProject !== null}
+                            >
+                              {creatingProject === p.name ? (
+                                <Loader2 className="size-3 animate-spin" />
+                              ) : (
+                                <Folder className="size-3" />
+                              )}
+                              Create project record
+                            </button>
+                          )}
+                        </div>
                       ) : (
                         p.jobs.map((job) => {
                           const meta = job.status

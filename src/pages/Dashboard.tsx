@@ -958,6 +958,7 @@ export default function Dashboard() {
               onDeleteFg={(fg) => void handleDeleteFg(fg)}
               onEditFg={(fg) => void handleEditFg(fg)}
               onNewProduct={(name) => void handleNewFg(name)}
+              onNewProject={canDoItem("projects", "create") ? () => void handleNewProject() : undefined}
               onEditProject={(p) => void handleEditProject(p)}
               onDeleteProject={(p) => void handleDeleteProject(p)}
               canCreate={canDoItem("products", "create")}
@@ -970,7 +971,6 @@ export default function Dashboard() {
               canPrint={canDoItem("printing", "view")}
               canImportExport={canDoItem("dataImport", "view")}
               canImport={canDoItem("dataImport", "create")}
-              canCreateProject={canDoItem("projects", "create")}
               canEditProject={canDoItem("projects", "edit")}
               canDeleteProject={canDoItem("projects", "delete")}
             />

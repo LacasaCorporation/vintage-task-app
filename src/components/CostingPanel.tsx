@@ -54,6 +54,7 @@ export default function CostingPanel({
   onDeleteFg,
   onEditFg,
   onNewProduct,
+  onNewProject,
   onEditProject,
   onDeleteProject,
   canCreate = true,
@@ -66,7 +67,6 @@ export default function CostingPanel({
   canPrint = true,
   canImportExport = true,
   canImport = true,
-  canCreateProject = true,
   canEditProject = true,
   canDeleteProject = true,
 }: {
@@ -80,6 +80,7 @@ export default function CostingPanel({
   onDeleteFg: (fg: FgDoc) => void;
   onEditFg: (fg: FgDoc) => void;
   onNewProduct?: (projectName: string) => void;
+  onNewProject?: () => void;
   onEditProject?: (project: Doc<"projects">) => void;
   onDeleteProject?: (project: Doc<"projects">) => void;
   canCreate?: boolean;
@@ -95,7 +96,6 @@ export default function CostingPanel({
   canImportExport?: boolean;
   /** Row importing (dataImport.create). */
   canImport?: boolean;
-  canCreateProject?: boolean;
   canEditProject?: boolean;
   canDeleteProject?: boolean;
 }) {
@@ -539,9 +539,7 @@ export default function CostingPanel({
               setProjectFocus(name);
               onSelectView({ kind: "products" });
             }}
-            onNewProject={
-              canCreateProject ? () => onNewFg("new") : undefined
-            }
+            onNewProject={onNewProject}
             onNewProduct={
               canCreate ? (name) => onNewProduct?.(name) : undefined
             }
