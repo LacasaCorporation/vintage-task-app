@@ -1642,6 +1642,78 @@ export default function SettingsPanel() {
         </div>
       </section>
 
+      {/* backup & restore — export/import all user content */}
+      <section
+        id="settings-data"
+        className="scroll-mt-6 overflow-hidden rounded-2xl border bg-card shadow-sm"
+      >
+        <header className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
+          <DatabaseBackup className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Backup &amp; restore</h2>
+          <span className="ml-auto text-xs text-muted-foreground">
+            Your tasks, notes, products and projects — nothing else
+          </span>
+        </header>
+        <div className="space-y-4 px-5 py-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Export a backup</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Downloads one JSON file with every task, list, folder, step,
+                notebook, page, project, job, product and costing line.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={backupData === undefined || backupData === null}
+              onClick={handleExportBackup}
+            >
+              {backupData === undefined ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Download className="size-3.5" />
+              )}
+              Download backup
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-start justify-between gap-3 border-t pt-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Restore from a backup</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Replaces <strong>everything</strong> currently in your workspace
+                with the contents of a backup file. This cannot be undone.
+              </p>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleRestoreFile(f);
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={restoring}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {restoring ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Upload className="size-3.5" />
+              )}
+              {restoring ? "Restoring…" : "Choose backup file"}
+            </Button>
+          </div>
+        </div>
+      </section>
+
       <p className="text-xs text-muted-foreground">
         <strong>Super user</strong> — full control (created automatically, one per
         workspace). <strong>Admin</strong> — can add users and change roles. Use{" "}
