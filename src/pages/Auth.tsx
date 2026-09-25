@@ -16,7 +16,7 @@ import {
 
 import { useAuth } from "@/hooks/use-auth";
 import logo from "@/assets/logo.svg";
-import { ArrowRight, KeyRound, Loader2, Mail, User, UserX } from "lucide-react";
+import { ArrowRight, KeyRound, Loader2, Mail, User } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -57,7 +57,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     searchParams.get("returnTo"),
     redirectAfterAuth,
   );
-  const [useEmail, setUseEmail] = useState(false);
+  // Email sign-in is the default: unlike guest sessions, an email account
+  // keeps its data across refreshes (guest sessions in sandboxed previews
+  // lose their localStorage token, orphaning everything the guest created).
+  const [useEmail, setUseEmail] = useState(true);
   const [step, setStep] = useState<"signIn" | { email: string }>("signIn");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -130,20 +133,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   };
 
-  const handleGuestLogin = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await signIn("anonymous");
-      navigate(redirect);
-    } catch (err) {
-      setError(
-        messageFor(err, "Failed to sign in as guest. Please try again."),
-      );
-      setIsLoading(false);
-    }
-  };
-
   return (
     <div className="min-h-screen flex flex-col">
       {/* Auth Content */}
@@ -168,7 +157,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   </CardTitle>
                   <CardDescription>
                     {useEmail
-                      ? "Enter your email to log in or sign up"
+                      ? "Enter your email to log in or sign up — your data stays with your account"
                       : "Use the username and password your admin gave you"}
                   </CardDescription>
                 </CardHeader>
@@ -264,19 +253,26 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   </div>
 
                   {useEmail ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full mt-4"
-                      disabled={isLoading}
-                      onClick={() => {
-                        setUseEmail(false);
-                        setError(null);
-                      }}
-                    >
-                      <KeyRound className="mr-2 h-4 w-4" />
-                      Sign in with a username
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full mt-4"
+                        disabled={isLoading}
+                        onClick={() => {
+                          setUseEmail(false);
+                          setError(null);
+                        }}
+                      >
+                        <KeyRound className="mr-2 h-4 w-4" />
+                        Sign in with a username
+                      </Button>
+
+                      <p className="mt-3 text-center text-xs text-muted-foreground">
+                        Email accounts keep your data across refreshes and
+                        devices — sign in the same way every time.
+                      </p>
+                    </>
                   ) : (
                     <Button
                       type="button"
@@ -293,16 +289,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     </Button>
                   )}
 
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="w-full mt-2 text-muted-foreground"
-                    onClick={handleGuestLogin}
-                    disabled={isLoading}
-                  >
-                    <UserX className="mr-2 h-4 w-4" />
-                    Continue as Guest
-                  </Button>
                 </CardContent>
               </>
             ) : (
