@@ -4,15 +4,26 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import TaskDetail from "@/components/TaskDetail";
+import {
+  FlaggedBoard,
+  FlaggedItemsList,
+  FlaggedProductsList,
+  FlaggedProjectsList,
+  PRIORITY_META,
+  PRIORITY_RANK,
+  daysLeftLabel,
+  fgProjectStatus,
+  jobProjectStatus,
+  projectDocStatus,
+  tagChip,
+  type FgDoc,
+  type FlagStatusFilter,
+  type FlaggedData,
+  type FlaggedSel,
+  type JobDoc,
+  type SortMode,
+} from "@/components/FlaggedLists";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
 import {
@@ -33,14 +44,11 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronDown,
-  Circle,
   Clock,
   Columns3,
   FileText,
   Flag,
   Folder,
-  GanttChartSquare,
-  GripVertical,
   History,
   Inbox,
   List,
@@ -67,807 +75,13 @@ import {
 } from "@/lib/project-statuses";
 
 type ListId = Id<"taskLists">;
-type SortMode = "manual" | "due" | "priority" | "created";
-type JobDoc = Doc<"projectJobs">;
-type FgDoc = Doc<"finishedGoods">;
-
-const PRIORITY_RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
-
-/** Sort flagged jobs like the main todo list (custom/due/priority/newest). */
-function sortJobs(jobs: JobDoc[], mode: SortMode): JobDoc[] {
-  const out = [...jobs];
-  if (mode === "due") out.sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
-  else if (mode === "priority")
-    out.sort(
-      (a, b) => PRIORITY_RANK[a.priority ?? "low"] - PRIORITY_RANK[b.priority ?? "low"],
-    );
-  else if (mode === "created") out.sort((a, b) => b._creationTime - a._creationTime);
-  return out;
-}
-
-/** Products have no due date/priority, so those modes fall back to name order. */
-function sortFgs(fgs: FgDoc[], mode: SortMode): FgDoc[] {
-  const out = [...fgs];
-  if (mode === "created") out.sort((a, b) => b._creationTime - a._creationTime);
-  else if (mode !== "manual") out.sort((a, b) => a.name.localeCompare(b.name));
-  return out;
-}
 
 /**
- * Flagged view filter: "all" = everything (jobs as parents + their products as
- * subtasks), "products" = only the flagged product cards (flat), "jobs" = only
- * flagged job rows. `status` narrows by completion state.
+ * Projects workspace filter — one button per level of the hierarchy:
+ * "projects" = every project, "jobs" = flagged job rows, "products" = flagged
+ * product rows. `status` narrows by completion state.
  */
-type FlagFilter = "all" | "products" | "jobs";
-type FlagStatusFilter = "all" | string;
-
-type ProjectStatus = string;
-
-function jobProjectStatus(job: JobDoc, statuses: string[]): ProjectStatus {
-  if (job.projectStatus && statuses.includes(job.projectStatus)) return job.projectStatus;
-  if (job.status === "completed" || job.status === "cancelled") return PROJECT_STATUS_FINISH;
-  if (job.status === "in_progress" || job.status === "paused") return statuses[1] ?? PROJECT_STATUS_START;
-  return PROJECT_STATUS_START;
-}
-
-function fgProjectStatus(fg: FgDoc, statuses: string[]): ProjectStatus {
-  if (fg.projectStatus && statuses.includes(fg.projectStatus)) return fg.projectStatus;
-  return fg.isCompleted ? PROJECT_STATUS_FINISH : PROJECT_STATUS_START;
-}
-
-/** Days left until a due date: "Due in 3d" / "Due today" / "2d overdue". */
-function daysLeftLabel(ts: number): { text: string; overdue: boolean } {
-  const now = new Date();
-  const startOfToday = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-  ).getTime();
-  const d = new Date(ts);
-  const startOfDue = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((startOfDue - startOfToday) / 86_400_000);
-  if (days === 0) return { text: "Due today", overdue: false };
-  if (days === 1) return { text: "Due tomorrow", overdue: false };
-  if (days > 1) return { text: `Due in ${days}d`, overdue: false };
-  return { text: `${Math.abs(days)}d overdue`, overdue: true };
-}
-
-/** Which flagged item's detail pane is open. */
-type FlaggedSel =
-  | { kind: "job"; id: Id<"projectJobs"> }
-  | { kind: "fg"; id: Id<"finishedGoods"> }
-  | null;
-
-/** Wider chip shared by the flagged-view filter bar and cards. */
-const tagChip =
-  "shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground";
-
-/** Flagged jobs & products (from the Projects section) with their labels. */
-type FlaggedData = {
-  jobs: JobDoc[];
-  fgs: FgDoc[];
-  projects: Doc<"projects">[];
-  projectNameOf: (job: JobDoc) => string;
-};
-
-/**
- * Flagged items rendered as real todo rows: products get a checkbox, and a job
- * can only be checked off once every flagged product under it is completed.
- * `showTags` adds explicit project & job name tag chips (used in the main list).
- */
-function FlaggedItemsList({
-  data,
-  allJobs,
-  allFgs,
-  showTags = false,
-  statusFilter = "all",
-  projectStatuses: configuredProjectStatuses,
-  productsOnly = false,
-  onToggleFg,
-  onToggleJob,
-  busyKey,
-  sortMode = "manual",
-  selection,
-  onSelect,
-}: {
-  data: FlaggedData;
-  allJobs: JobDoc[];
-  allFgs: FgDoc[];
-  showTags?: boolean;
-  statusFilter?: FlagStatusFilter;
-  projectStatuses?: string[];
-  productsOnly?: boolean;
-  onToggleFg: (fg: FgDoc) => void;
-  onToggleJob: (job: JobDoc) => void;
-  busyKey: string | null;
-  sortMode?: SortMode;
-  selection?: FlaggedSel;
-  onSelect?: (sel: FlaggedSel) => void;
-}) {
-  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
-  const projectStatuses = projectStatusesOrDefaults(
-    configuredProjectStatuses ?? configuredStatusesQuery,
-  );
-  const checkCls =
-    "size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3";
-  /** Projects whose job list is folded away; a project header opens/closes it. */
-  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const toggleProject = (key: string) =>
-    setCollapsedProjects((current) => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  const visibleJobs = productsOnly
-    ? []
-    : sortJobs(data.jobs, sortMode).filter((job) =>
-        matchesStatusFilter(
-          statusFilter ?? "all",
-          jobProjectStatus(job, projectStatuses),
-          job.status === "completed",
-        ),
-      );
-
-  return (
-    <ul className="divide-y divide-border/70">
-      {/* flagged jobs: main task — their flagged products as completable subtasks */}
-      {visibleJobs.map((job, jobIndex) => {
-        const project = data.projects.find((item) => item._id === job.projectId);
-        const isFirstJobForProject =
-          visibleJobs.findIndex((item) => item.projectId === job.projectId) === jobIndex;
-        const jobProducts = allFgs
-          .filter((f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id))
-          .filter((f) => matchesStatusFilter(statusFilter ?? "all", fgProjectStatus(f, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]), f.isCompleted ?? false));
-        const done = jobProjectStatus(job, projectStatuses) === PROJECT_STATUS_FINISH;
-        const allFlaggedProducts = allFgs.filter(
-          (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
-        );
-        const allProductsDone =
-          allFlaggedProducts.length > 0 &&
-          allFlaggedProducts.every((f) => f.isCompleted);
-        const disabled = busyKey !== null || (!done && !allProductsDone);
-        const projectCollapsed = collapsedProjects.has(job.projectId);
-        const projectJobs = visibleJobs.filter(
-          (item) => item.projectId === job.projectId,
-        );
-        return (
-          <li
-            key={job._id}
-            className={cn(
-              "px-4 py-3 transition-colors",
-              done && "opacity-60",
-              !isFirstJobForProject && projectCollapsed && "hidden",
-              selection?.kind === "job" && selection.id === job._id && "bg-primary/[0.04]",
-            )}
-          >
-            {isFirstJobForProject && (
-              <button
-                type="button"
-                onClick={() => toggleProject(job.projectId)}
-                aria-expanded={!projectCollapsed}
-                className="mb-2 flex w-full flex-wrap items-center gap-2 rounded-lg bg-primary/[0.06] px-2 py-1.5 text-left text-sm"
-              >
-                <ChevronDown
-                  className={cn(
-                    "size-3.5 shrink-0 text-primary transition-transform",
-                    !projectCollapsed && "rotate-180",
-                  )}
-                />
-                <Folder className="size-4 shrink-0 text-sky-500/80" />
-                <span className="font-semibold">{data.projectNameOf(job)}</span>
-                {project?.code && <span className="font-mono text-[10px] text-muted-foreground/70">{project.code}</span>}
-                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                  {projectJobs.length} job{projectJobs.length === 1 ? "" : "s"}
-                </span>
-              </button>
-            )}
-            <div
-              className={cn(
-                "ml-4 flex flex-wrap items-center gap-2 border-l border-border/60 pl-3",
-                projectCollapsed && "hidden",
-              )}
-            >
-              <Checkbox
-                checked={done}
-                disabled={disabled}
-                onCheckedChange={() => onToggleJob(job)}
-                aria-label={
-                  done
-                    ? `Reopen job “${job.name}”`
-                    : `Mark job “${job.name}” as done`
-                }
-                title={
-                  !done && !allProductsDone
-                    ? jobProducts.length === 0
-                      ? "No flagged products to complete yet"
-                      : "Complete all products first"
-                    : undefined
-                }
-                className={checkCls}
-              />
-              <button
-                type="button"
-                onClick={() => onSelect?.({ kind: "job", id: job._id })}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                title="Open details"
-              >
-                <Flag
-                  className={cn(
-                    "size-3.5 shrink-0",
-                    done ? "fill-emerald-400 text-emerald-500" : "fill-amber-400 text-amber-500",
-                  )}
-                />
-                <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-sm font-medium",
-                    done && "text-muted-foreground line-through",
-                  )}
-                >
-                  {job.name}
-                </span>
-              </button>
-              {jobProducts.length > 0 && (
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                    done
-                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                      : "bg-muted text-muted-foreground",
-                  )}
-                  title="Flagged products completed"
-                >
-                  {jobProducts.filter((f) => f.isCompleted).length}/{jobProducts.length}
-                </span>
-              )}
-              <span className={tagChip}>{data.projectNameOf(job)}</span>
-              <span className={tagChip}>{jobProjectStatus(job, projectStatuses)}</span>
-            </div>
-            {jobProducts.length > 0 && (
-              <ul
-                className={cn(
-                  "ml-4 mt-1.5 space-y-1 border-l border-border/60 pl-3",
-                  projectCollapsed && "hidden",
-                )}
-              >
-                {jobProducts.map((fg) => (
-                  <li
-                    key={fg._id}
-                    className={cn(
-                      "flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs transition-colors",
-                      selection?.kind === "fg" && selection.id === fg._id && "bg-primary/10",
-                    )}
-                  >
-                    <Checkbox
-                      checked={fg.isCompleted ?? false}
-                      disabled={busyKey !== null}
-                      onCheckedChange={() => onToggleFg(fg)}
-                      aria-label={
-                        fg.isCompleted
-                          ? `Reopen product “${fg.name}”`
-                          : `Mark product “${fg.name}” as done`
-                      }
-                      className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
-                    />
-                    <Package className="size-3 shrink-0 text-sky-500/70" />
-                    <button
-                      type="button"
-                      onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
-                      className={cn(
-                        "min-w-0 flex-1 cursor-pointer truncate text-left",
-                        fg.isCompleted && "text-muted-foreground line-through",
-                      )}
-                    >
-                      {fg.name}
-                    </button>
-                    {fg.code && (
-                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                        {fg.code}
-                      </span>
-                    )}
-                    {fg.dueAt !== undefined && (
-                      <>
-                        <span
-                          className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
-                          title={`Due ${formatDueLabel(fg.dueAt)}`}
-                        >
-                          {formatDueLabel(fg.dueAt)}
-                        </span>
-                        <span
-                          className={cn(
-                            "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                            daysLeftLabel(fg.dueAt).overdue
-                              ? "bg-destructive/10 text-destructive"
-                              : "bg-primary/10 text-primary",
-                          )}
-                          title="Time left to complete this product"
-                        >
-                          {daysLeftLabel(fg.dueAt).text}
-                        </span>
-                      </>
-                    )}
-                    {showTags && (
-                      <>
-                        <span className={tagChip}>{data.projectNameOf(job)}</span>
-                        <span className={tagChip}>{job.name}</span>
-                      </>
-                    )}
-                    <span className={tagChip}>{fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        );
-      })}
-      {/* flagged products whose job is not flagged: job shown as main, product as the completable subtask */}
-      {sortFgs(
-        data.fgs
-          .filter((f) => matchesStatusFilter(statusFilter ?? "all", fgProjectStatus(f, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]), f.isCompleted ?? false))
-          .filter((f) => {
-            const jobs = f.jobIds ?? (f.jobId ? [f.jobId] : []);
-            return !jobs.some((jid) => data.jobs.some((j) => j._id === jid));
-          }),
-        sortMode,
-      ).map((fg) => {
-          const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
-          const parentJob = allJobs.find((j) => jobIds.includes(j._id));
-          return (
-            <li
-              key={fg._id}
-              className={cn(
-                "px-4 py-3 transition-colors",
-                fg.isCompleted && "opacity-60",
-                selection?.kind === "fg" && selection.id === fg._id && "bg-primary/[0.04]",
-              )}
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                {parentJob ? (
-                  <>
-                    <Briefcase className="size-3.5 shrink-0 text-sky-500/70" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground">
-                      {parentJob.name}
-                    </span>
-                    <span className={tagChip}>{data.projectNameOf(parentJob)}</span>
-                  </>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                    Unassigned job
-                  </span>
-                )}
-              </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs">
-                <Checkbox
-                  checked={fg.isCompleted ?? false}
-                  disabled={busyKey !== null}
-                  onCheckedChange={() => onToggleFg(fg)}
-                  aria-label={
-                    fg.isCompleted
-                      ? `Reopen product “${fg.name}”`
-                      : `Mark product “${fg.name}” as done`
-                  }
-                  className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
-                />
-                <Package className="size-3 shrink-0 text-sky-500/70" />
-                <button
-                  type="button"
-                  onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
-                  className={cn(
-                    "min-w-0 flex-1 cursor-pointer truncate text-left font-medium",
-                    fg.isCompleted && "text-muted-foreground line-through",
-                  )}
-                >
-                  {fg.name}
-                </button>
-                {fg.code && (
-                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                    {fg.code}
-                  </span>
-                )}
-                {showTags && parentJob && <span className={tagChip}>{parentJob.name}</span>}
-                {fg.dueAt !== undefined && (
-                  <>
-                    <span
-                      className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
-                      title={`Due ${formatDueLabel(fg.dueAt)}`}
-                    >
-                      {formatDueLabel(fg.dueAt)}
-                    </span>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                        daysLeftLabel(fg.dueAt).overdue
-                          ? "bg-destructive/10 text-destructive"
-                          : "bg-primary/10 text-primary",
-                      )}
-                      title="Time left to complete this product"
-                    >
-                      {daysLeftLabel(fg.dueAt).text}
-                    </span>
-                  </>
-                )}
-              </div>
-            </li>
-          );
-        })}
-    </ul>
-  );
-}
-/** Shared completion-status predicate for the flagged-view filters. */
-function matchesStatusFilter(
-  filter: FlagStatusFilter,
-  status: string,
-  isDone: boolean,
-): boolean {
-  if (filter === "all") return true;
-  if (filter === "open") return !isDone;
-  if (filter === "done") return isDone;
-  return status === filter;
-}
-
-/**
- * Products-only flagged list: one flat card per flagged product (jobs are just
- * a small tag on the card), honoring the status filter. Same row layout as the
- * rest of the todo list so it reads as another list, not a different UI.
- */
-function FlaggedProductsList({
-  data,
-  allJobs,
-  statusFilter,
-  projectStatuses: configuredProjectStatuses,
-  showTags = false,
-  onToggleFg,
-  busyKey,
-  sortMode = "manual",
-  selection,
-  onSelect,
-}: {
-  data: FlaggedData;
-  allJobs: JobDoc[];
-  statusFilter?: FlagStatusFilter;
-  projectStatuses?: string[];
-  showTags?: boolean;
-  onToggleFg: (fg: FgDoc) => void;
-  busyKey: string | null;
-  sortMode?: SortMode;
-  selection?: FlaggedSel;
-  onSelect?: (sel: FlaggedSel) => void;
-}) {
-  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
-  const projectStatuses = projectStatusesOrDefaults(
-    configuredProjectStatuses ?? configuredStatusesQuery,
-  );
-  const rows = sortFgs(
-    data.fgs.filter((f) => matchesStatusFilter(statusFilter ?? "all", fgProjectStatus(f, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]), f.isCompleted ?? false)),
-    sortMode,
-  ).map((fg) => {
-    const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
-    const parentJob = allJobs.find((j) => jobIds.includes(j._id));
-    return { fg, parentJob };
-  });
-
-  if (rows.length === 0) {
-    return (
-      <div className="px-6 py-10 text-center">
-        <Package className="mx-auto size-7 text-muted-foreground/40" />
-        <p className="mt-2 text-sm font-medium">
-          {statusFilter === PROJECT_STATUS_FINISH ? "No finished products" : "No products in this status"}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {statusFilter === "all"
-            ? "Flag a product in the Projects page and it will show up here."
-            : "Choose another status filter to see more products."}
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <ul className="divide-y divide-border/70">
-      {rows.map(({ fg, parentJob }) => (
-        <li
-          key={fg._id}
-          className={cn(
-            "flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm transition-colors",
-            fg.isCompleted && "opacity-60",
-            selection?.kind === "fg" && selection.id === fg._id && "bg-primary/[0.04]",
-          )}
-        >
-          <Checkbox
-            checked={fg.isCompleted ?? false}
-            disabled={busyKey !== null}
-            onCheckedChange={() => onToggleFg(fg)}
-            aria-label={
-              fg.isCompleted
-                ? `Reopen product “${fg.name}”`
-                : `Mark product “${fg.name}” as done`
-            }
-            className="size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3"
-          />
-          <Flag
-            className={cn(
-              "size-3.5 shrink-0",
-              fg.isCompleted
-                ? "fill-emerald-400 text-emerald-500"
-                : "fill-amber-400 text-amber-500",
-            )}
-          />
-          <Package className="size-3.5 shrink-0 text-sky-500/80" />
-          <button
-            type="button"
-            onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
-            className={cn(
-              "min-w-0 flex-1 cursor-pointer truncate text-left font-medium",
-              fg.isCompleted && "text-muted-foreground line-through",
-            )}
-          >
-            {fg.name}
-          </button>
-          {fg.code && (
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-              {fg.code}
-            </span>
-          )}
-          {parentJob && <span className={tagChip}>{parentJob.name}</span>}
-          {showTags && parentJob && <span className={tagChip}>{data.projectNameOf(parentJob)}</span>}
-          <span className={tagChip}>{fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** Kanban columns for flagged work. The first and last statuses are fixed. */
-type BoardColumn = string;
-type BoardCard = { kind: "fg"; fg: FgDoc; jobName?: string; project: string; status: string };
-
-const BOARD_CARD =
-  "group/card relative flex cursor-grab flex-col gap-1.5 rounded-xl border bg-card p-3 text-left shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing";
-
-function BoardCardView({
-  card,
-  busyKey,
-  onToggleFg,
-  onOpen,
-}: {
-  card: BoardCard;
-  busyKey: string | null;
-  onToggleFg: (fg: FgDoc) => void;
-  onOpen: (fg: FgDoc) => void;
-}) {
-  const done = card.status === PROJECT_STATUS_FINISH;
-  const busy = busyKey === `f:${card.fg._id}`;
-  return (
-    <motion.div layout className={BOARD_CARD}>
-      <span
-        aria-hidden
-        className="absolute inset-x-0 top-0 h-0.5 rounded-t-xl bg-violet-500/70"
-      />
-      <div className="flex items-start gap-1.5">
-        <GripVertical className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/40 transition-colors group-hover/card:text-muted-foreground/70" />
-        <button
-          type="button"
-          onClick={() => onOpen(card.fg)}
-          className="min-w-0 flex-1 cursor-pointer text-left"
-          title="Open details"
-        >
-          <p
-            className={cn(
-              "truncate text-sm font-medium leading-snug",
-              done && "text-muted-foreground line-through",
-            )}
-          >
-            {card.fg.name}
-          </p>
-          <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-muted-foreground">
-            <Package className="size-2.5 text-violet-500/80" />
-            {card.jobName ?? "Product"}
-            <span className="text-muted-foreground/50">·</span>
-            <span className="truncate">{card.project}</span>
-          </p>
-        </button>
-        <Checkbox
-          checked={done}
-          disabled={busy}
-          onCheckedChange={() => onToggleFg(card.fg)}
-          aria-label={
-            done ? `Reopen product “${card.fg.name}”` : `Mark product “${card.fg.name}” as done`
-          }
-          className="mt-0.5 size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
-        />
-      </div>
-      <div className="flex flex-wrap items-center gap-1">
-        {card.fg.dueAt !== undefined && (
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-              (card.fg.dueAt ?? 0) < Date.now() && !done
-                ? "bg-rose-500/10 text-rose-700 dark:text-rose-400"
-                : "bg-muted text-muted-foreground",
-            )}
-          >
-            <CalendarDays className="size-2.5" />
-            {formatDueLabel(card.fg.dueAt)}
-          </span>
-        )}
-        {card.fg.priority && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium capitalize text-muted-foreground">
-            <span
-              className={cn(
-                "size-1.5 rounded-full",
-                card.fg.priority === "high"
-                  ? "bg-rose-500"
-                  : card.fg.priority === "medium"
-                    ? "bg-amber-500"
-                    : "bg-sky-500",
-              )}
-            />
-            {card.fg.priority}
-          </span>
-        )}
-        {done ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
-            <CheckCircle2 className="size-2.5" /> Finish
-          </span>
-        ) : (
-          <span className="rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-400">
-            {card.status}
-          </span>
-        )}
-      </div>
-    </motion.div>
-  );
-}
-
-/**
- * Professional drag & drop kanban of the flagged work: jobs as Job cards,
- * products as Product cards. Dragging a product card between columns calls
- * setFgCompleted; dragging a job updates its status (jobs can only be marked
- * completed once every flagged product under them is done, same rule as the
- * list checkbox).
- */
-function FlaggedBoard({
-  data,
-  allJobs,
-  statusFilter,
-  projectStatuses: configuredProjectStatuses,
-  onToggleFg,
-  onSetStatus,
-  busyKey,
-  onOpenFg,
-  projectNameOf,
-}: {
-  data: FlaggedData;
-  allJobs: JobDoc[];
-  statusFilter?: FlagStatusFilter;
-  projectStatuses?: string[];
-  onToggleFg: (fg: FgDoc) => void;
-  onSetStatus?: (fg: FgDoc, status: string) => void;
-  busyKey: string | null;
-  onOpenFg: (fg: FgDoc) => void;
-  projectNameOf: (job: JobDoc) => string;
-}) {
-  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
-  const projectStatuses = projectStatusesOrDefaults(
-    configuredProjectStatuses ?? configuredStatusesQuery,
-  );
-  const [dragging, setDragging] = useState<Id<"finishedGoods"> | null>(null);
-  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
-
-  const productCards: BoardCard[] = data.fgs.map((fg) => {
-    const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
-    const parentJob = allJobs.find((j) => jobIds.includes(j._id));
-    return {
-      kind: "fg" as const,
-      fg,
-      jobName: parentJob?.name,
-      project: parentJob ? projectNameOf(parentJob) : (fg.projectName ?? "Standalone"),
-      status: fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]),
-    };
-  });
-
-  const fgsByCol = (col: BoardColumn) =>
-    productCards.filter((c) => c.status === col);
-
-  const colCards = (col: BoardColumn): BoardCard[] =>
-    fgsByCol(col).filter((c) =>
-      matchesStatusFilter(statusFilter ?? "all", c.status, c.fg.isCompleted ?? false),
-    );
-
-  const handleDrop = (col: BoardColumn) => {
-    if (!dragging) return;
-    const card = productCards.find((c) => c.fg._id === dragging);
-    if (card && card.status !== col) {
-      if (onSetStatus) {
-        onSetStatus(card.fg, col);
-      } else {
-        void setFgProjectStatusM({ id: card.fg._id, status: col }).catch((error) =>
-          toast.error(error instanceof Error ? error.message : "Couldn't update the product status."),
-        );
-      }
-    }
-    setDragging(null);
-  };
-
-  return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {(projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]).map((col) => {
-        const cards = colCards(col);
-        const droppable =
-          dragging !== null &&
-          productCards.find((c) => c.fg._id === dragging)?.status !== col;
-        return (
-          <section
-            key={col}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-            }}              onDrop={(e) => {
-                e.preventDefault();
-                handleDrop(col);
-              }}
-            className={cn(
-              "flex min-h-56 flex-col rounded-2xl border bg-muted/30 shadow-sm transition-colors",
-              droppable && "border-primary/50 bg-primary/[0.04] ring-2 ring-primary/20",
-            )}
-          >
-            <header className="flex items-center gap-2 border-b border-border/60 px-3.5 py-2.5">
-              {col === PROJECT_STATUS_FINISH ? (
-                <CheckCircle2 className="size-4 text-emerald-500" />
-              ) : col === PROJECT_STATUS_START ? (
-                <Circle className="size-4 text-muted-foreground" />
-              ) : (
-                <GanttChartSquare className="size-4 text-sky-500" />
-              )}
-              <h3 className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                {col}
-              </h3>
-              <span className="ml-auto rounded-full bg-background px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground shadow-sm">
-                {cards.length}
-              </span>
-            </header>
-            <div className="flex-1 space-y-2 overflow-y-auto p-2">
-              <AnimatePresence initial={false}>
-                {cards.map((card) => {
-                  const id = card.fg._id;
-                  return (
-                    <motion.div
-                      key={id}
-                      layout
-                      initial={{ opacity: 0, y: -6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.96 }}
-                      transition={{ duration: 0.18 }}
-                      draggable
-                      onDragStart={() => setDragging(id)}
-                      onDragEnd={() => setDragging(null)}
-                      className={cn(dragging === id && "opacity-40")}
-                    >
-                      <BoardCardView
-                        card={card}
-                        busyKey={busyKey}
-                        onToggleFg={onToggleFg}
-                        onOpen={onOpenFg}
-                      />
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
-              {cards.length === 0 && (
-                <p className="rounded-xl border border-dashed px-3 py-6 text-center text-xs text-muted-foreground/70">
-                  Drop cards here
-                </p>
-              )}
-            </div>
-          </section>
-        );
-      })}
-    </div>
-  );
-}
+type FlagFilter = "projects" | "jobs" | "products";
 
 /** Detail-pane row: icon + label + content, like TaskDetail's rows. */
 function DetailRow({
@@ -905,16 +119,22 @@ function FlaggedDetail({
   jobs,
   fgs,
   projects,
+  onSelect,
   onClose,
 }: {
   selection: NonNullable<FlaggedSel>;
   jobs: JobDoc[];
   fgs: FgDoc[];
   projects: Doc<"projects">[];
+  onSelect: (sel: FlaggedSel) => void;
   onClose: () => void;
 }) {
   const updateJobM = useMutation(api.jobs.updateJob);
   const updateFgM = useMutation(api.costing.updateFinishedGood);
+  const updateProjectM = useMutation(api.costing.updateProject);
+  const setProjectProjectStatusM = useMutation(
+    api.costing.setProjectProjectStatus,
+  );
   const setJobProjectStatusM = useMutation(api.jobs.setJobProjectStatus);
   const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
   const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
@@ -931,16 +151,18 @@ function FlaggedDetail({
         ) ?? null)
       : null;
   const project =
-    job !== null
-      ? (projects.find((pp) => pp._id === job.projectId) ?? null)
-      : fg !== null
-        ? (projects.find((pp) => pp.name === fg.projectName) ??
-          (parentJob !== null
-            ? projects.find((pp) => pp._id === parentJob.projectId) ?? null
-            : null))
-        : null;
+    selection.kind === "project"
+      ? (projects.find((pp) => pp._id === selection.id) ?? null)
+      : job !== null
+        ? (projects.find((pp) => pp._id === job.projectId) ?? null)
+        : fg !== null
+          ? (projects.find((pp) => pp.name === fg.projectName) ??
+            (parentJob !== null
+              ? projects.find((pp) => pp._id === parentJob.projectId) ?? null
+              : null))
+          : null;
 
-  if (job === null && fg === null) {
+  if (job === null && fg === null && project === null) {
     return (
       <aside className="w-full shrink-0 border-border/60 lg:w-80 lg:border-l">
         <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
@@ -983,6 +205,30 @@ function FlaggedDetail({
     }
   };
 
+  const patchProject = async (patch: Record<string, unknown>) => {
+    if (project === null) return;
+    setBusy(true);
+    try {
+      await updateProjectM({ id: project._id, ...patch } as never);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't save.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const projectJobs = project !== null ? jobs.filter((j) => j.projectId === project._id) : [];
+  const projectFgs =
+    project !== null
+      ? fgs.filter(
+          (f) =>
+            f.projectName === project.name ||
+            projectJobs.some(
+              (j) => f.jobId === j._id || (f.jobIds ?? []).includes(j._id),
+            ),
+        )
+      : [];
+
   const prioChip: Record<string, string> = {
     high: "bg-rose-500/10 text-rose-700 dark:text-rose-400",
     medium: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
@@ -994,7 +240,11 @@ function FlaggedDetail({
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
           <p className="text-sm font-semibold">
-            {job !== null ? "Job details" : "Product details"}
+            {selection.kind === "project"
+              ? "Project details"
+              : job !== null
+                ? "Job details"
+                : "Product details"}
           </p>
           <button
             type="button"
@@ -1008,7 +258,206 @@ function FlaggedDetail({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          {job !== null ? (
+          {selection.kind === "project" && project !== null ? (
+            <>
+              <input
+                value={project.name}
+                onChange={(e) => void patchProject({ name: e.target.value })}
+                className="w-full bg-transparent text-[15px] font-medium outline-none"
+              />
+              {project.code && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  <Folder className="mr-1 inline size-3 text-sky-500/80" />
+                  {project.code}
+                </p>
+              )}
+
+              <div className="mt-4">
+                <DetailRow icon={CalendarDays} label="Start date">
+                  <p className="rounded-lg border bg-card px-2.5 py-1.5 text-sm">
+                    {formatDueLabel(project._creationTime)}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Date this project was created
+                  </p>
+                </DetailRow>
+
+                <DetailRow icon={CalendarDays} label="Due date">
+                  <input
+                    type="datetime-local"
+                    value={project.dueAt !== undefined ? toLocalInput(new Date(project.dueAt)) : ""}
+                    onChange={(e) =>
+                      void patchProject({
+                        dueAt: e.target.value ? new Date(e.target.value).getTime() : undefined,
+                      })
+                    }
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  {project.dueAt !== undefined && (
+                    <p
+                      className={cn(
+                        "mt-1 text-[11px]",
+                        daysLeftLabel(project.dueAt).overdue
+                          ? "text-destructive"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {daysLeftLabel(project.dueAt).text}
+                    </p>
+                  )}
+                </DetailRow>
+
+                <DetailRow icon={Briefcase} label="Status">
+                  <select
+                    value={projectDocStatus(project, projectStatuses)}
+                    onChange={(e) =>
+                      void setProjectProjectStatusM({
+                        id: project._id,
+                        status: e.target.value,
+                      })
+                    }
+                    disabled={busy}
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {projectStatuses.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </DetailRow>
+
+                <DetailRow icon={Flag} label="Priority">
+                  <div className="flex flex-wrap gap-1.5">
+                    {(["high", "medium", "low"] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        disabled={busy}
+                        className={cn(
+                          chipBase,
+                          project.priority === p
+                            ? `${prioChip[p]} border-transparent`
+                            : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                        )}
+                        onClick={() =>
+                          void patchProject({
+                            priority: project.priority === p ? undefined : p,
+                          })
+                        }
+                      >
+                        <span className={cn("mr-1 inline-block size-1.5 rounded-full", PRIORITY_META[p].dot)} />
+                        {p[0]!.toUpperCase() + p.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </DetailRow>
+
+                <DetailRow icon={Briefcase} label="Client">
+                  <input
+                    value={project.client ?? ""}
+                    onChange={(e) => void patchProject({ client: e.target.value })}
+                    placeholder="Customer or stakeholder"
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </DetailRow>
+
+                <DetailRow icon={Flag} label="Assignee">
+                  <input
+                    value={project.assignee ?? ""}
+                    onChange={(e) => void patchProject({ assignee: e.target.value })}
+                    placeholder="Person responsible"
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </DetailRow>
+
+                <DetailRow icon={Tag} label="Budget">
+                  <input
+                    type="number"
+                    value={project.budget ?? ""}
+                    onChange={(e) =>
+                      void patchProject({
+                        budget: e.target.value ? Number(e.target.value) : undefined,
+                      })
+                    }
+                    placeholder="0.00"
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </DetailRow>
+
+                <DetailRow icon={FileText} label="Notes">
+                  <textarea
+                    value={project.description ?? ""}
+                    onChange={(e) => void patchProject({ description: e.target.value })}
+                    rows={3}
+                    placeholder="Add notes…"
+                    className="w-full resize-y rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </DetailRow>
+
+                <DetailRow icon={Briefcase} label={`Jobs (${projectJobs.length})`}>
+                  {projectJobs.length === 0 ? (
+                    <p className="rounded-lg border border-dashed px-2.5 py-1.5 text-xs text-muted-foreground">
+                      No jobs in this project yet.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {projectJobs.map((j) => (
+                        <li key={j._id}>
+                          <button
+                            type="button"
+                            onClick={() => onSelect({ kind: "job", id: j._id })}
+                            className="flex w-full flex-wrap items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                          >
+                            <Briefcase className="size-3 shrink-0 text-sky-500/80" />
+                            <span className="min-w-0 flex-1 truncate font-medium">
+                              {j.name}
+                            </span>
+                            <span className={tagChip}>
+                              {jobProjectStatus(j, projectStatuses)}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </DetailRow>
+
+                <DetailRow icon={Package} label={`Products (${projectFgs.length})`}>
+                  {projectFgs.length === 0 ? (
+                    <p className="rounded-lg border border-dashed px-2.5 py-1.5 text-xs text-muted-foreground">
+                      No products in this project yet.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {projectFgs.map((f) => (
+                        <li key={f._id}>
+                          <button
+                            type="button"
+                            onClick={() => onSelect({ kind: "fg", id: f._id })}
+                            className="flex w-full flex-wrap items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                          >
+                            <Package className="size-3 shrink-0 text-violet-500/80" />
+                            <span
+                              className={cn(
+                                "min-w-0 flex-1 truncate font-medium",
+                                f.isCompleted && "text-muted-foreground line-through",
+                              )}
+                            >
+                              {f.name}
+                            </span>
+                            <span className={tagChip}>
+                              {fgProjectStatus(f, projectStatuses)}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </DetailRow>
+              </div>
+            </>
+          ) : job !== null ? (
             <>
               <input
                 value={job.name}
@@ -1204,12 +653,6 @@ function FlaggedDetail({
   );
 }
 
-const PRIORITY_META: Record<Priority, { dot: string; chip: string }> = {
-  high: { dot: "bg-rose-500", chip: "bg-rose-500/10 text-rose-700 dark:text-rose-400" },
-  medium: { dot: "bg-amber-500", chip: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  low: { dot: "bg-sky-500", chip: "bg-sky-500/10 text-sky-700 dark:text-sky-400" },
-};
-
 export default function TasksPanel({
   activeView,
   lists,
@@ -1263,9 +706,9 @@ export default function TasksPanel({
   const [showDone, setShowDone] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("manual");
 
-  // Flagged view: scope filter (all / products / jobs), completion filter and
-  // list-vs-board presentation.
-  const [flagFilter, setFlagFilter] = useState<FlagFilter>("all");
+  // Projects workspace: which level of the hierarchy is shown (projects /
+  // jobs / products), the completion filter and list-vs-board presentation.
+  const [flagFilter, setFlagFilter] = useState<FlagFilter>("projects");
   const [flagSelection, setFlagSelection] = useState<FlaggedSel>(null);
   const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
   const [flagBoardMode, setFlagBoardMode] = useState(false);
@@ -1368,6 +811,19 @@ export default function TasksPanel({
     return { jobs, fgs, projects: flaggedProjects ?? [], projectNameOf };
   }, [flaggedJobs, flaggedFgs, flaggedProjects]);
 
+  /** Projects are never flagged, so their list works with nothing flagged yet. */
+  const projectListData = useMemo<FlaggedData>(
+    () =>
+      flaggedItems ?? {
+        jobs: [],
+        fgs: [],
+        projects: flaggedProjects ?? [],
+        projectNameOf: (job: JobDoc) =>
+          (flaggedProjects ?? []).find((p) => p._id === job.projectId)?.name ?? "Project",
+      },
+    [flaggedItems, flaggedProjects],
+  );
+
   const handleAdd = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const raw = draft.trim();
@@ -1400,29 +856,6 @@ export default function TasksPanel({
       await toggleTask({ id });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update that task.");
-    }
-  };
-
-  /** Check off (or reopen) a flagged product in the todo list. */
-  const handleSetFlaggedFgStatus = async (fg: FgDoc, status: string) => {
-    setFlaggedBusy(`f:${fg._id}`);
-    try {
-      await setFgProjectStatusM({ id: fg._id, status });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the product status.");
-    } finally {
-      setFlaggedBusy(null);
-    }
-  };
-
-  const handleSetFlaggedJobStatus = async (job: JobDoc, status: string) => {
-    setFlaggedBusy(`j:${job._id}`);
-    try {
-      await setJobProjectStatusM({ id: job._id, status });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the job status.");
-    } finally {
-      setFlaggedBusy(null);
     }
   };
 
@@ -1475,12 +908,6 @@ export default function TasksPanel({
     }
   };
 
-  /**
-   * Move a flagged job on the kanban board. "todo" re-opens a completed job,
-   * "in_progress" flips it into the working state, "completed" keeps the same
-   * guard as the list: only when every flagged product under it is done (the
-   * unguarded path is onToggleFlaggedJob, which also flips flag colors).
-   */
   const handleDelete = async (id: Id<"tasks">) => {
     try {
       await removeTask({ id });
@@ -1515,7 +942,11 @@ export default function TasksPanel({
             label: viewLabel,
             value:
               activeView === "flagged"
-                ? (flaggedItems?.jobs.length ?? 0) + (flaggedItems?.fgs.length ?? 0)
+                ? flagFilter === "projects"
+                  ? (flaggedProjects?.length ?? 0)
+                  : flagFilter === "jobs"
+                    ? (flaggedItems?.jobs.length ?? 0)
+                    : (flaggedItems?.fgs.length ?? 0)
                 : tasks.length,
           },
           { label: "Completed", value: doneCount },
@@ -1631,15 +1062,21 @@ export default function TasksPanel({
               <span className="mr-1">Show</span>
               {(
                 [
-                  ["all", "All"],
-                  ["products", "Products"],
+                  ["projects", "Projects"],
                   ["jobs", "Jobs"],
+                  ["products", "Products"],
                 ] as [FlagFilter, string][]
               ).map(([mode, label]) => (
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => setFlagFilter(mode)}
+                  aria-pressed={flagFilter === mode}
+                  onClick={() => {
+                    setFlagFilter(mode);
+                    // the kanban only drives products, so leave it behind when
+                    // the Projects or Jobs list is selected
+                    if (mode !== "products") setFlagBoardMode(false);
+                  }}
                   className={cn(
                     "rounded-full border px-2.5 py-1 transition-colors",
                     flagFilter === mode
@@ -1734,42 +1171,54 @@ export default function TasksPanel({
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setFlagBoardMode(false)}
-                aria-pressed={!flagBoardMode}
-                className={cn(
-                  "grid size-7 place-items-center rounded-md border transition-colors",
-                  !flagBoardMode
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-                title="List view"
-              >
-                <List className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setFlagBoardMode(true)}
-                aria-pressed={flagBoardMode}
-                className={cn(
-                  "grid size-7 place-items-center rounded-md border transition-colors",
-                  flagBoardMode
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-                title="Board view"
-              >
-                <Columns3 className="size-3.5" />
-              </button>
-            </div>
+            {flagFilter === "products" && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setFlagBoardMode(false)}
+                  aria-pressed={!flagBoardMode}
+                  className={cn(
+                    "grid size-7 place-items-center rounded-md border transition-colors",
+                    !flagBoardMode
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  title="List view"
+                >
+                  <List className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFlagBoardMode(true)}
+                  aria-pressed={flagBoardMode}
+                  className={cn(
+                    "grid size-7 place-items-center rounded-md border transition-colors",
+                    flagBoardMode
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  title="Board view (products)"
+                >
+                  <Columns3 className="size-3.5" />
+                </button>
+              </div>
+            )}
           </div>
-          {flaggedJobs === undefined || flaggedFgs === undefined ? (
+          {flaggedJobs === undefined || flaggedFgs === undefined || flaggedProjects === undefined ? (
             <div className="flex items-center justify-center gap-2 px-5 py-14 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              Loading flagged items…
+              Loading projects…
             </div>
+          ) : flagFilter === "projects" ? (
+            <FlaggedProjectsList
+              data={projectListData}
+              allJobs={flaggedJobs ?? []}
+              allFgs={flaggedFgs ?? []}
+              statusFilter={flagStatus}
+              sortMode={sortMode}
+              selection={flagSelection}
+              onSelect={setFlagSelection}
+            />
           ) : flaggedItems === null ? (
             <div className="px-6 py-14 text-center">
               <Flag className="mx-auto size-8 text-amber-500/40" />
@@ -1778,6 +1227,20 @@ export default function TasksPanel({
                 Flag a job or product in the Projects page and it will show up here.
               </p>
             </div>
+          ) : flagFilter === "jobs" ? (
+            <FlaggedItemsList
+              data={flaggedItems}
+              allJobs={flaggedJobs ?? []}
+              allFgs={flaggedFgs ?? []}
+              statusFilter={flagStatus}
+              jobsOnly
+              onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
+              onToggleJob={(job) => void handleToggleFlaggedJob(job)}
+              busyKey={flaggedBusy}
+              sortMode={sortMode}
+              selection={flagSelection}
+              onSelect={setFlagSelection}
+            />
           ) : flagBoardMode ? (
             <div className="p-3">
               <FlaggedBoard
@@ -1790,26 +1253,12 @@ export default function TasksPanel({
                 onOpenFg={(fg) => setFlagSelection({ kind: "fg", id: fg._id })}
               />
             </div>
-          ) : flagFilter === "products" ? (
+          ) : (
             <FlaggedProductsList
               data={flaggedItems}
               allJobs={flaggedJobs ?? []}
               statusFilter={flagStatus}
               onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
-              busyKey={flaggedBusy}
-              sortMode={sortMode}
-              selection={flagSelection}
-              onSelect={setFlagSelection}
-            />
-          ) : (
-            <FlaggedItemsList
-              data={flaggedItems}
-              allJobs={flaggedJobs ?? []}
-              allFgs={flaggedFgs ?? []}
-              statusFilter={flagStatus}
-              productsOnly={flagFilter === "jobs"}
-              onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
-              onToggleJob={(job) => void handleToggleFlaggedJob(job)}
               busyKey={flaggedBusy}
               sortMode={sortMode}
               selection={flagSelection}
@@ -1824,6 +1273,7 @@ export default function TasksPanel({
               jobs={flaggedJobs}
               fgs={flaggedFgs}
               projects={flaggedProjects ?? []}
+              onSelect={setFlagSelection}
               onClose={() => setFlagSelection(null)}
             />
           </div>
