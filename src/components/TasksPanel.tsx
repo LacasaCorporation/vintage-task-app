@@ -615,7 +615,7 @@ function FlaggedBoard({
   statusFilter,
   projectStatuses: configuredProjectStatuses,
   onToggleFg,
-  onSetStatus = () => undefined,
+  onSetStatus,
   busyKey,
   onOpenFg,
   projectNameOf,
@@ -635,6 +635,7 @@ function FlaggedBoard({
     configuredProjectStatuses ?? configuredStatusesQuery,
   );
   const [dragging, setDragging] = useState<Id<"finishedGoods"> | null>(null);
+  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
 
   const productCards: BoardCard[] = data.fgs.map((fg) => {
     const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
@@ -659,7 +660,15 @@ function FlaggedBoard({
   const handleDrop = (col: BoardColumn) => {
     if (!dragging) return;
     const card = productCards.find((c) => c.fg._id === dragging);
-    if (card && card.status !== col) onSetStatus(card.fg, col);
+    if (card && card.status !== col) {
+      if (onSetStatus) {
+        onSetStatus(card.fg, col);
+      } else {
+        void setFgProjectStatusM({ id: card.fg._id, status: col }).catch((error) =>
+          toast.error(error instanceof Error ? error.message : "Couldn't update the product status."),
+        );
+      }
+    }
     setDragging(null);
   };
 
