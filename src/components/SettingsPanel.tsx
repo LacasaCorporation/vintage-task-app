@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import MasterDataManager from "@/components/MasterDataManager";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { cn } from "@/lib/utils";
+import { downloadBackupFile } from "@/lib/backup-download";
 import {
   ACTION_DESCRIPTIONS,
   ACTIONS,
@@ -50,6 +51,9 @@ import {
   Pencil,
   Power,
   RefreshCw,
+  Upload,
+  Download,
+  DatabaseBackup,
   Settings as SettingsIcon,
   ShieldCheck,
   SlidersHorizontal,
@@ -61,7 +65,7 @@ import {
   X,
 } from "lucide-react";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 type Role = "super" | "admin" | "user" | "member";
@@ -430,6 +434,12 @@ export default function SettingsPanel() {
   const deleteCustomRole = useMutation(api.settings.deleteCustomRole);
 
   const [busy, setBusy] = useState(false);
+
+  // ── backup & restore ─────────────────────────────────────────────────
+  const backupData = useQuery(api.backup.exportBackup);
+  const restoreBackupM = useMutation(api.backup.restoreBackup);
+  const [restoring, setRestoring] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [addEmail, setAddEmail] = useState("");
   const [addRole, setAddRole] = useState<AssignableRole>("user");
   const [addCustomRoleId, setAddCustomRoleId] = useState<Id<"customRoles"> | null>(null);
@@ -505,6 +515,50 @@ export default function SettingsPanel() {
     setAddEmail("");
     setAddRole("user");
     setAddCustomRoleId(null);
+  };
+
+  // ── backup & restore handlers ────────────────────────────────────────
+
+  const handleExportBackup = () => {
+    if (!backupData) return;
+    downloadBackupFile(backupData);
+    toast.success(
+      `Backup downloaded — ${backupData.totalRows} item${backupData.totalRows === 1 ? "" : "s"} exported.`,
+    );
+  };
+
+  const handleRestoreFile = async (file: File) => {
+    setRestoring(true);
+    try {
+      const text = await file.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throw new Error("That file isn't valid JSON — is it the right file?");
+      }
+      const doc = parsed as { version?: number; totalRows?: number };
+      if (doc?.version !== 1) {
+        throw new Error(
+          "That file isn't a Slate backup (or was made with a different version).",
+        );
+      }
+      const confirmed = await confirm({
+        title: "Restore this backup?",
+        message: `This will REPLACE everything currently in your workspace with the backup's ${doc.totalRows ?? "?"} items. Your current tasks, notes, products and projects will be permanently deleted.`,
+        confirmLabel: "Replace my data",
+        cancelLabel: "Cancel",
+        danger: true,
+      });
+      if (!confirmed) return;
+      await restoreBackupM({ backup: parsed });
+      toast.success("Backup restored — your workspace has been replaced.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Restore failed.");
+    } finally {
+      setRestoring(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   // ── organisation + sign-ins ────────────────────────────────────────────

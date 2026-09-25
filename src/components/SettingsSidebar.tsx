@@ -1,4 +1,4 @@
-import { Building2, GitBranch, Layers, Tags, Users } from "lucide-react";
+import { Building2, DatabaseBackup, GitBranch, Layers, Tags, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -7,7 +7,8 @@ export type SettingsSectionKey =
   | "people"
   | "team"
   | "roles"
-  | "catalog";
+  | "catalog"
+  | "data";
 
 const ITEMS: {
   key: SettingsSectionKey;
@@ -39,6 +40,12 @@ const ITEMS: {
     label: "Units & categories",
     hint: "Shared mastering data",
     icon: Layers,
+  },
+  {
+    key: "data",
+    label: "Backup & restore",
+    hint: "Export or import your data",
+    icon: DatabaseBackup,
   },
 ];
 
