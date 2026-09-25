@@ -1078,7 +1078,7 @@ export default function TasksPanel({
   const [flagFilter, setFlagFilter] = useState<FlagFilter>("all");
   const [flagSelection, setFlagSelection] = useState<FlaggedSel>(null);
   const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
-  const [flagBoardMode, setFlagBoardMode] = useState(true);
+  const [flagBoardMode, setFlagBoardMode] = useState(false);
 
   // ── reminder notifications (in-app while the app is open) ──────────
   useEffect(() => {
