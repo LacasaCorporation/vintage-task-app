@@ -80,6 +80,8 @@ const settings = defineTable({
   /** Short code shown to users so they know where to sign in, e.g. "ORG-4F7K". */
   orgCode: v.optional(v.string()),
   orgCreatedAt: v.optional(v.number()),
+  /** Ordered workflow statuses for Projects. Start and Finish are fixed. */
+  projectStatuses: v.optional(v.array(v.string())),
   members: v.array(teamMemberValidator), // every user + role + restrictions
 }).index("by_owner", ["ownerId"]);
 
@@ -278,6 +280,8 @@ const schema = defineSchema(
       isFlagged: v.optional(v.boolean()),
       // a flagged product can be checked off in the todo list
       isCompleted: v.optional(v.boolean()),
+      /** Ordered custom Projects status; Start and Finish are fixed. */
+      projectStatus: v.optional(v.string()),
       // timestamp when the product was added to the flagged todo list
       flaggedAt: v.optional(v.number()),
       // its own due date & priority on the flagged board (defaults copied
@@ -318,6 +322,8 @@ const schema = defineSchema(
       isFlagged: v.optional(v.boolean()),
       // timestamp when the job was added to the flagged todo list
       flaggedAt: v.optional(v.number()),
+      /** Ordered custom Projects status; Start and Finish are fixed. */
+      projectStatus: v.optional(v.string()),
     })
       .index("by_owner", ["ownerId"])
       .index("by_project", ["projectId"]),

@@ -3,6 +3,10 @@ import { scopeUserId } from "./org";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import {
+  PROJECT_STATUS_FINISH,
+  PROJECT_STATUS_START,
+} from "../lib/project-statuses";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -155,6 +159,28 @@ export const updateJob = mutation({
     if (patch.status !== undefined) clean.status = normalizeStatus(patch.status);
     if (patch.priority !== undefined) clean.priority = patch.priority;
     await ctx.db.patch(id, clean);
+  },
+});
+
+/** Move a job to an ordered custom Projects status. */
+export const setJobProjectStatus = mutation({
+  args: { id: v.id("projectJobs"), status: v.string() },
+  handler: async (ctx, { id, status }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const job = await ctx.db.get(id);
+    if (job === null || job.ownerId !== userId)
+      throw new Error("That job no longer exists.");
+    const clean = status.trim().replace(/\s+/g, " ");
+    if (!clean) throw new Error("Choose a status.");
+    const isFinish = clean === PROJECT_STATUS_FINISH;
+    const isStart = clean === PROJECT_STATUS_START;
+    await ctx.db.patch(id, {
+      projectStatus: clean,
+      status: isFinish ? "completed" : isStart ? "planning" : "in_progress",
+      completedAt: isFinish ? job.completedAt ?? Date.now() : undefined,
+      pausedAt: undefined,
+    });
   },
 });
 

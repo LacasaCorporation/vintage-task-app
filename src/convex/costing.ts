@@ -3,6 +3,10 @@ import { scopeUserId } from "./org";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import {
+  PROJECT_STATUS_FINISH,
+  PROJECT_STATUS_START,
+} from "../lib/project-statuses";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -927,6 +931,46 @@ export const setFgFlag = mutation({
   },
 });
 
+/** Move a product to an ordered custom Projects status. */
+export const setFgProjectStatus = mutation({
+  args: { id: v.id("finishedGoods"), status: v.string() },
+  handler: async (ctx, { id, status }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(id);
+    if (fg === null || fg.ownerId !== userId)
+      throw new Error("That product no longer exists.");
+    const clean = status.trim().replace(/\s+/g, " ");
+    if (!clean) throw new Error("Choose a status.");
+    const isFinish = clean === PROJECT_STATUS_FINISH;
+    await ctx.db.patch(id, {
+      projectStatus: clean,
+      isCompleted: isFinish || undefined,
+      completedAt: isFinish ? fg.completedAt ?? Date.now() : undefined,
+    });
+
+    const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
+    for (const jid of jobIds) {
+      const job = await ctx.db.get(jid);
+      if (job === null || job.ownerId !== userId || job.isFlagged !== true) continue;
+      const all = await ctx.db
+        .query("finishedGoods")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+      const products = all.filter(
+        (f) => f.isFlagged && (f.jobId === jid || (f.jobIds ?? []).includes(jid)),
+      );
+      if (products.length === 0) continue;
+      const everyDone = products.every((f) => f.projectStatus === PROJECT_STATUS_FINISH || f.isCompleted === true);
+      await ctx.db.patch(jid, {
+        projectStatus: everyDone ? PROJECT_STATUS_FINISH : job.projectStatus === PROJECT_STATUS_FINISH ? undefined : job.projectStatus,
+        status: everyDone ? "completed" : job.status === "completed" ? "in_progress" : job.status,
+        completedAt: everyDone ? job.completedAt ?? Date.now() : undefined,
+      });
+    }
+  },
+});
+
 /**
  * Check off (or un-check) a flagged product in the todo list.
  * When every flagged product of a job is completed, the job itself is marked
@@ -942,6 +986,7 @@ export const setFgCompleted = mutation({
       throw new Error("That product no longer exists.");
     await ctx.db.patch(id, {
       isCompleted: completed || undefined,
+      projectStatus: completed ? PROJECT_STATUS_FINISH : PROJECT_STATUS_START,
       completedAt: completed ? Date.now() : undefined,
     });
 
@@ -962,9 +1007,14 @@ export const setFgCompleted = mutation({
       if (products.length === 0) continue;
       const everyDone = products.every((f) => f.isCompleted === true);
       if (everyDone && job.status !== "completed") {
-        await ctx.db.patch(jid, { status: "completed", completedAt: Date.now() });
+        await ctx.db.patch(jid, {
+          projectStatus: PROJECT_STATUS_FINISH,
+          status: "completed",
+          completedAt: Date.now(),
+        });
       } else if (!everyDone && job.status === "completed") {
         await ctx.db.patch(jid, {
+          projectStatus: PROJECT_STATUS_START,
           status: "in_progress",
           completedAt: undefined,
         });

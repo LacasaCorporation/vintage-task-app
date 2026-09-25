@@ -48,6 +48,7 @@ import {
   Paperclip,
   Plus,
   Repeat,
+  Settings2,
   Star,
   Tag,
   Trash2,
@@ -57,6 +58,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  DEFAULT_PROJECT_STATUSES,
+  PROJECT_STATUS_FINISH,
+  PROJECT_STATUS_START,
+  projectStatusesOrDefaults,
+} from "@/lib/project-statuses";
 
 type ListId = Id<"taskLists">;
 type SortMode = "manual" | "due" | "priority" | "created";
@@ -91,7 +98,21 @@ function sortFgs(fgs: FgDoc[], mode: SortMode): FgDoc[] {
  * flagged job rows. `status` narrows by completion state.
  */
 type FlagFilter = "all" | "products" | "jobs";
-type FlagStatusFilter = "open" | "done" | "all";
+type FlagStatusFilter = "all" | string;
+
+type ProjectStatus = string;
+
+function jobProjectStatus(job: JobDoc, statuses: string[]): ProjectStatus {
+  if (job.projectStatus && statuses.includes(job.projectStatus)) return job.projectStatus;
+  if (job.status === "completed" || job.status === "cancelled") return PROJECT_STATUS_FINISH;
+  if (job.status === "in_progress" || job.status === "paused") return statuses[1] ?? PROJECT_STATUS_START;
+  return PROJECT_STATUS_START;
+}
+
+function fgProjectStatus(fg: FgDoc, statuses: string[]): ProjectStatus {
+  if (fg.projectStatus && statuses.includes(fg.projectStatus)) return fg.projectStatus;
+  return fg.isCompleted ? PROJECT_STATUS_FINISH : PROJECT_STATUS_START;
+}
 
 /** Which flagged item's detail pane is open. */
 type FlaggedSel =
@@ -121,6 +142,7 @@ function FlaggedItemsList({
   allFgs,
   showTags = false,
   statusFilter = "all",
+  projectStatuses: configuredProjectStatuses,
   productsOnly = false,
   onToggleFg,
   onToggleJob,
@@ -134,6 +156,7 @@ function FlaggedItemsList({
   allFgs: FgDoc[];
   showTags?: boolean;
   statusFilter?: FlagStatusFilter;
+  projectStatuses?: string[];
   productsOnly?: boolean;
   onToggleFg: (fg: FgDoc) => void;
   onToggleJob: (job: JobDoc) => void;
@@ -142,17 +165,21 @@ function FlaggedItemsList({
   selection?: FlaggedSel;
   onSelect?: (sel: FlaggedSel) => void;
 }) {
+  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(
+    configuredProjectStatuses ?? configuredStatusesQuery,
+  );
   const checkCls =
     "size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3";
 
   return (
     <ul className="divide-y divide-border/70">
       {/* flagged jobs: main task — their flagged products as completable subtasks */}
-      {!productsOnly && sortJobs(data.jobs, sortMode).filter((job) => matchesStatusFilter(statusFilter, job.status === "completed")).map((job) => {
+      {!productsOnly && sortJobs(data.jobs, sortMode).filter((job) => matchesStatusFilter(statusFilter ?? "all", jobProjectStatus(job, projectStatuses), job.status === "completed")).map((job) => {
         const jobProducts = allFgs
           .filter((f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id))
-          .filter((f) => matchesStatusFilter(statusFilter, f.isCompleted ?? false));
-        const done = job.status === "completed";
+          .filter((f) => matchesStatusFilter(statusFilter ?? "all", fgProjectStatus(f, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]), f.isCompleted ?? false));
+        const done = jobProjectStatus(job, projectStatuses) === PROJECT_STATUS_FINISH;
         const allFlaggedProducts = allFgs.filter(
           (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
         );
@@ -224,6 +251,7 @@ function FlaggedItemsList({
                 </span>
               )}
               <span className={tagChip}>{data.projectNameOf(job)}</span>
+              <span className={tagChip}>{jobProjectStatus(job, projectStatuses)}</span>
             </div>
             {jobProducts.length > 0 && (
               <ul className="mt-1.5 space-y-1">
@@ -268,6 +296,7 @@ function FlaggedItemsList({
                         <span className={tagChip}>{job.name}</span>
                       </>
                     )}
+                    <span className={tagChip}>{fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}</span>
                   </li>
                 ))}
               </ul>
@@ -278,7 +307,7 @@ function FlaggedItemsList({
       {/* flagged products whose job is not flagged: job shown as main, product as the completable subtask */}
       {sortFgs(
         data.fgs
-          .filter((f) => matchesStatusFilter(statusFilter, f.isCompleted ?? false))
+          .filter((f) => matchesStatusFilter(statusFilter ?? "all", fgProjectStatus(f, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]), f.isCompleted ?? false))
           .filter((f) => {
             const jobs = f.jobIds ?? (f.jobId ? [f.jobId] : []);
             return !jobs.some((jid) => data.jobs.some((j) => j._id === jid));
@@ -350,11 +379,13 @@ function FlaggedItemsList({
 /** Shared completion-status predicate for the flagged-view filters. */
 function matchesStatusFilter(
   filter: FlagStatusFilter,
+  status: string,
   isDone: boolean,
 ): boolean {
+  if (filter === "all") return true;
   if (filter === "open") return !isDone;
   if (filter === "done") return isDone;
-  return true;
+  return status === filter;
 }
 
 /**
@@ -366,6 +397,7 @@ function FlaggedProductsList({
   data,
   allJobs,
   statusFilter,
+  projectStatuses: configuredProjectStatuses,
   showTags = false,
   onToggleFg,
   busyKey,
@@ -375,7 +407,8 @@ function FlaggedProductsList({
 }: {
   data: FlaggedData;
   allJobs: JobDoc[];
-  statusFilter: FlagStatusFilter;
+  statusFilter?: FlagStatusFilter;
+  projectStatuses?: string[];
   showTags?: boolean;
   onToggleFg: (fg: FgDoc) => void;
   busyKey: string | null;
@@ -383,8 +416,12 @@ function FlaggedProductsList({
   selection?: FlaggedSel;
   onSelect?: (sel: FlaggedSel) => void;
 }) {
+  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(
+    configuredProjectStatuses ?? configuredStatusesQuery,
+  );
   const rows = sortFgs(
-    data.fgs.filter((f) => matchesStatusFilter(statusFilter, f.isCompleted ?? false)),
+    data.fgs.filter((f) => matchesStatusFilter(statusFilter ?? "all", fgProjectStatus(f, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]), f.isCompleted ?? false)),
     sortMode,
   ).map((fg) => {
     const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
@@ -397,12 +434,12 @@ function FlaggedProductsList({
       <div className="px-6 py-10 text-center">
         <Package className="mx-auto size-7 text-muted-foreground/40" />
         <p className="mt-2 text-sm font-medium">
-          {statusFilter === "done" ? "No completed products" : "No open products"}
+          {statusFilter === PROJECT_STATUS_FINISH ? "No finished products" : "No products in this status"}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           {statusFilter === "all"
             ? "Flag a product in the Projects page and it will show up here."
-            : `Switch the status filter to “${statusFilter === "open" ? "Done" : "To do"}” to see the rest.`}
+            : "Choose another status filter to see more products."}
         </p>
       </div>
     );
@@ -456,20 +493,16 @@ function FlaggedProductsList({
           )}
           {parentJob && <span className={tagChip}>{parentJob.name}</span>}
           {showTags && parentJob && <span className={tagChip}>{data.projectNameOf(parentJob)}</span>}
+          <span className={tagChip}>{fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}</span>
         </li>
       ))}
     </ul>
   );
 }
 
-/** Kanban columns for flagged work. */
-type BoardColumn = "todo" | "in_progress" | "completed";
-const BOARD_COLUMNS: { key: BoardColumn; label: string; icon: typeof Circle }[] = [
-  { key: "todo", label: "To do", icon: Circle },
-  { key: "in_progress", label: "In progress", icon: GanttChartSquare },
-  { key: "completed", label: "Completed", icon: CheckCircle2 },
-];
-type BoardCard = { kind: "fg"; fg: FgDoc; jobName?: string; project: string };
+/** Kanban columns for flagged work. The first and last statuses are fixed. */
+type BoardColumn = string;
+type BoardCard = { kind: "fg"; fg: FgDoc; jobName?: string; project: string; status: string };
 
 const BOARD_CARD =
   "group/card relative flex cursor-grab flex-col gap-1.5 rounded-xl border bg-card p-3 text-left shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing";
@@ -485,7 +518,7 @@ function BoardCardView({
   onToggleFg: (fg: FgDoc) => void;
   onOpen: (fg: FgDoc) => void;
 }) {
-  const done = card.fg.isCompleted ?? false;
+  const done = card.status === PROJECT_STATUS_FINISH;
   const busy = busyKey === `f:${card.fg._id}`;
   return (
     <motion.div layout className={BOARD_CARD}>
@@ -555,9 +588,13 @@ function BoardCardView({
             {card.fg.priority}
           </span>
         )}
-        {done && (
+        {done ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
-            <CheckCircle2 className="size-2.5" /> Completed
+            <CheckCircle2 className="size-2.5" /> Finish
+          </span>
+        ) : (
+          <span className="rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-400">
+            {card.status}
           </span>
         )}
       </div>
@@ -576,19 +613,27 @@ function FlaggedBoard({
   data,
   allJobs,
   statusFilter,
+  projectStatuses: configuredProjectStatuses,
   onToggleFg,
+  onSetStatus = () => undefined,
   busyKey,
   onOpenFg,
   projectNameOf,
 }: {
   data: FlaggedData;
   allJobs: JobDoc[];
-  statusFilter: FlagStatusFilter;
+  statusFilter?: FlagStatusFilter;
+  projectStatuses?: string[];
   onToggleFg: (fg: FgDoc) => void;
+  onSetStatus?: (fg: FgDoc, status: string) => void;
   busyKey: string | null;
   onOpenFg: (fg: FgDoc) => void;
   projectNameOf: (job: JobDoc) => string;
 }) {
+  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(
+    configuredProjectStatuses ?? configuredStatusesQuery,
+  );
   const [dragging, setDragging] = useState<Id<"finishedGoods"> | null>(null);
 
   const productCards: BoardCard[] = data.fgs.map((fg) => {
@@ -599,79 +644,60 @@ function FlaggedBoard({
       fg,
       jobName: parentJob?.name,
       project: parentJob ? projectNameOf(parentJob) : (fg.projectName ?? "Standalone"),
+      status: fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]),
     };
   });
 
   const fgsByCol = (col: BoardColumn) =>
-    productCards.filter((c) =>
-      col === "completed"
-        ? c.fg.isCompleted === true
-        : col === "in_progress"
-          ? false
-          : c.fg.isCompleted !== true,
-    );
+    productCards.filter((c) => c.status === col);
 
   const colCards = (col: BoardColumn): BoardCard[] =>
     fgsByCol(col).filter((c) =>
-      matchesStatusFilter(statusFilter, c.fg.isCompleted ?? false),
+      matchesStatusFilter(statusFilter ?? "all", c.status, c.fg.isCompleted ?? false),
     );
-
-  const colCounts: Record<BoardColumn, number> = {
-    todo: colCards("todo").length,
-    in_progress: colCards("in_progress").length,
-    completed: colCards("completed").length,
-  };
 
   const handleDrop = (col: BoardColumn) => {
     if (!dragging) return;
     const card = productCards.find((c) => c.fg._id === dragging);
-    if (card && ((card.fg.isCompleted ?? false) !== (col === "completed"))) {
-      onToggleFg(card.fg);
-    }
+    if (card && card.status !== col) onSetStatus(card.fg, col);
     setDragging(null);
   };
 
   return (
-    <div className="grid gap-3 md:grid-cols-3">
-      {BOARD_COLUMNS.map((col) => {
-        const cards = colCards(col.key);
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {(projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]).map((col) => {
+        const cards = colCards(col);
         const droppable =
           dragging !== null &&
-          col.key !== "in_progress" &&
-          ((productCards.find((c) => c.fg._id === dragging)?.fg.isCompleted ?? false) !==
-            (col.key === "completed"));
+          productCards.find((c) => c.fg._id === dragging)?.status !== col;
         return (
           <section
-            key={col.key}
+            key={col}
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleDrop(col.key);
-            }}
+            }}              onDrop={(e) => {
+                e.preventDefault();
+                handleDrop(col);
+              }}
             className={cn(
               "flex min-h-56 flex-col rounded-2xl border bg-muted/30 shadow-sm transition-colors",
               droppable && "border-primary/50 bg-primary/[0.04] ring-2 ring-primary/20",
             )}
           >
             <header className="flex items-center gap-2 border-b border-border/60 px-3.5 py-2.5">
-              <col.icon
-                className={cn(
-                  "size-4",
-                  col.key === "completed"
-                    ? "text-emerald-500"
-                    : col.key === "in_progress"
-                      ? "text-sky-500"
-                      : "text-muted-foreground",
-                )}
-              />
+              {col === PROJECT_STATUS_FINISH ? (
+                <CheckCircle2 className="size-4 text-emerald-500" />
+              ) : col === PROJECT_STATUS_START ? (
+                <Circle className="size-4 text-muted-foreground" />
+              ) : (
+                <GanttChartSquare className="size-4 text-sky-500" />
+              )}
               <h3 className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-                {col.label}
+                {col}
               </h3>
               <span className="ml-auto rounded-full bg-background px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground shadow-sm">
-                {colCounts[col.key]}
+                {cards.length}
               </span>
             </header>
             <div className="flex-1 space-y-2 overflow-y-auto p-2">
@@ -760,6 +786,10 @@ function FlaggedDetail({
 }) {
   const updateJobM = useMutation(api.jobs.updateJob);
   const updateFgM = useMutation(api.costing.updateFinishedGood);
+  const setJobProjectStatusM = useMutation(api.jobs.setJobProjectStatus);
+  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
+  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(configuredStatusesQuery);
   const [busy, setBusy] = useState(false);
 
   const job = selection.kind === "job" ? jobs.find((j) => j._id === selection.id) ?? null : null;
@@ -916,15 +946,12 @@ function FlaggedDetail({
 
                 <DetailRow icon={Briefcase} label="Status">
                   <select
-                    value={job.status ?? "planning"}
-                    onChange={(e) => void patchJob({ status: e.target.value })}
+                    value={jobProjectStatus(job, projectStatuses)}
+                    onChange={(e) => void setJobProjectStatusM({ id: job._id, status: e.target.value })}
+                    disabled={busy}
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                   >
-                    <option value="planning">Planning</option>
-                    <option value="in_progress">In progress</option>
-                    <option value="paused">Paused</option>
-                    <option value="completed">Completed</option>
-                    <option value="cancelled">Cancelled</option>
+                    {projectStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
                   </select>
                 </DetailRow>
 
@@ -1010,6 +1037,17 @@ function FlaggedDetail({
                   </div>
                 </DetailRow>
 
+                <DetailRow icon={Flag} label="Status">
+                  <select
+                    value={fgProjectStatus(fg, projectStatuses)}
+                    onChange={(e) => void setFgProjectStatusM({ id: fg._id, status: e.target.value })}
+                    disabled={busy}
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    {projectStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                </DetailRow>
+
                 <DetailRow icon={Tag} label="Unit">
                   <input
                     value={fg.unit ?? ""}
@@ -1082,7 +1120,12 @@ export default function TasksPanel({
   const flaggedFgs = useQuery(api.costing.listFinishedGoods);
   const flaggedProjects = useQuery(api.costing.listProjects);
   const setFgCompletedM = useMutation(api.costing.setFgCompleted);
+  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
+  const setJobProjectStatusM = useMutation(api.jobs.setJobProjectStatus);
   const updateJobM = useMutation(api.jobs.updateJob);
+  const projectStatusesQuery = useQuery(api.settings.listProjectStatuses);
+  const setProjectStatusesM = useMutation(api.settings.setProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(projectStatusesQuery);
   const [flaggedBusy, setFlaggedBusy] = useState<string | null>(null);
 
   const [draft, setDraft] = useState("");
@@ -1097,6 +1140,8 @@ export default function TasksPanel({
   const [flagSelection, setFlagSelection] = useState<FlaggedSel>(null);
   const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
   const [flagBoardMode, setFlagBoardMode] = useState(false);
+  const [statusSettingsOpen, setStatusSettingsOpen] = useState(false);
+  const [statusDraft, setStatusDraft] = useState<string[] | null>(null);
 
   // Projects should always open as a list when selected from the sidebar.
   useEffect(() => {
@@ -1230,6 +1275,40 @@ export default function TasksPanel({
   };
 
   /** Check off (or reopen) a flagged product in the todo list. */
+  const handleSetFlaggedFgStatus = async (fg: FgDoc, status: string) => {
+    setFlaggedBusy(`f:${fg._id}`);
+    try {
+      await setFgProjectStatusM({ id: fg._id, status });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the product status.");
+    } finally {
+      setFlaggedBusy(null);
+    }
+  };
+
+  const handleSetFlaggedJobStatus = async (job: JobDoc, status: string) => {
+    setFlaggedBusy(`j:${job._id}`);
+    try {
+      await setJobProjectStatusM({ id: job._id, status });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the job status.");
+    } finally {
+      setFlaggedBusy(null);
+    }
+  };
+
+  const saveProjectStatuses = async () => {
+    if (statusDraft === null) return;
+    try {
+      await setProjectStatusesM({ statuses: statusDraft });
+      setStatusDraft(null);
+      setStatusSettingsOpen(false);
+      toast.success("Projects statuses updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update statuses.");
+    }
+  };
+
   const handleToggleFlaggedFg = async (fg: FgDoc) => {
     setFlaggedBusy(`f:${fg._id}`);
     try {
@@ -1254,11 +1333,12 @@ export default function TasksPanel({
     if (!allDone) return;
     setFlaggedBusy(`j:${job._id}`);
     try {
-      if (job.status === "completed") {
-        await updateJobM({ id: job._id, status: "in_progress" });
-      } else {
-        await updateJobM({ id: job._id, status: "completed" });
-      }
+      await setJobProjectStatusM({
+        id: job._id,
+        status: jobProjectStatus(job, projectStatuses) === PROJECT_STATUS_FINISH
+          ? PROJECT_STATUS_START
+          : PROJECT_STATUS_FINISH,
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the job.");
     } finally {
@@ -1442,28 +1522,89 @@ export default function TasksPanel({
                 </button>
               ))}
               <span className="mx-1 h-4 w-px bg-border" />
-              {(
-                [
-                  ["open", "To do"],
-                  ["done", "Done"],
-                  ["all", "Any status"],
-                ] as [FlagStatusFilter, string][]
-              ).map(([mode, label]) => (
+              <button
+                type="button"
+                onClick={() => setFlagStatus("all")}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 transition-colors",
+                  flagStatus === "all"
+                    ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400"
+                    : "border-border bg-card hover:bg-accent hover:text-foreground",
+                )}
+              >
+                Any status
+              </button>
+              {projectStatuses.map((status) => (
                 <button
-                  key={mode}
+                  key={status}
                   type="button"
-                  onClick={() => setFlagStatus(mode)}
+                  onClick={() => setFlagStatus(status)}
                   className={cn(
                     "rounded-full border px-2.5 py-1 transition-colors",
-                    flagStatus === mode
+                    flagStatus === status
                       ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400"
                       : "border-border bg-card hover:bg-accent hover:text-foreground",
                   )}
                 >
-                  {label}
+                  {status}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusDraft(projectStatuses);
+                  setStatusSettingsOpen((open) => !open);
+                }}
+                className="ml-1 inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 px-2.5 py-1 text-primary transition-colors hover:bg-primary/10"
+                title="Customize Projects statuses"
+              >
+                <Settings2 className="size-3" /> Custom status
+              </button>
             </div>
+            {statusSettingsOpen && statusDraft !== null && (
+              <div className="mx-3 mb-2 rounded-xl border bg-card p-3 shadow-sm">
+                <div className="mb-2 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold">Custom Projects statuses</p>
+                    <p className="text-[11px] text-muted-foreground">Start and Finish stay fixed.</p>
+                  </div>
+                  <button type="button" onClick={() => setStatusSettingsOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close status settings">
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <div className="space-y-1.5">
+                  {statusDraft.map((status, index) => {
+                    const locked = index === 0 || index === statusDraft.length - 1;
+                    return (
+                      <div key={`${index}-${status}`} className="flex items-center gap-1.5">
+                        <Input
+                          value={status}
+                          disabled={locked}
+                          onChange={(e) => setStatusDraft((current) => current?.map((item, i) => i === index ? e.target.value : item) ?? null)}
+                          className="h-8 text-xs"
+                        />
+                        {!locked && (
+                          <button type="button" onClick={() => setStatusDraft((current) => current?.filter((_, i) => i !== index) ?? null)} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`Remove ${status}`}>
+                            <X className="size-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 flex justify-between">
+                  <button
+                    type="button"
+                    disabled={statusDraft.length >= 11}
+                    onClick={() => setStatusDraft((current) => current ? [...current.slice(0, -1), "", "Finish"] : null)}
+                    className="inline-flex items-center gap-1 text-xs text-primary disabled:opacity-40"
+                  >
+                    <Plus className="size-3" /> Add middle status
+                  </button>
+                  <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => void saveProjectStatuses()}>Save</Button>
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-1">
               <button
                 type="button"

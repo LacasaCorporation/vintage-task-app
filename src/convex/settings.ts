@@ -10,6 +10,10 @@ import type {
   SectionKey,
 } from "../lib/permissions";
 import { ACTIONS, ITEMS, SECTIONS } from "../lib/permissions";
+import {
+  cleanProjectStatuses,
+  projectStatusesOrDefaults,
+} from "../lib/project-statuses";
 
 /**
  * Workspace roles:
@@ -192,9 +196,31 @@ function mergePerms(
   }
   if (Object.keys(items).length > 0) out.items = items;
   return Object.keys(out).length > 0 ? out : undefined;
-}
+}// ── Queries ─────────────────────────────────────────────────────────────
 
-// ── Queries ─────────────────────────────────────────────────────────────
+/** Ordered statuses used by the Projects list and board. */
+export const listProjectStatuses = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return projectStatusesOrDefaults(undefined);
+    const settingsDoc = await getSettings(ctx, userId);
+    return projectStatusesOrDefaults(settingsDoc?.projectStatuses);
+  },
+});
+
+/** Save the ordered Projects status workflow. Start and Finish cannot change. */
+export const setProjectStatuses = mutation({
+  args: { statuses: v.array(v.string()) },
+  handler: async (ctx, { statuses }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const settingsDoc = await getOrCreateSettings(ctx, userId);
+    const cleaned = cleanProjectStatuses(statuses);
+    await ctx.db.patch(settingsDoc._id, { projectStatuses: cleaned });
+    return cleaned;
+  },
+});
 
 /**
  * Claim any pending invite for the caller's email and register them as a
