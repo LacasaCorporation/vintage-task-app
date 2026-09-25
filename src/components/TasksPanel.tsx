@@ -24,6 +24,7 @@ import {
   isOverdue,
   parseAttachments,
   parseQuickAdd,
+  toLocalInput,
 } from "@/lib/task-utils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -48,7 +49,9 @@ import {
   Plus,
   Repeat,
   Star,
+  Tag,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -62,6 +65,26 @@ type FgDoc = Doc<"finishedGoods">;
 
 const PRIORITY_RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
 
+/** Sort flagged jobs like the main todo list (custom/due/priority/newest). */
+function sortJobs(jobs: JobDoc[], mode: SortMode): JobDoc[] {
+  const out = [...jobs];
+  if (mode === "due") out.sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
+  else if (mode === "priority")
+    out.sort(
+      (a, b) => PRIORITY_RANK[a.priority ?? "low"] - PRIORITY_RANK[b.priority ?? "low"],
+    );
+  else if (mode === "created") out.sort((a, b) => b._creationTime - a._creationTime);
+  return out;
+}
+
+/** Products have no due date/priority, so those modes fall back to name order. */
+function sortFgs(fgs: FgDoc[], mode: SortMode): FgDoc[] {
+  const out = [...fgs];
+  if (mode === "created") out.sort((a, b) => b._creationTime - a._creationTime);
+  else if (mode !== "manual") out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+
 /**
  * Flagged view filter: "all" = everything (jobs as parents + their products as
  * subtasks), "products" = only the flagged product cards (flat), "jobs" = only
@@ -69,6 +92,12 @@ const PRIORITY_RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
  */
 type FlagFilter = "all" | "products" | "jobs";
 type FlagStatusFilter = "open" | "done" | "all";
+
+/** Which flagged item's detail pane is open. */
+type FlaggedSel =
+  | { kind: "job"; id: Id<"projectJobs"> }
+  | { kind: "fg"; id: Id<"finishedGoods"> }
+  | null;
 
 /** Wider chip shared by the flagged-view filter bar and cards. */
 const tagChip =
@@ -96,6 +125,9 @@ function FlaggedItemsList({
   onToggleFg,
   onToggleJob,
   busyKey,
+  sortMode = "manual",
+  selection,
+  onSelect,
 }: {
   data: FlaggedData;
   allJobs: JobDoc[];
@@ -106,6 +138,9 @@ function FlaggedItemsList({
   onToggleFg: (fg: FgDoc) => void;
   onToggleJob: (job: JobDoc) => void;
   busyKey: string | null;
+  sortMode?: SortMode;
+  selection?: FlaggedSel;
+  onSelect?: (sel: FlaggedSel) => void;
 }) {
   const checkCls =
     "size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3";
@@ -113,7 +148,7 @@ function FlaggedItemsList({
   return (
     <ul className="divide-y divide-border/70">
       {/* flagged jobs: main task — their flagged products as completable subtasks */}
-      {!productsOnly && data.jobs.filter((job) => matchesStatusFilter(statusFilter, job.status === "completed")).map((job) => {
+      {!productsOnly && sortJobs(data.jobs, sortMode).filter((job) => matchesStatusFilter(statusFilter, job.status === "completed")).map((job) => {
         const jobProducts = allFgs
           .filter((f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id))
           .filter((f) => matchesStatusFilter(statusFilter, f.isCompleted ?? false));
@@ -126,8 +161,21 @@ function FlaggedItemsList({
           allFlaggedProducts.every((f) => f.isCompleted);
         const disabled = busyKey !== null || (!done && !allProductsDone);
         return (
-          <li key={job._id} className={cn("px-4 py-3", done && "opacity-60")}>
+          <li
+            key={job._id}
+            className={cn(
+              "px-4 py-3 transition-colors",
+              done && "opacity-60",
+              selection?.kind === "job" && selection.id === job._id && "bg-primary/[0.04]",
+            )}
+          >
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onSelect?.({ kind: "job", id: job._id })}
+                className="min-w-0 flex-1 basis-full cursor-pointer truncate text-left"
+                title="Open details"
+              >
               <Checkbox
                 checked={done}
                 disabled={disabled}
@@ -153,14 +201,15 @@ function FlaggedItemsList({
                 )}
               />
               <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
-              <span
-                className={cn(
-                  "min-w-0 flex-1 truncate text-sm font-medium",
-                  done && "text-muted-foreground line-through",
-                )}
-              >
-                {job.name}
-              </span>
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-sm font-medium",
+                    done && "text-muted-foreground line-through",
+                  )}
+                >
+                  {job.name}
+                </span>
+              </button>
               {jobProducts.length > 0 && (
                 <span
                   className={cn(
@@ -181,7 +230,10 @@ function FlaggedItemsList({
                 {jobProducts.map((fg) => (
                   <li
                     key={fg._id}
-                    className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs"
+                    className={cn(
+                      "flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs transition-colors",
+                      selection?.kind === "fg" && selection.id === fg._id && "bg-primary/10",
+                    )}
                   >
                     <Checkbox
                       checked={fg.isCompleted ?? false}
@@ -195,14 +247,16 @@ function FlaggedItemsList({
                       className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
                     />
                     <Package className="size-3 shrink-0 text-sky-500/70" />
-                    <span
+                    <button
+                      type="button"
+                      onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
                       className={cn(
-                        "min-w-0 flex-1 truncate",
+                        "min-w-0 flex-1 cursor-pointer truncate text-left",
                         fg.isCompleted && "text-muted-foreground line-through",
                       )}
                     >
                       {fg.name}
-                    </span>
+                    </button>
                     {fg.code && (
                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                         {fg.code}
@@ -222,17 +276,26 @@ function FlaggedItemsList({
         );
       })}
       {/* flagged products whose job is not flagged: job shown as main, product as the completable subtask */}
-      {data.fgs
-        .filter((f) => matchesStatusFilter(statusFilter, f.isCompleted ?? false))
-        .filter((f) => {
-          const jobs = f.jobIds ?? (f.jobId ? [f.jobId] : []);
-          return !jobs.some((jid) => data.jobs.some((j) => j._id === jid));
-        })
-        .map((fg) => {
+      {sortFgs(
+        data.fgs
+          .filter((f) => matchesStatusFilter(statusFilter, f.isCompleted ?? false))
+          .filter((f) => {
+            const jobs = f.jobIds ?? (f.jobId ? [f.jobId] : []);
+            return !jobs.some((jid) => data.jobs.some((j) => j._id === jid));
+          }),
+        sortMode,
+      ).map((fg) => {
           const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
           const parentJob = allJobs.find((j) => jobIds.includes(j._id));
           return (
-            <li key={fg._id} className={cn("px-4 py-3", fg.isCompleted && "opacity-60")}>
+            <li
+              key={fg._id}
+              className={cn(
+                "px-4 py-3 transition-colors",
+                fg.isCompleted && "opacity-60",
+                selection?.kind === "fg" && selection.id === fg._id && "bg-primary/[0.04]",
+              )}
+            >
               <div className="flex flex-wrap items-center gap-2">
                 {parentJob ? (
                   <>
@@ -261,14 +324,16 @@ function FlaggedItemsList({
                   className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
                 />
                 <Package className="size-3 shrink-0 text-sky-500/70" />
-                <span
+                <button
+                  type="button"
+                  onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
                   className={cn(
-                    "min-w-0 flex-1 truncate font-medium",
+                    "min-w-0 flex-1 cursor-pointer truncate text-left font-medium",
                     fg.isCompleted && "text-muted-foreground line-through",
                   )}
                 >
                   {fg.name}
-                </span>
+                </button>
                 {fg.code && (
                   <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                     {fg.code}
@@ -304,6 +369,9 @@ function FlaggedProductsList({
   showTags = false,
   onToggleFg,
   busyKey,
+  sortMode = "manual",
+  selection,
+  onSelect,
 }: {
   data: FlaggedData;
   allJobs: JobDoc[];
@@ -311,14 +379,18 @@ function FlaggedProductsList({
   showTags?: boolean;
   onToggleFg: (fg: FgDoc) => void;
   busyKey: string | null;
+  sortMode?: SortMode;
+  selection?: FlaggedSel;
+  onSelect?: (sel: FlaggedSel) => void;
 }) {
-  const rows = data.fgs
-    .filter((f) => matchesStatusFilter(statusFilter, f.isCompleted ?? false))
-    .map((fg) => {
-      const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
-      const parentJob = allJobs.find((j) => jobIds.includes(j._id));
-      return { fg, parentJob };
-    });
+  const rows = sortFgs(
+    data.fgs.filter((f) => matchesStatusFilter(statusFilter, f.isCompleted ?? false)),
+    sortMode,
+  ).map((fg) => {
+    const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
+    const parentJob = allJobs.find((j) => jobIds.includes(j._id));
+    return { fg, parentJob };
+  });
 
   if (rows.length === 0) {
     return (
@@ -342,8 +414,9 @@ function FlaggedProductsList({
         <li
           key={fg._id}
           className={cn(
-            "flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm",
+            "flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm transition-colors",
             fg.isCompleted && "opacity-60",
+            selection?.kind === "fg" && selection.id === fg._id && "bg-primary/[0.04]",
           )}
         >
           <Checkbox
@@ -366,14 +439,16 @@ function FlaggedProductsList({
             )}
           />
           <Package className="size-3.5 shrink-0 text-sky-500/80" />
-          <span
+          <button
+            type="button"
+            onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
             className={cn(
-              "min-w-0 flex-1 truncate font-medium",
+              "min-w-0 flex-1 cursor-pointer truncate text-left font-medium",
               fg.isCompleted && "text-muted-foreground line-through",
             )}
           >
             {fg.name}
-          </span>
+          </button>
           {fg.code && (
             <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
               {fg.code}
@@ -726,6 +801,256 @@ function FlaggedBoard({
   }
 }
 
+
+/** Detail-pane row: icon + label + content, like TaskDetail's rows. */
+function DetailRow({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: typeof CalendarDays;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-2.5 px-1 py-1.5">
+      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          {label}
+        </p>
+        <div className="mt-1">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+const chipBase =
+  "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors";
+/**
+ * Right-side detail pane for a flagged job or product — mirrors TaskDetail's
+ * layout (header + rows) so the flagged list behaves like the todo list.
+ */
+function FlaggedDetail({
+  selection,
+  jobs,
+  fgs,
+  projects,
+  onClose,
+}: {
+  selection: NonNullable<FlaggedSel>;
+  jobs: JobDoc[];
+  fgs: FgDoc[];
+  projects: Doc<"projects">[];
+  onClose: () => void;
+}) {
+  const updateJobM = useMutation(api.jobs.updateJob);
+  const updateFgM = useMutation(api.costing.updateFinishedGood);
+  const [busy, setBusy] = useState(false);
+
+  const job = selection.kind === "job" ? jobs.find((j) => j._id === selection.id) ?? null : null;
+  const fg = selection.kind === "fg" ? fgs.find((f) => f._id === selection.id) ?? null : null;
+  const project =
+    job !== null
+      ? (projects.find((pp) => pp._id === job.projectId) ?? null)
+      : fg !== null
+        ? (projects.find((pp) => pp.name === fg.projectName) ?? null)
+        : null;
+
+  if (job === null && fg === null) {
+    return (
+      <aside className="w-full shrink-0 border-border/60 lg:w-80 lg:border-l">
+        <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+          <p className="text-sm font-semibold">Details</p>
+          <button
+            type="button"
+            aria-label="Close details"
+            onClick={onClose}
+            className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <p className="px-4 py-6 text-sm text-muted-foreground">This item no longer exists.</p>
+      </aside>
+    );
+  }
+
+  const patchJob = async (patch: Record<string, unknown>) => {
+    if (job === null) return;
+    setBusy(true);
+    try {
+      await updateJobM({ id: job._id, ...patch } as never);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't save.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const patchFg = async (patch: Record<string, unknown>) => {
+    if (fg === null) return;
+    setBusy(true);
+    try {
+      await updateFgM({ id: fg._id, ...patch } as never);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't save.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const chipBase =
+    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors";
+  const prioChip: Record<string, string> = {
+    high: "bg-rose-500/10 text-rose-700 dark:text-rose-400",
+    medium: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    low: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
+  };
+
+  return (
+    <aside className="w-full shrink-0 border-border/60 lg:w-80 lg:border-l">
+      <div className="flex h-full flex-col">
+        {/* header */}
+        <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
+          <p className="text-sm font-semibold">
+            {job !== null ? "Job details" : "Product details"}
+          </p>
+          <button
+            type="button"
+            aria-label="Close details"
+            title="Close"
+            onClick={onClose}
+            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {job !== null ? (
+            <>
+              <input
+                value={job.name}
+                onChange={(e) => void patchJob({ name: e.target.value })}
+                className="w-full bg-transparent text-[15px] font-medium outline-none"
+              />
+              {project && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  <Briefcase className="mr-1 inline size-3 text-sky-500/80" />
+                  {project.name}
+                  {job.code ? ` · ${job.code}` : ""}
+                </p>
+              )}
+
+              <div className="mt-4">
+                <DetailRow icon={CalendarDays} label="Due date">
+                  <input
+                    type="datetime-local"
+                    value={job.dueAt !== undefined ? toLocalInput(new Date(job.dueAt)) : ""}
+                    onChange={(e) =>
+                      void patchJob({
+                        dueAt: e.target.value ? new Date(e.target.value).getTime() : undefined,
+                      })
+                    }
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  {job.dueAt !== undefined && (
+                    <p className={cn("mt-1 text-xs", isOverdue({ dueAt: job.dueAt, isCompleted: false } as never) ? "font-medium text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>
+                      {formatDueLabel(job.dueAt)}
+                    </p>
+                  )}
+                </DetailRow>
+
+                <DetailRow icon={Flag} label="Priority">
+                  <div className="flex flex-wrap gap-1.5">
+                    {(["high", "medium", "low"] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        disabled={busy}
+                        className={cn(
+                          chipBase,
+                          job.priority === p
+                            ? `${prioChip[p]} border-transparent`
+                            : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                        )}
+                        onClick={() => void patchJob({ priority: job.priority === p ? undefined : p })}
+                      >
+                        <span className={cn("mr-1 inline-block size-1.5 rounded-full", PRIORITY_META[p].dot)} />
+                        {p[0]!.toUpperCase() + p.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </DetailRow>
+
+                <DetailRow icon={Briefcase} label="Status">
+                  <select
+                    value={job.status ?? "planning"}
+                    onChange={(e) => void patchJob({ status: e.target.value })}
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  >
+                    <option value="planning">Planning</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="paused">Paused</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </DetailRow>
+
+                <DetailRow icon={FileText} label="Notes">
+                  <textarea
+                    value={job.description ?? ""}
+                    onChange={(e) => void patchJob({ description: e.target.value })}
+                    rows={3}
+                    placeholder="Add notes…"
+                    className="w-full resize-y rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </DetailRow>
+              </div>
+            </>
+          ) : fg !== null ? (
+            <>
+              <input
+                value={fg.name}
+                onChange={(e) => void patchFg({ name: e.target.value })}
+                className="w-full bg-transparent text-[15px] font-medium outline-none"
+              />
+              {fg.code && (
+                <p className="mt-1 font-mono text-xs text-muted-foreground">
+                  <Package className="mr-1 inline size-3 text-violet-500/80" />
+                  {fg.code}
+                </p>
+              )}
+
+              <div className="mt-4">
+                <DetailRow icon={Tag} label="Unit">
+                  <input
+                    value={fg.unit ?? ""}
+                    onChange={(e) => void patchFg({ unit: e.target.value })}
+                    placeholder="e.g. pcs"
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </DetailRow>
+
+                <DetailRow icon={FileText} label="Note">
+                  <textarea
+                    value={fg.note ?? ""}
+                    onChange={(e) => void patchFg({ note: e.target.value })}
+                    rows={3}
+                    placeholder="Add a note…"
+                    className="w-full resize-y rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </DetailRow>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 const PRIORITY_META: Record<Priority, { dot: string; chip: string }> = {
   high: { dot: "bg-rose-500", chip: "bg-rose-500/10 text-rose-700 dark:text-rose-400" },
   medium: { dot: "bg-amber-500", chip: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
@@ -783,6 +1108,7 @@ export default function TasksPanel({
   // Flagged view: scope filter (all / products / jobs), completion filter and
   // list-vs-board presentation.
   const [flagFilter, setFlagFilter] = useState<FlagFilter>("all");
+  const [flagSelection, setFlagSelection] = useState<FlaggedSel>(null);
   const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
   const [flagBoardMode, setFlagBoardMode] = useState(false);
 
@@ -1129,6 +1455,7 @@ export default function TasksPanel({
 
       {/* ── Flagged jobs & products (from Projects) ─────────────────── */}
       {activeView === "flagged" && (
+        <>
         <section className="mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm">
           {/* filter bar: scope, status, and list/board presentation */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
@@ -1240,8 +1567,11 @@ export default function TasksPanel({
               data={flaggedItems}
               allJobs={flaggedJobs ?? []}
               statusFilter={flagStatus}
-            onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
+              onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
               busyKey={flaggedBusy}
+              sortMode={sortMode}
+              selection={flagSelection}
+              onSelect={setFlagSelection}
             />
           ) : (
             <FlaggedItemsList
@@ -1253,9 +1583,24 @@ export default function TasksPanel({
               onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
               onToggleJob={(job) => void handleToggleFlaggedJob(job)}
               busyKey={flaggedBusy}
+              sortMode={sortMode}
+              selection={flagSelection}
+              onSelect={setFlagSelection}
             />
           )}
         </section>
+        {flagSelection && flaggedJobs !== undefined && flaggedFgs !== undefined && (
+          <div className="mt-3">
+            <FlaggedDetail
+              selection={flagSelection}
+              jobs={flaggedJobs}
+              fgs={flaggedFgs}
+              projects={flaggedProjects ?? []}
+              onClose={() => setFlagSelection(null)}
+            />
+          </div>
+        )}
+        </>
       )}
 
       {/* ── Task list ───────────────────────────────────────────────── */}
@@ -1287,6 +1632,9 @@ export default function TasksPanel({
                   onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
                   onToggleJob={(job) => void handleToggleFlaggedJob(job)}
                   busyKey={flaggedBusy}
+                  sortMode={sortMode}
+                  selection={flagSelection}
+                  onSelect={setFlagSelection}
                 />
               </div>
             )}
