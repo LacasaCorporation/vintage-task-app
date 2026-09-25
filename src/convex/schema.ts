@@ -278,6 +278,10 @@ const schema = defineSchema(
       isFlagged: v.optional(v.boolean()),
       // a flagged product can be checked off in the todo list
       isCompleted: v.optional(v.boolean()),
+      // its own due date & priority on the flagged board (defaults copied
+      // from the parent job when the product is flagged)
+      dueAt: v.optional(v.number()),
+      priority: v.optional(taskPriorityValidator),
       completedAt: v.optional(v.number()),
     }).index("by_owner", ["ownerId"]),
 
@@ -301,6 +305,10 @@ const schema = defineSchema(
         ),
       ),
       priority: v.optional(taskPriorityValidator),
+      // snapshot of the job's due date/priority at flag time — products
+      // inherit these so their board cards and details start in sync
+      fgDueAt: v.optional(v.number()),
+      fgPriority: v.optional(taskPriorityValidator),
       startedAt: v.optional(v.number()), // when work first started
       pausedAt: v.optional(v.number()), // when it was last paused
       completedAt: v.optional(v.number()), // when it was completed

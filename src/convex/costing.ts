@@ -772,6 +772,10 @@ export const updateFinishedGood = mutation({
     note: v.optional(v.string()),
     currency: v.optional(v.string()),
     markupPct: v.optional(v.number()),
+    dueAt: v.optional(v.number()), // per-product due date (flagged board)
+    priority: v.optional(
+      v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+    ),
   },
   handler: async (ctx, { id, ...patch }) => {
     const userId = await scopeUserId(ctx);
@@ -904,8 +908,14 @@ export const setFgFlag = mutation({
       throw new Error("Attach the product to a job before flagging it.");
     await ctx.db.patch(id, { isFlagged: flagged || undefined });
     if (flagged) {
-      // cascade up: the job of a flagged product is flagged as well
+      // inherit due date & priority from the parent job at flag time
       const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
+      const parent = jobIds.length > 0 ? await ctx.db.get(jobIds[0]!) : null;
+      if (fg.dueAt === undefined && parent?.dueAt !== undefined)
+        await ctx.db.patch(id, { dueAt: parent.dueAt });
+      if (fg.priority === undefined && parent?.priority !== undefined)
+        await ctx.db.patch(id, { priority: parent.priority });
+      // cascade up: the job of a flagged product is flagged as well
       for (const jid of jobIds) {
         const job = await ctx.db.get(jid);
         if (job !== null && job.ownerId === userId && job.isFlagged !== true) {

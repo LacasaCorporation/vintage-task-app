@@ -469,9 +469,7 @@ const BOARD_COLUMNS: { key: BoardColumn; label: string; icon: typeof Circle }[] 
   { key: "in_progress", label: "In progress", icon: GanttChartSquare },
   { key: "completed", label: "Completed", icon: CheckCircle2 },
 ];
-type BoardCard =
-  | { kind: "job"; job: JobDoc; project: string }
-  | { kind: "fg"; fg: FgDoc; jobName?: string; project: string };
+type BoardCard = { kind: "fg"; fg: FgDoc; jobName?: string; project: string };
 
 const BOARD_CARD =
   "group/card relative flex cursor-grab flex-col gap-1.5 rounded-xl border bg-card p-3 text-left shadow-sm transition-shadow hover:shadow-md active:cursor-grabbing";
@@ -480,125 +478,89 @@ function BoardCardView({
   card,
   busyKey,
   onToggleFg,
-  onSetJobStatus,
+  onOpen,
 }: {
   card: BoardCard;
   busyKey: string | null;
   onToggleFg: (fg: FgDoc) => void;
-  onSetJobStatus: (job: JobDoc, status: BoardColumn) => void;
+  onOpen: (fg: FgDoc) => void;
 }) {
-  const isJob = card.kind === "job";
-  const done = isJob ? card.job.status === "completed" : (card.fg.isCompleted ?? false);
-  const busy =
-    busyKey === (isJob ? `j:${card.job._id}` : `f:${card.fg._id}`);
+  const done = card.fg.isCompleted ?? false;
+  const busy = busyKey === `f:${card.fg._id}`;
   return (
     <motion.div layout className={BOARD_CARD}>
       <span
         aria-hidden
-        className={cn(
-          "absolute inset-x-0 top-0 h-0.5 rounded-t-xl",
-          isJob ? "bg-sky-500/70" : "bg-violet-500/70",
-        )}
+        className="absolute inset-x-0 top-0 h-0.5 rounded-t-xl bg-violet-500/70"
       />
       <div className="flex items-start gap-1.5">
         <GripVertical className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/40 transition-colors group-hover/card:text-muted-foreground/70" />
-        <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={() => onOpen(card.fg)}
+          className="min-w-0 flex-1 cursor-pointer text-left"
+          title="Open details"
+        >
           <p
             className={cn(
               "truncate text-sm font-medium leading-snug",
               done && "text-muted-foreground line-through",
             )}
           >
-            {isJob ? card.job.name : card.fg.name}
+            {card.fg.name}
           </p>
           <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-muted-foreground">
-            {isJob ? (
-              <>
-                <Briefcase className="size-2.5 text-sky-500/80" /> Job
-              </>
-            ) : (
-              <>
-                <Package className="size-2.5 text-violet-500/80" />
-                {card.jobName ?? "Product"}
-              </>
-            )}
+            <Package className="size-2.5 text-violet-500/80" />
+            {card.jobName ?? "Product"}
             <span className="text-muted-foreground/50">·</span>
             <span className="truncate">{card.project}</span>
           </p>
-        </div>
-        {isJob ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={`Move job “${card.job.name}”`}
-                disabled={busy}
-                className="-mr-1 -mt-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent focus-visible:opacity-100 group-hover/card:opacity-100"
-              >
-                {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Columns3 className="size-3.5" />}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-40">
-              <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-                Move job to
-              </DropdownMenuLabel>
-              {BOARD_COLUMNS.map((col) => (
-                <DropdownMenuItem
-                  key={col.key}
-                  onClick={() => onSetJobStatus(card.job, col.key)}
-                  className={cn(
-                    "gap-2 text-xs",
-                    col.key === "completed" && done && "opacity-50",
-                  )}
-                >
-                  <col.icon
-                    className={cn(
-                      "size-3.5",
-                      col.key === "completed" && "text-emerald-500",
-                      col.key === "in_progress" && "text-sky-500",
-                    )}
-                  />
-                  {col.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : (
-          <Checkbox
-            checked={done}
-            disabled={busy}
-            onCheckedChange={() => onToggleFg(card.fg)}
-            aria-label={
-              done ? `Reopen product “${card.fg.name}”` : `Mark product “${card.fg.name}” as done`
-            }
-            className="mt-0.5 size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
-          />
+        </button>
+        <Checkbox
+          checked={done}
+          disabled={busy}
+          onCheckedChange={() => onToggleFg(card.fg)}
+          aria-label={
+            done ? `Reopen product “${card.fg.name}”` : `Mark product “${card.fg.name}” as done`
+          }
+          className="mt-0.5 size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        {card.fg.dueAt !== undefined && (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+              (card.fg.dueAt ?? 0) < Date.now() && !done
+                ? "bg-rose-500/10 text-rose-700 dark:text-rose-400"
+                : "bg-muted text-muted-foreground",
+            )}
+          >
+            <CalendarDays className="size-2.5" />
+            {formatDueLabel(card.fg.dueAt)}
+          </span>
+        )}
+        {card.fg.priority && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium capitalize text-muted-foreground">
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                card.fg.priority === "high"
+                  ? "bg-rose-500"
+                  : card.fg.priority === "medium"
+                    ? "bg-amber-500"
+                    : "bg-sky-500",
+              )}
+            />
+            {card.fg.priority}
+          </span>
+        )}
+        {done && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+            <CheckCircle2 className="size-2.5" /> Completed
+          </span>
         )}
       </div>
-      {isJob && (
-        <div className="flex flex-wrap items-center gap-1">
-          {done && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
-              <CheckCircle2 className="size-2.5" /> Completed
-            </span>
-          )}
-          {card.job.priority && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium capitalize text-muted-foreground">
-              <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  card.job.priority === "high"
-                    ? "bg-rose-500"
-                    : card.job.priority === "medium"
-                      ? "bg-amber-500"
-                      : "bg-sky-500",
-                )}
-              />
-              {card.job.priority}
-            </span>
-          )}
-        </div>
-      )}
     </motion.div>
   );
 }
@@ -613,63 +575,46 @@ function BoardCardView({
 function FlaggedBoard({
   data,
   allJobs,
-  allFgs,
   statusFilter,
   onToggleFg,
-  onToggleJob,
-  onSetJobStatus,
   busyKey,
+  onOpenFg,
+  projectNameOf,
 }: {
   data: FlaggedData;
   allJobs: JobDoc[];
-  allFgs: FgDoc[];
   statusFilter: FlagStatusFilter;
   onToggleFg: (fg: FgDoc) => void;
-  onToggleJob: (job: JobDoc) => void;
-  onSetJobStatus: (job: JobDoc, status: BoardColumn) => void;
   busyKey: string | null;
+  onOpenFg: (fg: FgDoc) => void;
+  projectNameOf: (job: JobDoc) => string;
 }) {
-  const [dragging, setDragging] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<Id<"finishedGoods"> | null>(null);
 
-  const jobCards = data.jobs.map((job) => ({
-    kind: "job" as const,
-    job,
-    project: data.projectNameOf(job),
-  }));
-  const productCards = data.fgs.map((fg) => {
+  const productCards: BoardCard[] = data.fgs.map((fg) => {
     const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
     const parentJob = allJobs.find((j) => jobIds.includes(j._id));
     return {
       kind: "fg" as const,
       fg,
       jobName: parentJob?.name,
-      project: parentJob
-        ? data.projectNameOf(parentJob)
-        : (fg.projectName ?? "Standalone"),
+      project: parentJob ? projectNameOf(parentJob) : (fg.projectName ?? "Standalone"),
     };
   });
 
-  const jobsTodo = jobCards.filter(
-    (c) => c.job.status !== "completed" && c.job.status !== "in_progress",
-  );
-  const jobsInProgress = jobCards.filter((c) => c.job.status === "in_progress");
-  const jobsCompleted = jobCards.filter((c) => c.job.status === "completed");
   const fgsByCol = (col: BoardColumn) =>
     productCards.filter((c) =>
-      col === "completed" ? c.fg.isCompleted === true : col === "in_progress" ? false : true,
+      col === "completed"
+        ? c.fg.isCompleted === true
+        : col === "in_progress"
+          ? false
+          : c.fg.isCompleted !== true,
     );
 
   const colCards = (col: BoardColumn): BoardCard[] =>
-    [...jobsByCol(col), ...fgsByCol(col)].filter((c) => {
-      const done = c.kind === "job" ? c.job.status === "completed" : (c.fg.isCompleted ?? false);
-      return matchesStatusFilter(statusFilter, done);
-    });
-
-  function jobsByCol(col: BoardColumn) {
-    if (col === "todo") return jobsTodo;
-    if (col === "in_progress") return jobsInProgress;
-    return jobsCompleted;
-  }
+    fgsByCol(col).filter((c) =>
+      matchesStatusFilter(statusFilter, c.fg.isCompleted ?? false),
+    );
 
   const colCounts: Record<BoardColumn, number> = {
     todo: colCards("todo").length,
@@ -677,34 +622,11 @@ function FlaggedBoard({
     completed: colCards("completed").length,
   };
 
-  /** Board columns a card may legally be dropped into. */
-  const dropTargets = (card: BoardCard): BoardColumn[] => {
-    if (card.kind === "fg") return ["todo", "completed"];
-    const products = allFgs.filter(
-      (f) => f.jobId === card.job._id || (f.jobIds ?? []).includes(card.job._id),
-    );
-    const allProductsDone = products.length > 0 && products.every((f) => f.isCompleted);
-    if (card.job.status === "completed") return ["todo", "in_progress"];
-    return allProductsDone ? ["todo", "in_progress", "completed"] : ["todo", "in_progress"];
-  };
-
   const handleDrop = (col: BoardColumn) => {
     if (!dragging) return;
-    const jobCard = jobCards.find((c) => c.job._id === dragging);
-    if (jobCard) {
-      if (col === "completed") {
-        // keep the same guard as the list: complete only when products are done
-        if (jobCard.job.status !== "completed") onToggleJob(jobCard.job);
-      } else if (col === "in_progress") {
-        onSetJobStatus(jobCard.job, "in_progress");
-      } else if (jobCard.job.status === "completed") {
-        onSetJobStatus(jobCard.job, "todo");
-      }
-    } else {
-      const fgCard = productCards.find((c) => c.fg._id === dragging);
-      if (fgCard && ((fgCard.fg.isCompleted ?? false) !== (col === "completed"))) {
-        onToggleFg(fgCard.fg);
-      }
+    const card = productCards.find((c) => c.fg._id === dragging);
+    if (card && ((card.fg.isCompleted ?? false) !== (col === "completed"))) {
+      onToggleFg(card.fg);
     }
     setDragging(null);
   };
@@ -714,7 +636,10 @@ function FlaggedBoard({
       {BOARD_COLUMNS.map((col) => {
         const cards = colCards(col.key);
         const droppable =
-          dragging !== null && dropTargetsFor(col.key, dragging);
+          dragging !== null &&
+          col.key !== "in_progress" &&
+          ((productCards.find((c) => c.fg._id === dragging)?.fg.isCompleted ?? false) !==
+            (col.key === "completed"));
         return (
           <section
             key={col.key}
@@ -752,7 +677,7 @@ function FlaggedBoard({
             <div className="flex-1 space-y-2 overflow-y-auto p-2">
               <AnimatePresence initial={false}>
                 {cards.map((card) => {
-                  const id = card.kind === "job" ? card.job._id : card.fg._id;
+                  const id = card.fg._id;
                   return (
                     <motion.div
                       key={id}
@@ -770,7 +695,7 @@ function FlaggedBoard({
                         card={card}
                         busyKey={busyKey}
                         onToggleFg={onToggleFg}
-                        onSetJobStatus={onSetJobStatus}
+                        onOpen={onOpenFg}
                       />
                     </motion.div>
                   );
@@ -787,20 +712,7 @@ function FlaggedBoard({
       })}
     </div>
   );
-
-  /** Guard: is this column a legal drop target for the dragged card? */
-  function dropTargetsFor(col: BoardColumn, cardId: string): boolean {
-    const jobCard = jobCards.find((c) => c.job._id === cardId);
-    if (jobCard) return dropTargets(jobCard).includes(col);
-    const fgCard = productCards.find((c) => c.fg._id === cardId);
-    if (fgCard) {
-      if (col === "in_progress") return false;
-      return ((fgCard.fg.isCompleted ?? false) !== (col === "completed"));
-    }
-    return false;
-  }
 }
-
 
 /** Detail-pane row: icon + label + content, like TaskDetail's rows. */
 function DetailRow({
@@ -827,9 +739,11 @@ function DetailRow({
 
 const chipBase =
   "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors";
+
 /**
  * Right-side detail pane for a flagged job or product — mirrors TaskDetail's
- * layout (header + rows) so the flagged list behaves like the todo list.
+ * layout (header + rows). Products show their parent job & project and an
+ * editable due date/priority that default to the parent job's values.
  */
 function FlaggedDetail({
   selection,
@@ -850,11 +764,21 @@ function FlaggedDetail({
 
   const job = selection.kind === "job" ? jobs.find((j) => j._id === selection.id) ?? null : null;
   const fg = selection.kind === "fg" ? fgs.find((f) => f._id === selection.id) ?? null : null;
+  const parentJob =
+    fg !== null
+      ? (jobs.find(
+          (j) =>
+            (fg.jobIds ?? (fg.jobId ? [fg.jobId] : [])).includes(j._id),
+        ) ?? null)
+      : null;
   const project =
     job !== null
       ? (projects.find((pp) => pp._id === job.projectId) ?? null)
       : fg !== null
-        ? (projects.find((pp) => pp.name === fg.projectName) ?? null)
+        ? (projects.find((pp) => pp.name === fg.projectName) ??
+          (parentJob !== null
+            ? projects.find((pp) => pp._id === parentJob.projectId) ?? null
+            : null))
         : null;
 
   if (job === null && fg === null) {
@@ -900,8 +824,6 @@ function FlaggedDetail({
     }
   };
 
-  const chipBase =
-    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors";
   const prioChip: Record<string, string> = {
     high: "bg-rose-500/10 text-rose-700 dark:text-rose-400",
     medium: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
@@ -911,7 +833,6 @@ function FlaggedDetail({
   return (
     <aside className="w-full shrink-0 border-border/60 lg:w-80 lg:border-l">
       <div className="flex h-full flex-col">
-        {/* header */}
         <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
           <p className="text-sm font-semibold">
             {job !== null ? "Job details" : "Product details"}
@@ -956,7 +877,7 @@ function FlaggedDetail({
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                   />
                   {job.dueAt !== undefined && (
-                    <p className={cn("mt-1 text-xs", isOverdue({ dueAt: job.dueAt, isCompleted: false } as never) ? "font-medium text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {formatDueLabel(job.dueAt)}
                     </p>
                   )}
@@ -1016,14 +937,61 @@ function FlaggedDetail({
                 onChange={(e) => void patchFg({ name: e.target.value })}
                 className="w-full bg-transparent text-[15px] font-medium outline-none"
               />
-              {fg.code && (
-                <p className="mt-1 font-mono text-xs text-muted-foreground">
-                  <Package className="mr-1 inline size-3 text-violet-500/80" />
-                  {fg.code}
-                </p>
-              )}
+              <p className="mt-1 text-xs text-muted-foreground">
+                <Package className="mr-1 inline size-3 text-violet-500/80" />
+                {parentJob ? (
+                  <>
+                    {parentJob.name}
+                    {parentJob.code ? ` · ${parentJob.code}` : ""}
+                    {project ? ` — ${project.name}` : ""}
+                  </>
+                ) : (
+                  "Standalone product"
+                )}
+                {fg.code ? ` · ${fg.code}` : ""}
+              </p>
 
               <div className="mt-4">
+                <DetailRow icon={CalendarDays} label="Due date">
+                  <input
+                    type="datetime-local"
+                    value={fg.dueAt !== undefined ? toLocalInput(new Date(fg.dueAt)) : ""}
+                    onChange={(e) =>
+                      void patchFg({
+                        dueAt: e.target.value ? new Date(e.target.value).getTime() : undefined,
+                      })
+                    }
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  {parentJob?.dueAt !== undefined && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Job due: {formatDueLabel(parentJob.dueAt)}
+                    </p>
+                  )}
+                </DetailRow>
+
+                <DetailRow icon={Flag} label="Priority">
+                  <div className="flex flex-wrap gap-1.5">
+                    {(["high", "medium", "low"] as const).map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        disabled={busy}
+                        className={cn(
+                          chipBase,
+                          fg.priority === p
+                            ? `${prioChip[p]} border-transparent`
+                            : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                        )}
+                        onClick={() => void patchFg({ priority: fg.priority === p ? undefined : p })}
+                      >
+                        <span className={cn("mr-1 inline-block size-1.5 rounded-full", PRIORITY_META[p].dot)} />
+                        {p[0]!.toUpperCase() + p.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </DetailRow>
+
                 <DetailRow icon={Tag} label="Unit">
                   <input
                     value={fg.unit ?? ""}
@@ -1554,12 +1522,11 @@ export default function TasksPanel({
               <FlaggedBoard
                 data={flaggedItems}
                 allJobs={flaggedJobs ?? []}
-                allFgs={flaggedFgs ?? []}
                 statusFilter={flagStatus}
                 onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
-                onToggleJob={(job) => void handleToggleFlaggedJob(job)}
-                onSetJobStatus={(job, status) => void handleBoardJobStatus(job, status)}
                 busyKey={flaggedBusy}
+                projectNameOf={flaggedItems.projectNameOf}
+                onOpenFg={(fg) => setFlagSelection({ kind: "fg", id: fg._id })}
               />
             </div>
           ) : flagFilter === "products" ? (

@@ -240,7 +240,12 @@ export const setJobFlag = mutation({
     const job = await ctx.db.get(id);
     if (job === null || job.ownerId !== userId)
       throw new Error("That job no longer exists.");
-    await ctx.db.patch(id, { isFlagged: flagged || undefined });
+    await ctx.db.patch(id, {
+      isFlagged: flagged || undefined,
+      // snapshot for products to inherit when flagged
+      fgDueAt: job.dueAt,
+      fgPriority: job.priority,
+    });
     // cascade to every product attached to this job (single or multi-link)
     const fgs = await ctx.db
       .query("finishedGoods")
@@ -250,7 +255,13 @@ export const setJobFlag = mutation({
       const linked =
         fg.jobId === id || (fg.jobIds ?? []).includes(id);
       if (linked) {
-        await ctx.db.patch(fg._id, { isFlagged: flagged || undefined });
+        await ctx.db.patch(fg._id, {
+          isFlagged: flagged || undefined,
+          // products inherit the job's due date & priority so board cards and
+          // details start in sync (they can be edited per product afterwards)
+          dueAt: flagged ? (job.fgDueAt ?? job.dueAt) : undefined,
+          priority: flagged ? (job.fgPriority ?? job.priority) : undefined,
+        });
       }
     }
   },
