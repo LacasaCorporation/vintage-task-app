@@ -850,6 +850,9 @@ export default function TasksPanel({
                   const taskSteps = stepsByTask.get(task._id) ?? [];
                   const stepsDone = taskSteps.filter((s) => s.isCompleted).length;
                   const stepsOpen = openStepRows.has(task._id);
+                  // shown on the chip: the first subtask that is still open
+                  const nextStepText =
+                    taskSteps.find((s) => !s.isCompleted)?.text ?? "";
                   const hasExtras =
                     task.dueAt !== undefined ||
                     task.tags !== undefined ||
@@ -1014,13 +1017,27 @@ export default function TasksPanel({
                                 title={
                                   taskSteps.length === 0
                                     ? "Add a subtask"
-                                    : `${stepsDone} of ${taskSteps.length} subtasks done`
+                                    : taskSteps
+                                        .map(
+                                          (s) => `${s.isCompleted ? "✓" : "•"} ${s.text}`,
+                                        )
+                                        .join("\n")
                                 }
                               >
                                 <ListTodo className="size-2.5" />
-                                {taskSteps.length === 0
-                                  ? "Subtasks"
-                                  : `${stepsDone}/${taskSteps.length}`}
+                                {taskSteps.length === 0 ? (
+                                  "Subtasks"
+                                ) : (
+                                  <>
+                                    <span>{stepsDone}/{taskSteps.length}</span>
+                                    {/* the next subtask still to do, right on the chip */}
+                                    {!stepsOpen && nextStepText !== "" && (
+                                      <span className="max-w-40 truncate font-normal opacity-80">
+                                        {nextStepText}
+                                      </span>
+                                    )}
+                                  </>
+                                )}
                                 <ChevronDown
                                   className={cn(
                                     "size-2.5 transition-transform",
