@@ -2,6 +2,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useAuth } from "@/hooks/use-auth";
 import FirmSwitcher from "@/components/FirmSwitcher";
+import { FirmMark } from "@/components/FirmLogoPicker";
 import { Button } from "@/components/ui/button";
 import NotesSidebar from "@/components/NotesSidebar";
 import TasksSidebar from "@/components/TasksSidebar";
@@ -14,7 +15,7 @@ import CostingPanel from "@/components/CostingPanel";
 import SettingsPanel from "@/components/SettingsPanel";
 import SettingsSidebar from "@/components/SettingsSidebar";
 import { format } from "date-fns";
-import { Calculator, Check, CheckSquare, LogOut, NotebookPen, Settings } from "lucide-react";
+import { Calculator, CheckSquare, LogOut, NotebookPen, Settings } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -45,6 +46,11 @@ export default function Dashboard() {
 
   // ── Access control (Settings tab roles & restrictions) ─────────────
   const myAccess = useQuery(api.settings.getMyAccess);
+  // the active firm's own logo (Settings → Organisation) replaces the Slate mark
+  const myFirms = useQuery(api.firms.listMyFirms);
+  const firmLogo =
+    myFirms?.firms.find((f) => f.firmId === myFirms.activeFirmId)?.logo ??
+    null;
   const ensureWorkspace = useMutation(api.settings.ensureWorkspace);
   const claimPendingInvite = useMutation(api.settings.claimPendingInvite);
   const touchLogin = useMutation(api.accounts.touchLogin);
@@ -777,9 +783,7 @@ export default function Dashboard() {
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto border-r border-border/60 bg-card/50 md:flex">
         {/* brand */}
         <div className="flex items-center gap-2.5 px-5 py-5">
-          <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-            <Check className="size-4" strokeWidth={3} />
-          </span>
+          <FirmMark logo={firmLogo} className="size-8" markClassName="size-4" />
           <span className="font-display text-lg font-semibold tracking-tight">
             Slate
           </span>
@@ -878,9 +882,7 @@ export default function Dashboard() {
         <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
           <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-8">
             <div className="flex items-center gap-2 md:hidden">
-              <span className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground">
-                <Check className="size-3.5" strokeWidth={3} />
-              </span>
+              <FirmMark logo={firmLogo} className="size-7" markClassName="size-3.5" />
               <span className="font-display font-semibold">Slate</span>
               <span className="mx-1 h-5 w-px bg-border" />
               {NAV_ITEMS.map((item) => {

@@ -247,6 +247,7 @@ export const getOrganisation = query({
       code: settingsDoc?.orgCode ?? null,
       createdAt: settingsDoc?.orgCreatedAt ?? null,
       memberCount: settingsDoc?.members.length ?? 0,
+      logo: settingsDoc?.logo ?? null,
       isSuper: settingsDoc === null || settingsDoc.ownerId === userId,
       myUsername: mine?.username ?? null,
       myLastLoginAt: mine?.lastLoginAt ?? null,

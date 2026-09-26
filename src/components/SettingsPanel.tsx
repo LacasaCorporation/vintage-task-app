@@ -70,6 +70,7 @@ import {
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useRef, useState } from "react";
 import { toast } from "@/lib/toast";
+import FirmLogoPicker from "@/components/FirmLogoPicker";
 
 type Role = "super" | "admin" | "user" | "member";
 type AssignableRole = Exclude<Role, "super">;
@@ -1061,6 +1062,11 @@ export default function SettingsPanel() {
             )}
           </div>
           <CurrencyPicker canEdit={canManage} />
+          <FirmLogoPicker
+            logo={organisation?.logo ?? null}
+            canEdit={canManage}
+            isOwner={isSuper}
+          />
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed bg-muted/30 px-3 py-2.5 sm:col-span-2">
             <p className="text-xs text-muted-foreground">
               Give your team the app address, then the username and password you

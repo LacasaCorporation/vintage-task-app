@@ -5,6 +5,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import {
   activeFirmId,
+  activeFirmSettings,
   firmsForUser,
   makeOrgCode,
   ownedFirmSettings,
@@ -12,6 +13,9 @@ import {
   type Firm,
 } from "./org";
 import { cleanCurrency, currencyOrDefault } from "../lib/currency";
+
+/** A 256px PNG data URL sits well under this; anything larger is rejected. */
+const LOGO_MAX_CHARS = 300_000;
 import type { WorkspaceRole } from "./settings";
 
 /** One firm as the switcher needs it. */
@@ -24,6 +28,7 @@ type FirmSummary = {
   isSuper: boolean;
   memberCount: number;
   createdAt: number | null;
+  logo: string | null;
 };
 
 function summarise(firm: Firm, userId: Id<"users">): FirmSummary {
@@ -38,6 +43,7 @@ function summarise(firm: Firm, userId: Id<"users">): FirmSummary {
     isSuper,
     memberCount: firm.members.length,
     createdAt: firm.orgCreatedAt ?? null,
+    logo: firm.logo ?? null,
   };
 }
 
@@ -159,6 +165,44 @@ export const createFirm = mutation({
     });
     await rememberActiveFirm(ctx, userId, ownerId);
     return { firmId: ownerId, ownedByYou: ownerId === userId };
+  },
+});
+
+/**
+ * Change the firm's logo — the mark shown as the app's main logo.
+ *
+ * Only the person who owns the firm may do this, because everyone in the firm
+ * sees it. Pass nothing to go back to the default mark. The image is stored as
+ * a small data URL (the client shrinks it to a 256px square first) so it stays
+ * inside one document, which also means it survives a backup as plain data.
+ */
+export const setLogo = mutation({
+  args: { logo: v.optional(v.string()) },
+  handler: async (
+    ctx,
+    { logo },
+  ): Promise<{ logo: string | null }> => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const firm = await activeFirmSettings(ctx, userId);
+    if (firm === null) throw new Error("Create your firm first.");
+    if (firm.ownerId !== userId) {
+      throw new Error(
+        "Only the person who owns this firm can change its logo.",
+      );
+    }
+    if (logo === undefined) {
+      await ctx.db.patch(firm._id, { logo: undefined });
+      return { logo: null };
+    }
+    if (!logo.startsWith("data:image/")) {
+      throw new Error("Pick an image file for the logo.");
+    }
+    if (logo.length > LOGO_MAX_CHARS) {
+      throw new Error("That image is too large. Pick a smaller one.");
+    }
+    await ctx.db.patch(firm._id, { logo });
+    return { logo };
   },
 });
 

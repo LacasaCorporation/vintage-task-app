@@ -78,6 +78,8 @@ const teamMemberValidator = v.object({
 const settings = defineTable({
   ownerId: v.id("users"), // the super admin who owns this organisation
   workspaceName: v.optional(v.string()), // organisation name
+  /** Firm logo as a small data URL, shown as the app's main logo. */
+  logo: v.optional(v.string()),
   /** Short code shown to users so they know where to sign in, e.g. "ORG-4F7K". */
   orgCode: v.optional(v.string()),
   orgCreatedAt: v.optional(v.number()),
