@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 type Priority = "high" | "medium" | "low";
 type Recurrence = "daily" | "weekly" | "monthly";

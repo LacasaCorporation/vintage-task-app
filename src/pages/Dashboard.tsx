@@ -18,7 +18,7 @@ import { Calculator, Check, CheckSquare, LogOut, NotebookPen, Settings } from "l
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import type { PromptField } from "@/components/AppDialogs";
 import { cn } from "@/lib/utils";

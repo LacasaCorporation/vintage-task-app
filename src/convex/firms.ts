@@ -137,7 +137,7 @@ export const createFirm = mutation({
     if (alreadyOwns !== null) {
       throw new Error(
         owner !== ""
-          ? `“${owner}” already owns a firm. Each account can own only one.`
+          ? `“${owner}” already owns a firm, and each account can own only one. Leave the field blank to own “${clean}” yourself, or name someone who doesn't own a firm yet.`
           : "You already own a firm. Name the username of the person who should own this one.",
       );
     }

@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { messageFrom } from "@/lib/errors";
 import {
   Card,
   CardContent,
@@ -36,17 +37,12 @@ function resolveRedirectAfterAuth(
 
 /** Turn whatever the server threw into something a person can act on. */
 function messageFor(error: unknown, fallback: string) {
-  const raw =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "";
+  const raw = messageFrom(error, "");
   if (raw.includes("switched off")) return raw;
   if (raw.includes("Invalid credentials")) {
     return "That username and password don't match.";
   }
-  return raw.trim().length > 0 && raw.length < 160 ? raw : fallback;
+  return raw.length > 0 && raw.length < 200 ? raw : fallback;
 }
 
 function Auth({ redirectAfterAuth }: AuthProps = {}) {

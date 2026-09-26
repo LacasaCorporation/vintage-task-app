@@ -26,7 +26,7 @@ import {
 import { exportMaterialTemplate, exportMaterials } from "@/lib/materialImport";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";

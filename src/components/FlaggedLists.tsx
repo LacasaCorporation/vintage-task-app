@@ -26,7 +26,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_PROJECT_STATUSES,

@@ -69,7 +69,7 @@ import {
 } from "lucide-react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 type Role = "super" | "admin" | "user" | "member";
 type AssignableRole = Exclude<Role, "super">;

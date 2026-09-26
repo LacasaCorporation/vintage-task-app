@@ -25,7 +25,7 @@ import {
 import { useMemo, useState, type ReactNode } from "react";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { useMutation, useQuery } from "convex/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { cn } from "@/lib/utils";
 

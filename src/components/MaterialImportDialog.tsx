@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useAction, useMutation } from "convex/react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 type MaterialDoc = Doc<"rawMaterials">;
