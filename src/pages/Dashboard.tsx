@@ -46,11 +46,13 @@ export default function Dashboard() {
 
   // ── Access control (Settings tab roles & restrictions) ─────────────
   const myAccess = useQuery(api.settings.getMyAccess);
-  // the active firm's own logo (Settings → Organisation) replaces the Slate mark
+  // the active firm's own logo and name (Settings → Organisation) replace the
+  // Slate mark and wordmark; "Slate" stays until a firm has named itself
   const myFirms = useQuery(api.firms.listMyFirms);
-  const firmLogo =
-    myFirms?.firms.find((f) => f.firmId === myFirms.activeFirmId)?.logo ??
-    null;
+  const activeFirm =
+    myFirms?.firms.find((f) => f.firmId === myFirms.activeFirmId) ?? null;
+  const firmLogo = activeFirm?.logo ?? null;
+  const brandName = activeFirm?.name ?? "Slate";
   const ensureWorkspace = useMutation(api.settings.ensureWorkspace);
   const claimPendingInvite = useMutation(api.settings.claimPendingInvite);
   const touchLogin = useMutation(api.accounts.touchLogin);
@@ -784,8 +786,11 @@ export default function Dashboard() {
         {/* brand */}
         <div className="flex items-center gap-2.5 px-5 py-5">
           <FirmMark logo={firmLogo} className="size-8" markClassName="size-4" />
-          <span className="font-display text-lg font-semibold tracking-tight">
-            Slate
+          <span
+            className="min-w-0 truncate font-display text-lg font-semibold tracking-tight"
+            title={brandName}
+          >
+            {brandName}
           </span>
         </div>
 
@@ -883,7 +888,9 @@ export default function Dashboard() {
           <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-8">
             <div className="flex items-center gap-2 md:hidden">
               <FirmMark logo={firmLogo} className="size-7" markClassName="size-3.5" />
-              <span className="font-display font-semibold">Slate</span>
+              <span className="max-w-40 truncate font-display font-semibold" title={brandName}>
+                {brandName}
+              </span>
               <span className="mx-1 h-5 w-px bg-border" />
               {NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
