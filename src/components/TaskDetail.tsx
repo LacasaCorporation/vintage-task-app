@@ -36,7 +36,7 @@ import {
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
-import PeopleGroupPicker from "@/components/PeopleGroupPicker";
+import AssignDialog from "@/components/AssignDialog";
 import { assigneeLabel, assigneesOfTask } from "@/lib/task-people";
 
 type Priority = "high" | "medium" | "low";
@@ -47,11 +47,14 @@ function Row({
   label,
   children,
   onClear,
+  locked = false,
 }: {
   icon: typeof CalendarDays;
   label: string;
   children: React.ReactNode;
   onClear?: () => void;
+  /** Shown read-only: the person may look but not change this field. */
+  locked?: boolean;
 }) {
   return (
     <div className="flex items-start gap-2.5 px-1 py-1.5">
@@ -60,9 +63,11 @@ function Row({
         <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
           {label}
         </p>
-        <div className="mt-1">{children}</div>
+        <div className={cn("mt-1", locked && "pointer-events-none opacity-60")}>
+          {children}
+        </div>
       </div>
-      {onClear && (
+      {onClear && !locked && (
         <button
           type="button"
           onClick={onClear}
@@ -118,7 +123,36 @@ export default function TaskDetail({
     () => assigneesOfTask(task, peopleById),
     [task, peopleById],
   );
-  const [showAssignees, setShowAssignees] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const rights = useQuery(api.tasks.myRights, { taskId: task._id });
+  // The role says what this person may do in the app; the task's own grant says
+  // what the person who created it allowed here. While the grant loads, fall
+  // back to the role so nothing flickers.
+  const mayEdit = canEdit && (rights?.canEdit ?? true);
+  const mayComplete = canEdit && (rights?.canComplete ?? true);
+  const mayChangeOptions = canEdit && (rights?.canChangeOptions ?? true);
+  const mayDelete = canDelete && (rights?.canDelete ?? true);
+  const mayEditSteps = canEditSteps && mayEdit;
+  const mayCreateSteps = canCreateSteps && mayEdit;
+  const mayDeleteSteps = canDeleteSteps && mayDelete;
+  const groupIds = task.groupIds ?? [];
+  const groupsData = useQuery(api.userGroups.list);
+  const groupsById = useMemo(
+    () => new Map((groupsData ?? []).map((g) => [g._id, g] as const)),
+    [groupsData],
+  );
+  const withLabel = useMemo(() => {
+    const people = assigneeLabel(assignees, peopleById);
+    const groupNames = groupIds
+      .map((id) => groupsById.get(id)?.name)
+      .filter((n): n is string => n !== undefined);
+    if (people === "Not assigned" && groupNames.length === 0) {
+      return "Not assigned";
+    }
+    return [people === "Not assigned" ? null : people, ...groupNames]
+      .filter((part): part is string => part !== null)
+      .join(" · ");
+  }, [assignees, groupIds, groupsById]);
   const [description, setDescription] = useState(task.description ?? "");
   const [tagDraft, setTagDraft] = useState("");
   const [stepDraft, setStepDraft] = useState("");
@@ -211,7 +245,7 @@ export default function TaskDetail({
 
   const handleAddStep = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canCreateSteps) {
+    if (!mayCreateSteps) {
       toast.error("Adding steps is restricted for your role.");
       return;
     }
@@ -229,7 +263,7 @@ export default function TaskDetail({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (!canCreateSteps) {
+    if (!mayCreateSteps) {
       toast.error("Attaching files is restricted for your role.");
       return;
     }
@@ -311,15 +345,15 @@ export default function TaskDetail({
           <div className="flex items-start gap-2.5">
             <Checkbox
               checked={task.isCompleted}
-              disabled={!canEdit}
+              disabled={!mayComplete}
               onCheckedChange={() => void toggleTask({ id: task._id })}
               className="mt-1 size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3"
             />
             <input
               value={task.text}
-              readOnly={!canEdit}
+              readOnly={!mayEdit}
               onChange={(e) =>
-                canEdit &&
+                mayEdit &&
                 void updateTask({ id: task._id, text: e.target.value }).catch(() => {})
               }
               className={cn(
@@ -334,43 +368,64 @@ export default function TaskDetail({
             <Row icon={Users} label="Assigned to">
               <button
                 type="button"
-                disabled={!canEdit}
-                onClick={() => setShowAssignees((v) => !v)}
-                aria-expanded={showAssignees}
+                onClick={() => setAssignOpen(true)}
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-lg border border-border/70 px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60",
-                  assignees.length > 0 && "border-primary/40 bg-primary/5",
+                  "flex w-full items-center gap-2 rounded-lg border border-border/70 px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent",
+                  (assignees.length > 0 || (task.groupIds ?? []).length > 0) &&
+                    "border-primary/40 bg-primary/5",
                 )}
               >
                 <UserRound
                   className={cn(
                     "size-3.5 shrink-0",
-                    assignees.length > 0 ? "text-primary" : "text-muted-foreground",
+                    assignees.length > 0
+                      ? "text-primary"
+                      : "text-muted-foreground",
                   )}
                 />
                 <span className="min-w-0 flex-1 truncate">
-                  {assigneeLabel(assignees, peopleById)}
+                  {withLabel}
                 </span>
                 <span className="shrink-0 text-[11px] text-muted-foreground">
-                  {showAssignees ? "Hide" : "Change"}
+                  Assign…
                 </span>
               </button>
-              {showAssignees && (
-                <PeopleGroupPicker
-                  taskId={task._id}
-                  assignees={assignees}
-                  canEdit={canEdit}
-                  className="mt-2.5 rounded-lg border border-border/60 bg-muted/20 p-2.5"
-                />
+              {groupIds.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {groupIds.map((id) => (
+                    <span
+                      key={id}
+                      className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                    >
+                      <Users className="size-2.5" />
+                      {groupsById.get(id)?.name ?? "Group"}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {!rights?.isOwner && (
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                  {rights?.canEdit || rights?.canComplete
+                    ? `You can ${[rights?.canEdit && "edit", rights?.canComplete && "complete", rights?.canChangeOptions && "change options", rights?.canDelete && "delete"].filter(Boolean).join(", ")} this task.`
+                    : "You can see this task, but only its owner can act on it."}
+                </p>
               )}
             </Row>
           </div>
+
+          <AssignDialog
+            task={task}
+            open={assignOpen}
+            onOpenChange={setAssignOpen}
+            canEdit={canEdit}
+          />
 
           {/* due date */}
           <div className="mt-4">
             <Row
               icon={CalendarDays}
               label="Due date"
+              locked={!mayChangeOptions}
               onClear={
                 task.dueAt !== undefined
                   ? () => void updateTask({ id: task._id, clearDue: true }).catch(() => {})
@@ -408,6 +463,7 @@ export default function TaskDetail({
             <Row
               icon={AlarmClock}
               label="Reminder"
+              locked={!mayChangeOptions}
               onClear={
                 task.remindAt !== undefined
                   ? () => void updateTask({ id: task._id, clearReminder: true }).catch(() => {})
@@ -436,7 +492,7 @@ export default function TaskDetail({
             </Row>
 
             {/* priority */}
-            <Row icon={Flag} label="Priority">
+            <Row icon={Flag} label="Priority" locked={!mayChangeOptions}>
               <div className="flex flex-wrap gap-1.5">
                 {PRIORITIES.map((p) => {
                   const active = task.priority === p.value;
@@ -469,6 +525,7 @@ export default function TaskDetail({
             <Row
               icon={Repeat}
               label="Repeat"
+              locked={!mayChangeOptions}
               onClear={
                 task.recurrence
                   ? () => void updateTask({ id: task._id, clearRecurrence: true }).catch(() => {})
@@ -507,7 +564,7 @@ export default function TaskDetail({
             </Row>
 
             {/* tags */}
-            <Row icon={Tag} label="Tags">
+            <Row icon={Tag} label="Tags" locked={!mayChangeOptions}>
               <div className="flex flex-wrap items-center gap-1.5">
                 {(task.tags ?? []).map((tag) => (
                   <span
@@ -545,7 +602,7 @@ export default function TaskDetail({
             </Row>
 
             {/* description / notes */}
-            <Row icon={FileText} label="Notes">
+            <Row icon={FileText} label="Notes" locked={!mayEdit}>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -575,9 +632,9 @@ export default function TaskDetail({
                     <li key={s._id} className="group/st flex items-center gap-2">
                       <Checkbox
                         checked={s.isCompleted}
-                        disabled={!canEditSteps}
+                        disabled={!mayEditSteps}
                         onCheckedChange={() =>
-                          canEditSteps
+                          mayEditSteps
                             ? void toggleStepM({ id: s._id })
                             : toast.error("Editing steps is restricted for your role.")
                         }
@@ -591,7 +648,7 @@ export default function TaskDetail({
                       >
                         {s.text}
                       </span>
-                      {canDeleteSteps && (
+                      {mayDeleteSteps && (
                         <button
                           type="button"
                           aria-label="Delete step"
@@ -605,7 +662,7 @@ export default function TaskDetail({
                   ))}
                 </ul>
               )}
-              {canCreateSteps ? (
+              {mayCreateSteps ? (
                 <form onSubmit={handleAddStep} className="flex gap-1.5">
                   <Input
                     value={stepDraft}
@@ -645,7 +702,7 @@ export default function TaskDetail({
                       <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
                         {a.size < 1024 ? `${a.size} B` : `${Math.round(a.size / 1024)} KB`}
                       </span>
-                      {canDeleteSteps && (
+                      {mayDeleteSteps && (
                         <button
                           type="button"
                           aria-label={`Remove ${a.name}`}
@@ -692,7 +749,7 @@ export default function TaskDetail({
 
         {/* footer */}
         <div className="border-t border-border/60 p-3">
-          {canDelete ? (
+          {mayDelete ? (
             <Button
               type="button"
               variant="ghost"

@@ -105,6 +105,15 @@ export default function TasksPanel({
   // everyone in the firm with their manager — one query, so every row can name
   // its assignees without a query per row
   const peopleData = useQuery(api.tasks.people);
+  // what the caller may do on each visible task — one query for the whole list,
+  // so a row's tick box and buttons match the task owner's permissions
+  const listRights = useQuery(api.tasks.myRightsForList, {
+    ids: (allTasks ?? []).map((t) => t._id),
+  });
+  const rightsByTask = useMemo(
+    () => new Map((listRights?.rights ?? []).map((r) => [r.taskId, r])),
+    [listRights],
+  );
   const peopleById = useMemo(
     () => new Map((peopleData?.people ?? []).map((p) => [p.userId, p])),
     [peopleData],
@@ -648,7 +657,7 @@ export default function TasksPanel({
                       <div className="flex flex-wrap items-center gap-3 px-4 py-3.5 sm:px-5">
                         <Checkbox
                           checked={task.isCompleted}
-                          disabled={!canEdit}
+                          disabled={!canEdit || rightsByTask.get(task._id)?.canComplete === false}
                           onCheckedChange={() => void handleToggleTask(task._id)}
                           aria-label={
                             task.isCompleted

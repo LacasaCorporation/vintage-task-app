@@ -1,0 +1,495 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
+import {
+  Crown,
+  Loader2,
+  ShieldCheck,
+  UserRound,
+  Users,
+} from "lucide-react";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import type { TaskDoc } from "@/lib/task-utils";
+import { assigneesOfTask, downLineOf } from "@/lib/task-people";
+import { messageFrom } from "@/lib/errors";
+import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
+
+/** The four things a person can be allowed to do with someone else's task. */
+const RIGHTS = [
+  { key: "canEdit", label: "Edit", hint: "title, notes, steps, files" },
+  { key: "canComplete", label: "Complete", hint: "tick it off" },
+  {
+    key: "canChangeOptions",
+    label: "Change options",
+    hint: "date, priority, repeat, tags, hand it on",
+  },
+  { key: "canDelete", label: "Delete", hint: "remove the task" },
+] as const;
+
+type Grant = {
+  canEdit: boolean;
+  canDelete: boolean;
+  canComplete: boolean;
+  canChangeOptions: boolean;
+};
+
+const NO_GRANT: Grant = {
+  canEdit: false,
+  canDelete: false,
+  canComplete: false,
+  canChangeOptions: false,
+};
+
+/**
+ * The "Assign to…" popup for one task.
+ *
+ * Two ways to share the work — tick people from your own down line, or tick a
+ * whole group made in Settings — and, for everyone the task is with, the four
+ * permissions the task's owner may hand out. The owner keeps all four until
+ * they give some away, so assigning a task never quietly passes on the power
+ * to delete or re-date it.
+ */
+export default function AssignDialog({
+  task,
+  open,
+  onOpenChange,
+  canEdit = true,
+}: {
+  task: TaskDoc;
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  canEdit?: boolean;
+}) {
+  const peopleData = useQuery(api.tasks.people);
+  const groupsData = useQuery(api.userGroups.list);
+  const grantsData = useQuery(api.tasks.grants, { taskId: task._id });
+  const assignTask = useMutation(api.tasks.assign);
+  const setGrant = useMutation(api.tasks.setGrant);
+  const [tab, setTab] = useState<"people" | "groups" | "rights">("people");
+  const [busy, setBusy] = useState(false);
+
+  const people = useMemo(() => peopleData?.people ?? [], [peopleData]);
+  const peopleById = useMemo(
+    () => new Map(people.map((p) => [p.userId, p] as const)),
+    [people],
+  );
+  const groups = useMemo(() => groupsData ?? [], [groupsData]);
+  const groupsById = useMemo(
+    () => new Map(groups.map((g) => [g._id, g] as const)),
+    [groups],
+  );
+
+  const assignees = useMemo(
+    () => assigneesOfTask(task, peopleById),
+    [task, peopleById],
+  );
+  const holderIds = useMemo(
+    () => [
+      ...new Set(
+        assignees.concat(
+          (task.groupIds ?? []).flatMap(
+            (id) => groupsById.get(id)?.memberIds ?? [],
+          ),
+        ),
+      ),
+    ],
+    [assignees, task.groupIds, groupsById],
+  );
+
+  const myTeam = useMemo(
+    () => downLineOf(people, peopleData?.me ?? null),
+    [people, peopleData],
+  );
+  const teamSet = useMemo(() => new Set(myTeam), [myTeam]);
+  const rows = useMemo(
+    () => myTeam.map((id) => peopleById.get(id)).filter((p) => p !== undefined),
+    [myTeam, peopleById],
+  );
+
+  const [picked, setPicked] = useState<Id<"users">[] | null>(null);
+  const [pickedGroups, setPickedGroups] = useState<Id<"userGroups">[] | null>(
+    null,
+  );
+  const selection = picked ?? assignees;
+  const groupSelection = pickedGroups ?? task.groupIds ?? [];
+  const selectionSet = useMemo(() => new Set(selection), [selection]);
+  const groupSet = useMemo(() => new Set(groupSelection), [groupSelection]);
+
+  const grantByUser = useMemo(() => {
+    const map = new Map<Id<"users">, Grant>();
+    for (const g of grantsData?.grants ?? []) {
+      map.set(g.userId, {
+        canEdit: g.canEdit,
+        canDelete: g.canDelete,
+        canComplete: g.canComplete,
+        canChangeOptions: g.canChangeOptions,
+      });
+    }
+    return map;
+  }, [grantsData]);
+  const isOwner = grantsData?.isOwner ?? false;
+
+  const toggle = (id: Id<"users">) =>
+    setPicked(
+      selectionSet.has(id)
+        ? selection.filter((x) => x !== id)
+        : [...selection, id],
+    );
+
+  const toggleWhole = (group: Id<"users">[]) => {
+    const everyone = group.every((id) => selectionSet.has(id));
+    setPicked(
+      everyone
+        ? selection.filter((id) => !group.includes(id))
+        : [...new Set([...selection, ...group])],
+    );
+  };
+
+  const toggleGroup = (id: Id<"userGroups">) =>
+    setPickedGroups(
+      groupSet.has(id)
+        ? groupSelection.filter((g) => g !== id)
+        : [...groupSelection, id],
+    );
+
+  const save = async (nextUsers: Id<"users">[], nextGroups: Id<"userGroups">[]) => {
+    setBusy(true);
+    try {
+      await assignTask({ id: task._id, userIds: nextUsers, groupIds: nextGroups });
+      setPicked(null);
+      setPickedGroups(null);
+      const who = [
+        ...nextUsers.map((id) => peopleById.get(id)?.label ?? "someone"),
+        ...nextGroups.map((id) => groupsById.get(id)?.name ?? "a group"),
+      ];
+      toast.success(
+        who.length === 0
+          ? "Task is no longer assigned to anyone."
+          : `Assigned to ${who.join(", ")}.`,
+      );
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't assign that task."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveGrant = async (userId: Id<"users">, next: Grant) => {
+    setBusy(true);
+    try {
+      await setGrant({ taskId: task._id, userId, ...next });
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't change their permission."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dirty =
+    (picked !== null &&
+      (picked.length !== assignees.length ||
+        picked.some((id, i) => id !== assignees[i]))) ||
+    (pickedGroups !== null &&
+      (pickedGroups.length !== groupSelection.length ||
+        pickedGroups.some((id, i) => id !== groupSelection[i])));
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Assign this task</DialogTitle>
+          <DialogDescription>
+            {isOwner
+              ? "You created this task, so you can edit, complete, change and delete it. Tick who else may — and what they may do."
+              : "Hand this task to people or to a group. Only the person who created it can change what they may do."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex gap-1 rounded-lg border bg-muted/40 p-1">
+          {(
+            [
+              ["people", "People", UserRound],
+              ["groups", "Groups", Users],
+              ["rights", "Permissions", ShieldCheck],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                tab === id
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="size-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {peopleData === undefined ? (
+          <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Loading your team…
+          </p>
+        ) : tab === "people" ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-1.5">
+              <Chip
+                active={
+                  peopleData.me !== null && selectionSet.has(peopleData.me)
+                }
+                onClick={() =>
+                  peopleData.me !== null && toggleWhole([peopleData.me])
+                }
+                label="Just me"
+              />
+              <Chip
+                active={myTeam.every((id) => selectionSet.has(id))}
+                onClick={() => toggleWhole(myTeam)}
+                label={`My whole team (${myTeam.length})`}
+              />
+              {rows
+                .filter((p) => teamSet.has(p.userId) && p.managerId === peopleData.me)
+                .map((p) => {
+                  const group = downLineOf(people, p.userId);
+                  return group.length > 1 ? (
+                    <Chip
+                      key={p.userId}
+                      active={group.every((id) => selectionSet.has(id))}
+                      onClick={() => toggleWhole(group)}
+                      label={`${p.label} +${group.length - 1}`}
+                    />
+                  ) : null;
+                })}
+            </div>
+
+            <ul className="max-h-64 space-y-0.5 overflow-y-auto">
+              {rows.map((person) => (
+                <li
+                  key={person.userId}
+                  className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-accent"
+                >
+                  <Checkbox
+                    checked={selectionSet.has(person.userId)}
+                    disabled={!canEdit}
+                    onCheckedChange={() => toggle(person.userId)}
+                    aria-label={`Assign to ${person.label}`}
+                    className="size-3.5 rounded-[3px]"
+                  />
+                  <button
+                    type="button"
+                    disabled={!canEdit}
+                    onClick={() => toggle(person.userId)}
+                    className="min-w-0 flex-1 truncate text-left text-sm"
+                  >
+                    {person.label}
+                  </button>
+                  {person.isFirmOwner && (
+                    <Crown className="size-3 shrink-0 text-primary" />
+                  )}
+                  {downLineOf(people, person.userId).length > 1 && (
+                    <button
+                      type="button"
+                      disabled={!canEdit}
+                      onClick={() => toggleWhole(downLineOf(people, person.userId))}
+                      title={`${person.label} and everyone below`}
+                      className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                    >
+                      +{downLineOf(people, person.userId).length - 1}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : tab === "groups" ? (
+          <div className="space-y-2">
+            {groups.length === 0 ? (
+              <p className="py-6 text-sm text-muted-foreground">
+                No groups yet. Make one in Settings → User groups — for example
+                “Site crew” — and it shows up here.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {groups.map((group) => {
+                  const on = groupSet.has(group._id);
+                  return (
+                    <li
+                      key={group._id}
+                      className="flex items-start gap-2 rounded-lg border border-border/70 px-2.5 py-2"
+                    >
+                      <Checkbox
+                        checked={on}
+                        disabled={!canEdit}
+                        onCheckedChange={() => toggleGroup(group._id)}
+                        aria-label={`Assign to the ${group.name} group`}
+                        className="mt-0.5 size-3.5 rounded-[3px]"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">
+                          {group.name}
+                        </p>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {group.memberIds.length} member
+                          {group.memberIds.length === 1 ? "" : "s"}
+                          {group.memberIds.length > 0 &&
+                            ` · ${group.memberIds
+                              .map((id) => peopleById.get(id)?.label ?? "someone")
+                              .slice(0, 3)
+                              .join(", ")}`}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {!isOwner ? (
+              <p className="py-6 text-sm text-muted-foreground">
+                Only the person who created this task can hand out permissions.
+              </p>
+            ) : holderIds.length === 0 ? (
+              <p className="py-6 text-sm text-muted-foreground">
+                Assign the task to someone first, then choose what they may do.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {holderIds.map((id) => {
+                  const person = peopleById.get(id);
+                  const grant = grantByUser.get(id) ?? NO_GRANT;
+                  const none = RIGHTS.every((r) => grant[r.key] === false);
+                  return (
+                    <li
+                      key={id}
+                      className="rounded-lg border border-border/70 px-2.5 py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {person?.label ?? "Someone"}
+                        </span>
+                        {none ? (
+                          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            can view only
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                            {RIGHTS.filter((r) => grant[r.key]).length} of{" "}
+                            {RIGHTS.length}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                        {RIGHTS.map((right) => (
+                          <button
+                            key={right.key}
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                              void saveGrant(id, {
+                                ...grant,
+                                [right.key]: !grant[right.key],
+                              })
+                            }
+                            title={right.hint}
+                            className={cn(
+                              "rounded-md border px-2 py-1 text-left text-[11px] transition-colors disabled:opacity-50",
+                              grant[right.key]
+                                ? "border-primary/40 bg-primary/10 text-primary"
+                                : "border-border/70 text-muted-foreground hover:bg-accent hover:text-foreground",
+                            )}
+                          >
+                            {right.label}
+                          </button>
+                        ))}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+
+        <DialogFooter className="gap-2">
+          {tab === "rights" ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+            >
+              Done
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void save([], [])}
+                disabled={busy || (selection.length === 0 && groupSelection.length === 0)}
+              >
+                Clear
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => void save(selection, groupSelection)}
+                disabled={busy || !canEdit || !dirty}
+              >
+                {busy ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <UserRound className="size-3.5" />
+                )}
+                Save
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Chip({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
+        active
+          ? "border-primary/40 bg-primary/10 text-primary"
+          : "border-border/70 text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  );
+}

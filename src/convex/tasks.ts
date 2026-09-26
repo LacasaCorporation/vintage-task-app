@@ -1,5 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { activeFirmSettings, firmAncestors, firmTeam, scopeUserId } from "./org";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -227,7 +228,19 @@ export const list = query({
       .query("tasks")
       .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
       .collect();
-    const people = all.map((t) => peopleOf(t, orgId));
+    // a task assigned to a group belongs to everyone in it, so their members
+    // see it in "mine" and in "all" just like an individual assignee
+    const groups = await ctx.db
+      .query("userGroups")
+      .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
+      .collect();
+    const groupMembers = new Map(groups.map((g) => [g._id, g.memberIds]));
+    const people = all.map((t) => [
+      ...new Set([
+        ...peopleOf(t, orgId),
+        ...(t.groupIds ?? []).flatMap((id) => groupMembers.get(id) ?? []),
+      ]),
+    ]);
     if (scope === "all") {
       const [down, up] = await Promise.all([
         firmTeam(ctx, userId),
@@ -302,8 +315,10 @@ export const assign = mutation({
   args: {
     id: v.id("tasks"),
     userIds: v.array(v.id("users")),
+    /** Whole groups of people (Settings → User groups) to assign it to. */
+    groupIds: v.optional(v.array(v.id("userGroups"))),
   },
-  handler: async (ctx, { id, userIds }) => {
+  handler: async (ctx, { id, userIds, groupIds }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const orgId = await scopeUserId(ctx);
@@ -330,10 +345,288 @@ export const assign = mutation({
         "You can only assign a task to yourself or to someone who reports to you.",
       );
     }
+    // Groups are curated in Settings by the firm owner and admins, so any of
+    // the firm's groups may be used — unlike picking people one by one.
+    const groups = [...new Set(groupIds ?? [])];
+    for (const groupId of groups) {
+      const group = await ctx.db.get(groupId);
+      if (group === null || group.ownerId !== orgId) {
+        throw new Error("One of those groups no longer exists.");
+      }
+    }
     await ctx.db.patch(id, {
       assigneeIds: targets.length > 0 ? targets : undefined,
+      groupIds: groups.length > 0 ? groups : undefined,
     });
-    return { assigneeIds: targets };
+    return { assigneeIds: targets, groupIds: groups };
+  },
+});
+
+/**
+ * Who may do what with one task.
+ *
+ * The task's owner — the person who created it, or the firm's top user — has
+ * every permission and hands the rest out explicitly, so handing a task on
+ * never silently gives someone the power to delete or re-date it. A task with
+ * no known owner (written before ownership was tracked) stays open to the firm,
+ * as it was before grants existed.
+ */
+export type TaskRights = {
+  isOwner: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canComplete: boolean;
+  canChangeOptions: boolean;
+};
+
+/** The person who owns a task, or null when its author was never recorded. */
+function ownerIdOf(
+  task: Doc<"tasks">,
+  orgId: Id<"users">,
+): Id<"users"> | null {
+  if (task.assigneeId === undefined) return null;
+  // a legacy row stamped with the firm's own id has no known author
+  if (task.assigneeId === orgId && task.assignedAt === undefined) return null;
+  return task.assigneeId;
+}
+
+async function grantOf(
+  ctx: QueryCtx | MutationCtx,
+  taskId: Id<"tasks">,
+  userId: Id<"users">,
+) {
+  const rows = await ctx.db
+    .query("taskGrants")
+    .withIndex("by_task", (q) => q.eq("taskId", taskId))
+    .collect();
+  return rows.find((g) => g.userId === userId);
+}
+
+/** The caller's rights on one task, resolved from ownership then grants. */
+export const myRights = query({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, { taskId }): Promise<TaskRights> => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      return {
+        isOwner: false,
+        canEdit: false,
+        canDelete: false,
+        canComplete: false,
+        canChangeOptions: false,
+      };
+    }
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) {
+      return {
+        isOwner: false,
+        canEdit: false,
+        canDelete: false,
+        canComplete: false,
+        canChangeOptions: false,
+      };
+    }
+    const task = await ctx.db.get(taskId);
+    if (task === null || task.ownerId !== orgId) {
+      return {
+        isOwner: false,
+        canEdit: false,
+        canDelete: false,
+        canComplete: false,
+        canChangeOptions: false,
+      };
+    }
+    return await rightsFor(ctx, task, orgId, userId);
+  },
+});
+
+async function rightsFor(
+  ctx: QueryCtx | MutationCtx,
+  task: Doc<"tasks">,
+  orgId: Id<"users">,
+  userId: Id<"users">,
+): Promise<TaskRights> {
+  const owner = ownerIdOf(task, orgId);
+  const isOwner =
+    owner === null ? userId === orgId : owner === userId || userId === orgId;
+  if (isOwner) {
+    return {
+      isOwner: true,
+      canEdit: true,
+      canDelete: true,
+      canComplete: true,
+      canChangeOptions: true,
+    };
+  }
+  if (owner === null) {
+    // nobody owns it, so it behaves as it did before grants existed
+    return {
+      isOwner: false,
+      canEdit: true,
+      canDelete: true,
+      canComplete: true,
+      canChangeOptions: true,
+    };
+  }
+  const grant = await grantOf(ctx, task._id, userId);
+  if (grant === undefined) {
+    return {
+      isOwner: false,
+      canEdit: false,
+      canDelete: false,
+      canComplete: false,
+      canChangeOptions: false,
+    };
+  }
+  return {
+    isOwner: false,
+    canEdit: grant.canEdit,
+    canDelete: grant.canDelete,
+    canComplete: grant.canComplete,
+    canChangeOptions: grant.canChangeOptions,
+  };
+}
+
+/**
+ * The caller's rights on many tasks at once, so a list of rows can show each
+ * one's tick box and buttons without a query per row. One round trip, one entry
+ * per task that exists and is in the caller's firm.
+ */
+export const myRightsForList = query({
+  args: { ids: v.array(v.id("tasks")) },
+  handler: async (
+    ctx,
+    { ids },
+  ): Promise<{ rights: ({ taskId: Id<"tasks"> } & TaskRights)[] }> => {
+    const userId = await getAuthUserId(ctx);
+    const orgId = await scopeUserId(ctx);
+    if (userId === null || orgId === null) return { rights: [] };
+    const out: ({ taskId: Id<"tasks"> } & TaskRights)[] = [];
+    for (const id of ids.slice(0, 200)) {
+      const task = await ctx.db.get(id);
+      if (task === null || task.ownerId !== orgId) continue;
+      const rights = await rightsFor(ctx, task, orgId, userId);
+      out.push({ taskId: id, ...rights });
+    }
+    return { rights: out };
+  },
+});
+
+/**
+ * Every permission this task's owner has handed out. Only the owner and the
+ * firm's top user can read the whole list; anyone else sees just their own.
+ */
+export const grants = query({
+  args: { taskId: v.id("tasks") },
+  handler: async (
+    ctx,
+    { taskId },
+  ): Promise<{
+    isOwner: boolean;
+    grants: {
+      userId: Id<"users">;
+      canEdit: boolean;
+      canDelete: boolean;
+      canComplete: boolean;
+      canChangeOptions: boolean;
+    }[];
+  }> => {
+    const userId = await getAuthUserId(ctx);
+    const orgId = await scopeUserId(ctx);
+    if (userId === null || orgId === null) {
+      return { isOwner: false, grants: [] };
+    }
+    const task = await ctx.db.get(taskId);
+    if (task === null || task.ownerId !== orgId) {
+      return { isOwner: false, grants: [] };
+    }
+    const rows = await ctx.db
+      .query("taskGrants")
+      .withIndex("by_task", (q) => q.eq("taskId", taskId))
+      .collect();
+    const shape = (g: (typeof rows)[number]) => ({
+      userId: g.userId,
+      canEdit: g.canEdit,
+      canDelete: g.canDelete,
+      canComplete: g.canComplete,
+      canChangeOptions: g.canChangeOptions,
+    });
+    const owner = ownerIdOf(task, orgId);
+    if (userId === orgId || owner === userId) {
+      return { isOwner: true, grants: rows.map(shape) };
+    }
+    const mine = rows.filter((g) => g.userId === userId);
+    return { isOwner: false, grants: mine.map(shape) };
+  },
+});
+
+/**
+ * Give or take back one person's permissions on a task. The owner starts with
+ * everything and hands out the rest here; clearing all four removes the row, so
+ * "no permission" is the same as no grant at all.
+ */
+export const setGrant = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    userId: v.id("users"),
+    canEdit: v.boolean(),
+    canDelete: v.boolean(),
+    canComplete: v.boolean(),
+    canChangeOptions: v.boolean(),
+  },
+  handler: async (
+    ctx,
+    { taskId, userId, canEdit, canDelete, canComplete, canChangeOptions },
+  ): Promise<{ userId: Id<"users"> }> => {
+    const caller = await getAuthUserId(ctx);
+    if (caller === null) throw new Error("Sign in first.");
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) throw new Error("Sign in first.");
+    const task = await ctx.db.get(taskId);
+    if (task === null || task.ownerId !== orgId) {
+      throw new Error("That entry no longer exists.");
+    }
+    const owner = ownerIdOf(task, orgId);
+    if (owner !== caller && orgId !== caller) {
+      throw new Error(
+        "Only the person who created this task can change who may edit it.",
+      );
+    }
+    // permissions only make sense for someone the task is actually with
+    const holders = peopleOf(task, orgId);
+    if (!holders.includes(userId)) {
+      throw new Error("Assign the task to that person first.");
+    }
+    const nothing =
+      !canEdit && !canDelete && !canComplete && !canChangeOptions;
+    const existing = await grantOf(ctx, taskId, userId);
+    if (nothing) {
+      if (existing !== undefined) await ctx.db.delete(existing._id);
+      return { userId };
+    }
+    if (existing === undefined) {
+      await ctx.db.insert("taskGrants", {
+        ownerId: orgId,
+        taskId,
+        userId,
+        canEdit,
+        canDelete,
+        canComplete,
+        canChangeOptions,
+        grantedBy: caller,
+        grantedAt: Date.now(),
+      });
+      return { userId };
+    }
+    await ctx.db.patch(existing._id, {
+      canEdit,
+      canDelete,
+      canComplete,
+      canChangeOptions,
+      grantedBy: caller,
+      grantedAt: Date.now(),
+    });
+    return { userId };
   },
 });
 
@@ -453,6 +746,36 @@ export const update = mutation({
     const task = await ctx.db.get(id);
     if (task === null) throw new Error("That entry is no longer in the ledger.");
     if (task.ownerId !== userId) throw new Error("That entry belongs to another ledger.");
+
+    // Two different permissions live on this one mutation: the wording and
+    // notes are "edit", while the date, priority, repeat, tags and star are
+    // "change options" — the task owner hands them out separately.
+    const actor = await getAuthUserId(ctx);
+    if (actor !== null) {
+      const rights = await rightsFor(ctx, task, userId, actor);
+      const touchingOptions =
+        clearDue === true ||
+        clearReminder === true ||
+        clearRecurrence === true ||
+        patch.dueAt !== undefined ||
+        patch.remindAt !== undefined ||
+        patch.priority !== undefined ||
+        patch.recurrence !== undefined ||
+        patch.tags !== undefined ||
+        patch.starred !== undefined ||
+        patch.listId !== undefined;
+      if (touchingOptions) {
+        if (!rights.canChangeOptions) {
+          throw new Error(
+            "You can see this task, but only its owner can change its date, priority or repeat.",
+          );
+        }
+      } else if (!rights.canEdit) {
+        throw new Error(
+          "You can see this task, but only its owner can edit it.",
+        );
+      }
+    }
 
     const clean: Record<string, unknown> = {};
     if (patch.text !== undefined) {
@@ -727,6 +1050,16 @@ export const toggle = mutation({
     if (task.ownerId !== userId) {
       throw new Error("That entry belongs to another ledger.");
     }
+    // ticking a task off needs the "complete" permission its owner handed out
+    const actor = await getAuthUserId(ctx);
+    if (actor !== null) {
+      const rights = await rightsFor(ctx, task, userId, actor);
+      if (!rights.canComplete) {
+        throw new Error(
+          "You can see this task, but only its owner can complete it.",
+        );
+      }
+    }
     const nowCompleted = !task.isCompleted;
     if (nowCompleted) {
       // a task can only be finished once every subtask is finished
@@ -780,6 +1113,15 @@ export const remove = mutation({
     const task = await ctx.db.get(id);
     if (task === null) throw new Error("That entry is no longer in the ledger.");
     if (task.ownerId !== userId) throw new Error("That entry belongs to another ledger.");
+    const actor = await getAuthUserId(ctx);
+    if (actor !== null) {
+      const rights = await rightsFor(ctx, task, userId, actor);
+      if (!rights.canDelete) {
+        throw new Error(
+          "You can see this task, but only its owner can delete it.",
+        );
+      }
+    }
     const steps = await ctx.db
       .query("taskSteps")
       .withIndex("by_task", (q) => q.eq("taskId", id))

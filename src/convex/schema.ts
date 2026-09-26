@@ -90,6 +90,36 @@ const settings = defineTable({
   members: v.array(teamMemberValidator), // every user + role + restrictions
 }).index("by_owner", ["ownerId"]);
 
+// Reusable groups of people inside a firm, e.g. "Site crew" or "Accounts".
+// A task can be handed to a whole group in one action, and a group can pull in
+// people from any branch of the hierarchy.
+const userGroups = defineTable({
+  ownerId: v.id("users"), // firm scope — settings.ownerId
+  name: v.string(),
+  description: v.optional(v.string()),
+  memberIds: v.array(v.id("users")),
+  createdBy: v.id("users"),
+  createdAt: v.number(),
+}).index("by_owner", ["ownerId"]);
+
+// What one person may do with one task. A task's owner has every permission by
+// default and hands out the rest here; with no row, the person can see the task
+// but not act on it.
+const taskGrants = defineTable({
+  ownerId: v.id("users"), // firm scope — settings.ownerId
+  taskId: v.id("tasks"),
+  userId: v.id("users"),
+  canEdit: v.boolean(), // title, notes, steps, files
+  canDelete: v.boolean(),
+  canComplete: v.boolean(),
+  /** Due date, priority, repeat, tags, and handing the task on. */
+  canChangeOptions: v.boolean(),
+  grantedBy: v.id("users"),
+  grantedAt: v.number(),
+})
+  .index("by_owner", ["ownerId"])
+  .index("by_task", ["taskId"]);
+
 // Sign-in credentials provisioned by the organisation's super admin. The auth
 // account itself lives in the Convex Auth tables; this row is the organisation
 // side of it (who created it, which org it belongs to, when it last signed in).
@@ -216,6 +246,8 @@ const schema = defineSchema(
        *  assigneeId above stays the person who created it, i.e. the task owner
        *  who is allowed to reassign it. */
       assigneeIds: v.optional(v.array(v.id("users"))),
+      /** Whole groups of people the task is assigned to (Settings → User groups). */
+      groupIds: v.optional(v.array(v.id("userGroups"))),
       text: v.string(), // the task itself, e.g. "Read Ch. 4 of Biology"
       isCompleted: v.boolean(), // false until the task is checked off
       listId: v.optional(v.id("taskLists")), // which named list it belongs to
@@ -519,6 +551,8 @@ const schema = defineSchema(
     // add other tables here
 
     settings,
+    userGroups,
+    taskGrants,
     credentials,
     customRoles,
     pendingInvites,

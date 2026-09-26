@@ -64,6 +64,7 @@ import {
   Tags,
   Trash2,
   UserPlus,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -71,6 +72,7 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { useRef, useState } from "react";
 import { toast } from "@/lib/toast";
 import FirmLogoPicker from "@/components/FirmLogoPicker";
+import UserGroupsSettings from "@/components/UserGroupsSettings";
 
 type Role = "super" | "admin" | "user" | "member";
 type AssignableRole = Exclude<Role, "super">;
@@ -125,6 +127,7 @@ type ProvisionedLogin = {
 const SETTINGS_TABS = [
   ["organisation", "Organisation", Building2],
   ["people", "Users & roles", Users],
+  ["groups", "User groups", UserRound],
   ["team", "Team hierarchy", GitBranch],
   ["credentials", "Credentials", KeyRound],
   ["roles", "Custom roles", Tags],
@@ -1341,6 +1344,23 @@ export default function SettingsPanel() {
             ))}
           </ul>
         )}
+      </section>
+
+      {/* user groups */}
+      <section
+        id="settings-groups"
+        className="scroll-mt-6 overflow-hidden rounded-2xl border bg-card shadow-sm"
+      >
+        <header className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
+          <UserRound className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">User groups</h2>
+          <span className="ml-auto text-xs text-muted-foreground">
+            Assign a task to a whole group
+          </span>
+        </header>
+        <div className="px-5 py-4">
+          <UserGroupsSettings canManage={canManage} />
+        </div>
       </section>
 
       {/* team hierarchy */}
