@@ -467,6 +467,37 @@ export default function SettingsPanel() {
   const [pwLogin, setPwLogin] = useState<ProvisionedLogin | null>(null);
   const [pwDraft, setPwDraft] = useState("");
   const [pwResult, setPwResult] = useState<string | null>(null);
+  // passwords are hidden until someone asks to see them
+  const [pwRevealDraft, setPwRevealDraft] = useState(false);
+  const [pwRevealResult, setPwRevealResult] = useState(false);
+
+  // credentials list: per-login username + a hidden password box
+  const [credDrafts, setCredDrafts] = useState<Record<string, string>>({});
+  const [credRevealed, setCredRevealed] = useState<Record<string, boolean>>({});
+  const [credBusy, setCredBusy] = useState<string | null>(null);
+  const [credSaved, setCredSaved] = useState<string | null>(null);
+
+  const saveCredential = async (login: ProvisionedLogin) => {
+    const password = (credDrafts[login._id] ?? "").trim();
+    if (password.length < 8) {
+      toast.error("Use at least 8 characters.");
+      return;
+    }
+    setCredBusy(login._id);
+    try {
+      await setLoginPassword({ credentialsId: login._id, password });
+      setCredDrafts((current) => ({ ...current, [login._id]: "" }));
+      setCredRevealed((current) => ({ ...current, [login._id]: false }));
+      setCredSaved(login._id);
+      toast.success(`Password updated for @${login.username}.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't update the password.",
+      );
+    } finally {
+      setCredBusy(null);
+    }
+  };
 
   // collapsed nodes in the team hierarchy tree
   const [collapsedNodes, setCollapsedNodes] = useState<Set<Id<"users">>>(new Set());
@@ -1374,7 +1405,7 @@ export default function SettingsPanel() {
                           : m.name ?? m.email ?? "User"}
                       </span>
                       {login && (
-                        <span className="hidden shrink-0 font-mono text-[10px] text-muted-foreground/70 sm:inline">
+                        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                           @{login.username}
                         </span>
                       )}
@@ -1512,6 +1543,145 @@ export default function SettingsPanel() {
             <RefreshCw className="size-3" />
             Reset their password
           </span>
+        </footer>
+      </section>
+
+      {/* ── Credentials: usernames and passwords ───────────────────── */}
+      <section
+        id="settings-credentials"
+        className="scroll-mt-6 overflow-hidden rounded-2xl border bg-card shadow-sm"
+      >
+        <header className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
+          <KeyRound className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Credentials</h2>
+          <span className="ml-auto text-xs text-muted-foreground">
+            {(logins ?? []).length} login{(logins ?? []).length === 1 ? "" : "s"}
+          </span>
+        </header>
+
+        {logins === undefined || logins === null ? (
+          <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+            Loading logins…
+          </p>
+        ) : logins.length === 0 ? (
+          <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+            No logins yet — create a user to give them a username and password.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border/60">
+            {logins.map((login) => {
+              const value = credDrafts[login._id] ?? "";
+              const revealed = credRevealed[login._id] === true;
+              const member = members?.find((m) => m.userId === login.userId);
+              return (
+                <li key={login._id} className="px-5 py-3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <KeyRound className="size-3.5 shrink-0 text-muted-foreground/70" />
+                      <span className="truncate text-sm font-medium">
+                        {member?.name ?? member?.email ?? login.username}
+                      </span>
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                        @{login.username}
+                      </span>
+                    </span>
+                    {login.disabled && (
+                      <span className="shrink-0 rounded-full bg-destructive/10 px-1.5 py-0.5 text-[9px] font-semibold text-destructive">
+                        off
+                      </span>
+                    )}
+                    {credSaved === login._id && (
+                      <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                        <Check className="size-3" /> Password updated
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <div className="relative min-w-0 flex-1 sm:max-w-sm">
+                      <Input
+                        type={revealed ? "text" : "password"}
+                        autoComplete="new-password"
+                        placeholder="New password"
+                        aria-label={`New password for @${login.username}`}
+                        className="pr-9 font-mono text-sm"
+                        value={value}
+                        onChange={(e) =>
+                          setCredDrafts((current) => ({
+                            ...current,
+                            [login._id]: e.target.value,
+                          }))
+                        }
+                      />
+                      <button
+                        type="button"
+                        aria-label={revealed ? "Hide password" : "Show password"}
+                        title={revealed ? "Hide password" : "Show password"}
+                        aria-pressed={revealed}
+                        onClick={() =>
+                          setCredRevealed((current) => ({
+                            ...current,
+                            [login._id]: !revealed,
+                          }))
+                        }
+                        className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                      >
+                        {revealed ? (
+                          <EyeOff className="size-4" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                      </button>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setCredDrafts((current) => ({
+                          ...current,
+                          [login._id]: makePassword(),
+                        }))
+                      }
+                    >
+                      Generate
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={credBusy === login._id || value.trim().length < 8}
+                      onClick={() => void saveCredential(login)}
+                    >
+                      {credBusy === login._id && (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      )}
+                      Save
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setPwLogin(login);
+                        setPwDraft(makePassword());
+                        setPwResult(null);
+                        setPwRevealDraft(false);
+                        setPwRevealResult(false);
+                      }}
+                    >
+                      <RefreshCw className="size-3.5" /> Reset
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <footer className="border-t border-border/60 px-5 py-2.5 text-xs text-muted-foreground">
+          Passwords are stored hashed, so an existing one can never be displayed —
+          set a new one here and read it out to the person. It is hidden by
+          default and cleared as soon as it is saved.
         </footer>
       </section>
 
