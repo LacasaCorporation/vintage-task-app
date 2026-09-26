@@ -39,6 +39,7 @@ import {
   History,
   Inbox,
   List,
+  ListTodo,
   Loader2,
   Paperclip,
   Plus,
@@ -113,6 +114,32 @@ export default function TasksPanel({
   const toggleTask = useMutation(api.tasks.toggle);
   const removeTask = useMutation(api.tasks.remove);
   const updateTask = useMutation(api.tasks.update);
+  // subtasks (steps) for the whole scope in one query, so each row can show
+  // its own subtask dropdown without a query per row
+  const allSteps = useQuery(api.tasks.listAllSteps);
+  const toggleStepM = useMutation(api.tasks.toggleStep);
+  const addStepM = useMutation(api.tasks.addStep);
+  const removeStepM = useMutation(api.tasks.removeStep);
+  const [openStepRows, setOpenStepRows] = useState<Set<string>>(() => new Set());
+  const [stepDrafts, setStepDrafts] = useState<Record<string, string>>({});
+
+  const stepsByTask = useMemo(() => {
+    const map = new Map<string, Doc<"taskSteps">[]>();
+    for (const step of allSteps ?? []) {
+      const list = map.get(step.taskId) ?? [];
+      list.push(step);
+      map.set(step.taskId, list);
+    }
+    return map;
+  }, [allSteps]);
+
+  const toggleStepRow = (taskId: string) =>
+    setOpenStepRows((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
 
   // flagged jobs & products (from the Projects section) for the Flagged view
   const flaggedJobs = useQuery(api.jobs.listJobs);
@@ -822,6 +849,9 @@ export default function TasksPanel({
                 {tasks.map((task) => {
                   const isOpen = openTaskId === task._id;
                   const overdue = isOverdue(task);
+                  const taskSteps = stepsByTask.get(task._id) ?? [];
+                  const stepsDone = taskSteps.filter((s) => s.isCompleted).length;
+                  const stepsOpen = openStepRows.has(task._id);
                   const hasExtras =
                     task.dueAt !== undefined ||
                     task.tags !== undefined ||
@@ -960,6 +990,46 @@ export default function TasksPanel({
                                   {parseAttachments(task.attachments).length}
                                 </span>
                               )}
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                aria-expanded={stepsOpen}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleStepRow(task._id);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    toggleStepRow(task._id);
+                                  }
+                                }}
+                                className={cn(
+                                  "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
+                                  stepsOpen
+                                    ? "bg-primary/10 text-primary"
+                                    : stepsDone === taskSteps.length && taskSteps.length > 0
+                                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                      : "bg-muted text-muted-foreground",
+                                )}
+                                title={
+                                  taskSteps.length === 0
+                                    ? "Add a subtask"
+                                    : `${stepsDone} of ${taskSteps.length} subtasks done`
+                                }
+                              >
+                                <ListTodo className="size-2.5" />
+                                {taskSteps.length === 0
+                                  ? "Subtasks"
+                                  : `${stepsDone}/${taskSteps.length}`}
+                                <ChevronDown
+                                  className={cn(
+                                    "size-2.5 transition-transform",
+                                    stepsOpen && "rotate-180",
+                                  )}
+                                />
+                              </span>
                               {task.sourcePageId && (
                                 <Badge
                                   variant="secondary"
@@ -1011,6 +1081,101 @@ export default function TasksPanel({
                           />
                         </span>
                       </div>
+                      {/* subtasks: a dropdown under the row */}
+                      <AnimatePresence initial={false}>
+                        {stepsOpen && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.18 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="space-y-1 border-t border-border/60 bg-muted/30 px-4 py-2.5 sm:px-5">
+                              {taskSteps.length === 0 ? (
+                                <p className="pl-1 text-xs text-muted-foreground">
+                                  No subtasks yet — add the first one below.
+                                </p>
+                              ) : (
+                                <ul className="space-y-1">
+                                  {taskSteps.map((step) => (
+                                    <li key={step._id} className="group/step flex items-center gap-2">
+                                      <Checkbox
+                                        checked={step.isCompleted}
+                                        disabled={!canEdit}
+                                        onCheckedChange={() => void toggleStepM({ id: step._id })}
+                                        aria-label={
+                                          step.isCompleted
+                                            ? `Reopen subtask “${step.text}”`
+                                            : `Mark subtask “${step.text}” as done`
+                                        }
+                                        className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
+                                      />
+                                      <span
+                                        className={cn(
+                                          "min-w-0 flex-1 truncate text-xs",
+                                          step.isCompleted
+                                            ? "text-muted-foreground line-through"
+                                            : "text-foreground",
+                                        )}
+                                      >
+                                        {step.text}
+                                      </span>
+                                      {canDelete && (
+                                        <button
+                                          type="button"
+                                          aria-label={`Delete subtask “${step.text}”`}
+                                          className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-0 transition-colors hover:text-destructive group-hover/step:opacity-100"
+                                          onClick={() => void removeStepM({ id: step._id })}
+                                        >
+                                          <Trash2 className="size-3" />
+                                        </button>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                              {canCreateSteps && (
+                                <form
+                                  className="flex items-center gap-1.5 pt-1"
+                                  onSubmit={(e) => {
+                                    e.preventDefault();
+                                    const text = (stepDrafts[task._id] ?? "").trim();
+                                    if (!text) return;
+                                    setStepDrafts((current) => ({ ...current, [task._id]: "" }));
+                                    void addStepM({ taskId: task._id, text }).catch(() =>
+                                      toast.error("Couldn't add the subtask."),
+                                    );
+                                  }}
+                                >
+                                  <Input
+                                    value={stepDrafts[task._id] ?? ""}
+                                    onChange={(e) =>
+                                      setStepDrafts((current) => ({
+                                        ...current,
+                                        [task._id]: e.target.value,
+                                      }))
+                                    }
+                                    onFocus={() => toggleStepRow(task._id)}
+                                    placeholder="Add a subtask…"
+                                    aria-label="New subtask"
+                                    maxLength={280}
+                                    className="h-8 rounded-lg text-xs"
+                                  />
+                                  <Button
+                                    type="submit"
+                                    size="sm"
+                                    disabled={!(stepDrafts[task._id] ?? "").trim()}
+                                    className="h-8 shrink-0 rounded-lg px-2.5 text-xs"
+                                  >
+                                    <Plus className="size-3" /> Add
+                                  </Button>
+                                </form>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </motion.li>
                   );
                 })}

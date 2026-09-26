@@ -210,6 +210,23 @@ export const listSteps = query({
   },
 });
 
+/**
+ * Every subtask in the current scope in one round trip, so the task list can
+ * show a subtask count and dropdown on each row without a query per row.
+ */
+export const listAllSteps = query({
+  args: {},
+  handler: async (ctx) => {
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) return [];
+    const steps = await ctx.db
+      .query("taskSteps")
+      .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
+      .collect();
+    return steps.sort((a, b) => a._creationTime - b._creationTime);
+  },
+});
+
 /** Write a new entry into the ledger. */
 export const add = mutation({
   args: {
