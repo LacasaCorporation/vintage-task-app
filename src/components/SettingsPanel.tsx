@@ -1438,9 +1438,9 @@ export default function SettingsPanel() {
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium">
-                        {m.isSuper
-                          ? m.name ?? "Organisation owner"
-                          : m.name ?? m.email ?? "User"}
+                        {/* the owner falls back to the email like everyone
+                            else, so the super user is never an anonymous row */}
+                        {m.name ?? m.email ?? "Organisation owner"}
                       </span>
                       {login && (
                         <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
@@ -1506,7 +1506,7 @@ export default function SettingsPanel() {
                                 key={c.userId}
                                 onClick={() => void handleAssignManager(m, c.userId)}
                               >
-                                {c.isSuper ? "Organisation owner" : memberName(c.userId)}
+                                {memberName(c.userId)}
                               </DropdownMenuItem>
                             ))}
                           {isSuper && (
