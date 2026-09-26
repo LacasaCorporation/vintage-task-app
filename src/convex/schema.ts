@@ -42,6 +42,7 @@ export const itemPermissionsValidator = v.object({
   products: v.optional(sectionPermissionsValidator),
   projects: v.optional(sectionPermissionsValidator),
   printing: v.optional(sectionPermissionsValidator),
+  purchases: v.optional(sectionPermissionsValidator),
 });
 export const permissionsValidator = v.object({
   tasks: v.optional(sectionPermissionsValidator),
@@ -258,6 +259,29 @@ const schema = defineSchema(
       subCategory: v.optional(v.string()), // managed master value
       unit: v.string(), // managed master value, e.g. kg, m, pcs, L, hr
       pricePerUnit: v.number(),
+      // how much is on hand; raised by purchase bills, lowered by usage
+      stock: v.optional(v.number()),
+    }).index("by_owner", ["ownerId"]),
+
+    // a purchase bill: buying raw materials, which adds to their stock
+    purchases: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // auto PUR0001, PUR0002, …
+      supplier: v.optional(v.string()),
+      purchasedAt: v.number(), // ms
+      note: v.optional(v.string()),
+      currency: v.optional(v.string()),
+      lines: v.array(
+        v.object({
+          materialId: v.id("rawMaterials"),
+          name: v.string(),
+          unit: v.string(),
+          qty: v.number(),
+          unitCost: v.number(),
+        }),
+      ),
+      total: v.number(),
+      isPaid: v.optional(v.boolean()),
     }).index("by_owner", ["ownerId"]),
 
     // a costing sheet for a job / project / task

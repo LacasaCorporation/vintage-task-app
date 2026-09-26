@@ -6,6 +6,7 @@ import MaterialsSheet from "@/components/MaterialsSheet";
 import ProductForm from "@/components/ProductForm";
 import ProjectsSheet from "@/components/ProjectsSheet";
 import type { CostingView } from "@/components/CostingSidebar";
+import PurchasePanel from "@/components/PurchasePanel";
 import {
   ChevronDown,
   Download,
@@ -61,6 +62,10 @@ export default function CostingPanel({
   canEdit = true,
   canDelete = true,
   canViewMaterials = true,
+  canViewPurchase = true,
+  canCreatePurchase = true,
+  canEditPurchase = true,
+  canDeletePurchase = true,
   canCreateMaterial = true,
   canEditMaterial = true,
   canDeleteMaterial = true,
@@ -87,6 +92,10 @@ export default function CostingPanel({
   canEdit?: boolean;
   canDelete?: boolean;
   canViewMaterials?: boolean;
+  canViewPurchase?: boolean;
+  canCreatePurchase?: boolean;
+  canEditPurchase?: boolean;
+  canDeletePurchase?: boolean;
   /** Raw material item permissions (separate from products). */
   canCreateMaterial?: boolean;
   canEditMaterial?: boolean;
@@ -518,7 +527,14 @@ export default function CostingPanel({
       )}
 
       {/* ── Views ────────────────────────────────────────────────────── */}
-      {view?.kind === "materials" && canViewMaterials ? (
+      {view?.kind === "purchase" && canViewPurchase ? (
+        <PurchasePanel
+          materials={materials}
+          canCreate={canCreatePurchase}
+          canEdit={canEditPurchase}
+          canDelete={canDeletePurchase}
+        />
+      ) : view?.kind === "materials" && canViewMaterials ? (
         <div className="mt-4">
           <MaterialsSheet
             materials={materials}

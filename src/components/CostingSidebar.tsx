@@ -7,6 +7,7 @@ import {
   Package,
   Pencil,
   Plus,
+  Receipt,
   Trash2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -18,6 +19,7 @@ type MaterialDoc = Doc<"rawMaterials">;
 /** What's open in the main area: raw-materials, products, projects, or one FG product. */
 export type CostingView =
   | { kind: "materials" }
+  | { kind: "purchase" }
   | { kind: "products" }
   | { kind: "projects" }
   | { kind: "fg"; fgId: FgDoc["_id"] }
@@ -35,6 +37,8 @@ export default function CostingSidebar({
   onDeleteFg,
   onMaterialsClick,
   showMaterials = true,
+  showPurchase = true,
+  purchaseCount = 0,
 }: {
   finishedGoods: FgDoc[];
   materials: MaterialDoc[];
@@ -46,6 +50,8 @@ export default function CostingSidebar({
   onDeleteFg?: (fg: FgDoc) => void;
   onMaterialsClick: () => void;
   showMaterials?: boolean;
+  showPurchase?: boolean;
+  purchaseCount?: number;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -91,6 +97,19 @@ export default function CostingSidebar({
             unit: "item",
             active: view?.kind === "materials",
             onClick: onMaterialsClick,
+          },
+        ]
+      : []),
+    ...(showPurchase
+      ? [
+          {
+            id: "purchase" as const,
+            label: "Purchase",
+            icon: Receipt,
+            count: purchaseCount,
+            unit: "bill",
+            active: view?.kind === "purchase",
+            onClick: () => onSelectView({ kind: "purchase" }),
           },
         ]
       : []),

@@ -29,6 +29,7 @@ export const ITEMS = [
   { key: "notePages", section: "notes", label: "Pages & sub-pages", actions: ["create", "edit", "delete"] },
   { key: "flagToTask", section: "notes", label: "Flag text → task", actions: ["create"] },
   { key: "materials", section: "costing", label: "Raw materials", actions: ["create", "edit", "delete"] },
+  { key: "purchases", section: "costing", label: "Purchase bills", actions: ["create", "edit", "delete", "view"] },
   { key: "dataImport", section: "costing", label: "Excel import / export", actions: ["create", "view"] },
   { key: "products", section: "costing", label: "Products (FG)", actions: ["create", "edit", "delete"] },
   { key: "projects", section: "costing", label: "Projects", actions: ["create", "edit", "delete"] },

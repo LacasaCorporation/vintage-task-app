@@ -430,6 +430,7 @@ export default function Dashboard() {
 
   // ── Costing (raw materials + sheets) ─────────────────────────────
   const materials = useQuery(api.costing.listMaterials);
+  const purchases = useQuery(api.purchases.list);
   const finishedGoods = useQuery(api.costing.listFinishedGoods);
   const allJobs = useQuery(api.jobs.listJobs);
   const addFgM = useMutation(api.costing.addFinishedGood);
@@ -799,6 +800,8 @@ export default function Dashboard() {
               onDeleteFg={canDoItem("products", "delete") ? (fg) => void handleDeleteFg(fg) : undefined}
               onMaterialsClick={() => setCostingView({ kind: "materials" })}
               showMaterials={canDoItem("materials", "view")}
+              showPurchase={canDoItem("purchases", "view")}
+              purchaseCount={purchases?.length ?? 0}
             />
           ) : section === "tasks" ? (
             <TasksSidebar
@@ -965,6 +968,10 @@ export default function Dashboard() {
               canEdit={canDoItem("products", "edit")}
               canDelete={canDoItem("products", "delete")}
               canViewMaterials={canDoItem("materials", "view")}
+              canViewPurchase={canDoItem("purchases", "view")}
+              canCreatePurchase={canDoItem("purchases", "create")}
+              canEditPurchase={canDoItem("purchases", "edit")}
+              canDeletePurchase={canDoItem("purchases", "delete")}
               canCreateMaterial={canDoItem("materials", "create")}
               canEditMaterial={canDoItem("materials", "edit")}
               canDeleteMaterial={canDoItem("materials", "delete")}

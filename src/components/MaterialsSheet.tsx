@@ -447,20 +447,21 @@ export default function MaterialsSheet({
                 <th className="w-28 px-3 py-2 font-semibold">Sub-cat.</th>
                 <th className="w-16 px-3 py-2 font-semibold">Unit</th>
                 <th className="w-28 px-3 py-2 text-right font-semibold">Unit price</th>
+                <th className="w-28 px-3 py-2 text-right font-semibold">Stock</th>
                 <th className="w-10 px-2 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading materials…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                     {search || categoryFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No raw materials yet — add your first one above."}
@@ -476,6 +477,20 @@ export default function MaterialsSheet({
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.subCategory ?? "—"}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.unit}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{m.pricePerUnit.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      <span
+                        className={cn(
+                          "font-medium",
+                          (m.stock ?? 0) > 0
+                            ? "text-foreground"
+                            : "text-muted-foreground/60",
+                        )}
+                        title={`${(m.stock ?? 0).toLocaleString()} ${m.unit} on hand`}
+                      >
+                        {(m.stock ?? 0).toLocaleString()}
+                      </span>
+                      <span className="ml-1 text-[10px] text-muted-foreground">{m.unit}</span>
+                    </td>
                     <td className="px-2 py-1 text-center">
                       <span className="hidden gap-0.5 group-hover/row:inline-flex">
                         {canEdit && (
