@@ -117,6 +117,53 @@ export function daysLeftLabel(ts: number): { text: string; overdue: boolean } {
   return { text: `${Math.abs(days)}d overdue`, overdue: true };
 }
 
+/**
+ * Due date + how many days are left to finish, shown as two chips on every
+ * row. `inherited` marks a date that came from the parent job, and `empty`
+ * renders a muted placeholder so a missing date is visible instead of silent.
+ */
+export function DueChips({
+  dueAt,
+  inherited = false,
+  empty = false,
+}: {
+  dueAt?: number;
+  inherited?: boolean;
+  empty?: boolean;
+}) {
+  if (dueAt === undefined) {
+    if (!empty) return null;
+    return (
+      <span
+        className={cn(tagChip, "border border-dashed border-border/80 text-muted-foreground/70")}
+        title="No due date yet — set one from the details pane"
+      >
+        No due date
+      </span>
+    );
+  }
+  const left = daysLeftLabel(dueAt);
+  return (
+    <>
+      <span
+        className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+        title={`Due ${formatDueLabel(dueAt)}${inherited ? " (inherited from the job)" : ""}`}
+      >
+        {formatDueLabel(dueAt)}
+      </span>
+      <span
+        className={cn(
+          "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+          left.overdue ? "bg-destructive/10 text-destructive" : "bg-primary/10 text-primary",
+        )}
+        title={`${left.text} — time left to finish`}
+      >
+        {left.text}
+      </span>
+    </>
+  );
+}
+
 /** Which item's detail pane is open — one per hierarchy level. */
 export type FlaggedSel =
   | { kind: "project"; id: Id<"projects"> }
@@ -324,6 +371,7 @@ export function FlaggedItemsList({
                   {jobProducts.filter((f) => f.isCompleted).length}/{jobProducts.length}
                 </span>
               )}
+              <DueChips dueAt={job.dueAt} empty />
               <span className={tagChip}>{data.projectNameOf(job)}</span>
               <span className={tagChip}>{jobProjectStatus(job, projectStatuses)}</span>
             </div>
@@ -369,27 +417,10 @@ export function FlaggedItemsList({
                         {fg.code}
                       </span>
                     )}
-                    {fg.dueAt !== undefined && (
-                      <>
-                        <span
-                          className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
-                          title={`Due ${formatDueLabel(fg.dueAt)}`}
-                        >
-                          {formatDueLabel(fg.dueAt)}
-                        </span>
-                        <span
-                          className={cn(
-                            "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                            daysLeftLabel(fg.dueAt).overdue
-                              ? "bg-destructive/10 text-destructive"
-                              : "bg-primary/10 text-primary",
-                          )}
-                          title="Time left to complete this product"
-                        >
-                          {daysLeftLabel(fg.dueAt).text}
-                        </span>
-                      </>
-                    )}
+                    <DueChips
+                      dueAt={fg.dueAt ?? job.dueAt}
+                      inherited={fg.dueAt === undefined && job.dueAt !== undefined}
+                    />
                     {showTags && (
                       <>
                         <span className={tagChip}>{data.projectNameOf(job)}</span>
@@ -469,27 +500,10 @@ export function FlaggedItemsList({
                   </span>
                 )}
                 {showTags && parentJob && <span className={tagChip}>{parentJob.name}</span>}
-                {fg.dueAt !== undefined && (
-                  <>
-                    <span
-                      className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
-                      title={`Due ${formatDueLabel(fg.dueAt)}`}
-                    >
-                      {formatDueLabel(fg.dueAt)}
-                    </span>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                        daysLeftLabel(fg.dueAt).overdue
-                          ? "bg-destructive/10 text-destructive"
-                          : "bg-primary/10 text-primary",
-                      )}
-                      title="Time left to complete this product"
-                    >
-                      {daysLeftLabel(fg.dueAt).text}
-                    </span>
-                  </>
-                )}
+                <DueChips
+                  dueAt={fg.dueAt ?? parentJob?.dueAt}
+                  inherited={fg.dueAt === undefined && parentJob?.dueAt !== undefined}
+                />
               </div>
             </li>
           );
@@ -634,27 +648,7 @@ export function FlaggedProjectsList({
             >
               {projectFgs.length} product{projectFgs.length === 1 ? "" : "s"}
             </span>
-            {project.dueAt !== undefined && (
-              <>
-                <span
-                  className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
-                  title={`Due ${formatDueLabel(project.dueAt)}`}
-                >
-                  {formatDueLabel(project.dueAt)}
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                    daysLeftLabel(project.dueAt).overdue
-                      ? "bg-destructive/10 text-destructive"
-                      : "bg-primary/10 text-primary",
-                  )}
-                  title="Time left to complete this project"
-                >
-                  {daysLeftLabel(project.dueAt).text}
-                </span>
-              </>
-            )}
+            <DueChips dueAt={project.dueAt} />
             <span className={tagChip}>{status}</span>
           </li>
         );
@@ -766,6 +760,11 @@ export function FlaggedProductsList({
             </span>
           )}
           {parentJob && <span className={tagChip}>{parentJob.name}</span>}
+          <DueChips
+            dueAt={fg.dueAt ?? parentJob?.dueAt}
+            inherited={fg.dueAt === undefined && parentJob?.dueAt !== undefined}
+            empty
+          />
           {showTags && parentJob && <span className={tagChip}>{data.projectNameOf(parentJob)}</span>}
           <span className={tagChip}>{fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}</span>
         </li>
@@ -845,6 +844,19 @@ function BoardCardView({
           >
             <CalendarDays className="size-2.5" />
             {formatDueLabel(card.fg.dueAt)}
+          </span>
+        )}
+        {card.fg.dueAt !== undefined && (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+              daysLeftLabel(card.fg.dueAt).overdue && !done
+                ? "bg-rose-500/10 text-rose-700 dark:text-rose-400"
+                : "bg-primary/10 text-primary",
+            )}
+            title="Time left to finish this product"
+          >
+            {daysLeftLabel(card.fg.dueAt).text}
           </span>
         )}
         {card.fg.priority && (
@@ -1454,8 +1466,16 @@ export function FlaggedDetail({
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                   />
                   {job.dueAt !== undefined && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {formatDueLabel(job.dueAt)}
+                    <p
+                      className={cn(
+                        "mt-1 text-xs",
+                        daysLeftLabel(job.dueAt).overdue
+                          ? "font-medium text-destructive"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {formatDueLabel(job.dueAt)} ·{" "}
+                      <span className="font-medium">{daysLeftLabel(job.dueAt).text}</span>
                     </p>
                   )}
                 </DetailRow>
