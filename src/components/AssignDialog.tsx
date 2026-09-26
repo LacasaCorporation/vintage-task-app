@@ -71,6 +71,34 @@ export default function AssignDialog({
   onOpenChange: (next: boolean) => void;
   canEdit?: boolean;
 }) {
+  // The body keeps the ticked people, groups and permissions while the popup
+  // is open, and forgets them the moment it closes. It lives inside
+  // DialogContent (which Radix unmounts on close) and is keyed by the task, so
+  // a half-finished pick on one task can never show up already ticked on the
+  // next one.
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <AssignBody
+          key={task._id}
+          task={task}
+          canEdit={canEdit}
+          onClose={() => onOpenChange(false)}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AssignBody({
+  task,
+  canEdit,
+  onClose,
+}: {
+  task: TaskDoc;
+  canEdit: boolean;
+  onClose: () => void;
+}) {
   const peopleData = useQuery(api.tasks.people);
   const groupsData = useQuery(api.userGroups.list);
   const grantsData = useQuery(api.tasks.grants, { taskId: task._id });
@@ -178,7 +206,7 @@ export default function AssignDialog({
           ? "Task is no longer assigned to anyone."
           : `Assigned to ${who.join(", ")}.`,
       );
-      onOpenChange(false);
+      onClose();
     } catch (error) {
       toast.error(messageFrom(error, "Couldn't assign that task."));
     } finally {
@@ -206,9 +234,8 @@ export default function AssignDialog({
         pickedGroups.some((id, i) => id !== groupSelection[i])));
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+    <>
+      <DialogHeader>
           <DialogTitle>Assign this task</DialogTitle>
           <DialogDescription>
             {isOwner
@@ -434,7 +461,7 @@ export default function AssignDialog({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => onOpenChange(false)}
+              onClick={onClose}
             >
               Done
             </Button>
@@ -463,8 +490,7 @@ export default function AssignDialog({
             </>
           )}
         </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </>
   );
 }
 
