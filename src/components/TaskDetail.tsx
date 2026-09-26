@@ -29,11 +29,15 @@ import {
   Star,
   Tag,
   Trash2,
+  UserRound,
+  Users,
   X,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
+import PeopleGroupPicker from "@/components/PeopleGroupPicker";
+import { assigneeLabel, assigneesOfTask } from "@/lib/task-people";
 
 type Priority = "high" | "medium" | "low";
 type Recurrence = "daily" | "weekly" | "monthly";
@@ -105,6 +109,16 @@ export default function TaskDetail({
   const removeAttachment = useMutation(api.tasks.removeAttachment);
 
   const steps = useQuery(api.tasks.listSteps, { taskId: task._id });
+  const peopleData = useQuery(api.tasks.people);
+  const peopleById = useMemo(
+    () => new Map((peopleData?.people ?? []).map((p) => [p.userId, p] as const)),
+    [peopleData],
+  );
+  const assignees = useMemo(
+    () => assigneesOfTask(task, peopleById),
+    [task, peopleById],
+  );
+  const [showAssignees, setShowAssignees] = useState(false);
   const [description, setDescription] = useState(task.description ?? "");
   const [tagDraft, setTagDraft] = useState("");
   const [stepDraft, setStepDraft] = useState("");
@@ -313,6 +327,43 @@ export default function TaskDetail({
                 task.isCompleted && "text-muted-foreground line-through",
               )}
             />
+          </div>
+
+          {/* assigned to — one person or a whole group in the firm */}
+          <div className="mt-4">
+            <Row icon={Users} label="Assigned to">
+              <button
+                type="button"
+                disabled={!canEdit}
+                onClick={() => setShowAssignees((v) => !v)}
+                aria-expanded={showAssignees}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg border border-border/70 px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60",
+                  assignees.length > 0 && "border-primary/40 bg-primary/5",
+                )}
+              >
+                <UserRound
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    assignees.length > 0 ? "text-primary" : "text-muted-foreground",
+                  )}
+                />
+                <span className="min-w-0 flex-1 truncate">
+                  {assigneeLabel(assignees, peopleById)}
+                </span>
+                <span className="shrink-0 text-[11px] text-muted-foreground">
+                  {showAssignees ? "Hide" : "Change"}
+                </span>
+              </button>
+              {showAssignees && (
+                <PeopleGroupPicker
+                  taskId={task._id}
+                  assignees={assignees}
+                  canEdit={canEdit}
+                  className="mt-2.5 rounded-lg border border-border/60 bg-muted/20 p-2.5"
+                />
+              )}
+            </Row>
           </div>
 
           {/* due date */}

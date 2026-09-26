@@ -62,6 +62,17 @@ export function assigneesOfTask(
     (task.assigneeId === undefined ? [] : [task.assigneeId]);
 }
 
+/** Short label for who a task is with: "Ravi, sabood +1" or "Not assigned". */
+export function assigneeLabel(
+  assignees: Id<"users">[],
+  peopleById: Map<Id<"users">, Person>,
+): string {
+  if (assignees.length === 0) return "Not assigned";
+  const names = assignees.map((id) => peopleById.get(id)?.label ?? "Someone");
+  const head = names.slice(0, 2).join(", ");
+  return names.length > 2 ? `${head} +${names.length - 2}` : head;
+}
+
 /** Everyone above this person, nearest first. Stops on an unset or cyclic link. */
 export function upLineOf(
   people: Person[],
