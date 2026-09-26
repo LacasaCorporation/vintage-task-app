@@ -25,6 +25,7 @@ import {
   isOverdue,
   parseAttachments,
   parseQuickAdd,
+  toLocalInput,
 } from "@/lib/task-utils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -120,6 +121,7 @@ export default function TasksPanel({
   const toggleStepM = useMutation(api.tasks.toggleStep);
   const addStepM = useMutation(api.tasks.addStep);
   const removeStepM = useMutation(api.tasks.removeStep);
+  const updateStepM = useMutation(api.tasks.updateStep);
   const [openStepRows, setOpenStepRows] = useState<Set<string>>(() => new Set());
   const [stepDrafts, setStepDrafts] = useState<Record<string, string>>({});
 
@@ -345,6 +347,28 @@ export default function TasksPanel({
    * Mount the hidden print sheet, let it paint, then open the browser print
    * dialog and unmount it again so it never lingers in the app.
    */
+  /**
+   * Check a task off — blocked server-side while any subtask is open, so the
+   * client shows a hint tooltip instead of letting the click fail silently.
+   */
+  const handleToggleTask = async (taskId: Id<"tasks">) => {
+    const open = (stepsByTask.get(taskId) ?? []).filter((s) => !s.isCompleted).length;
+    if (open > 0) {
+      toast.error(
+        open === 1
+          ? "Finish the last subtask first."
+          : `Finish the ${open} open subtasks first.`,
+      );
+      setOpenStepRows((current) => new Set(current).add(taskId));
+      return;
+    }
+    try {
+      await toggleTask({ id: taskId });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the task.");
+    }
+  };
+
   const handlePrintProducts = () => {
     setPrintProducts(true);
     window.setTimeout(() => {
@@ -877,7 +901,7 @@ export default function TasksPanel({
                         <Checkbox
                           checked={task.isCompleted}
                           disabled={!canEdit}
-                          onCheckedChange={() => void handleToggle(task._id)}
+                          onCheckedChange={() => void handleToggleTask(task._id)}
                           aria-label={
                             task.isCompleted
                               ? `Mark “${task.text}” as not done`
@@ -1121,6 +1145,64 @@ export default function TasksPanel({
                                       >
                                         {step.text}
                                       </span>
+                                      {step.dueAt !== undefined && (
+                                        <span
+                                          className={cn(
+                                            "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                                            !step.isCompleted &&
+                                              daysLeftLabel(step.dueAt).overdue
+                                              ? "bg-destructive/10 text-destructive"
+                                              : "bg-primary/10 text-primary",
+                                          )}
+                                          title={`Subtask due ${formatDueLabel(step.dueAt)}`}
+                                        >
+                                          <CalendarDays className="size-2.5" />
+                                          {formatDueLabel(step.dueAt)}
+                                        </span>
+                                      )}
+                                      {!step.isCompleted && step.dueAt !== undefined && (
+                                        <span
+                                          className={cn(
+                                            "hidden shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums sm:inline-flex",
+                                            daysLeftLabel(step.dueAt).overdue
+                                              ? "bg-destructive/10 text-destructive"
+                                              : "bg-muted text-muted-foreground",
+                                          )}
+                                        >
+                                          {daysLeftLabel(step.dueAt).text}
+                                        </span>
+                                      )}
+                                      {canEdit && (
+                                        <input
+                                          type="datetime-local"
+                                          value={
+                                            step.dueAt !== undefined
+                                              ? toLocalInput(new Date(step.dueAt))
+                                              : ""
+                                          }
+                                          max={
+                                            task.dueAt !== undefined
+                                              ? toLocalInput(new Date(task.dueAt))
+                                              : undefined
+                                          }
+                                          onChange={(e) =>
+                                            void updateStepM({
+                                              id: step._id,
+                                              dueAt: e.target.value
+                                                ? new Date(e.target.value).getTime()
+                                                : undefined,
+                                            }).catch(() =>
+                                              toast.error("Couldn't update the subtask due date."),
+                                            )
+                                          }
+                                          title={
+                                            task.dueAt !== undefined
+                                              ? `Subtask due date — can't be later than the task (${formatDueLabel(task.dueAt)})`
+                                              : "Subtask due date"
+                                          }
+                                          className="hidden w-44 shrink-0 rounded-md border bg-card px-1.5 py-0.5 text-[10px] outline-none focus:ring-2 focus:ring-primary/30 group-hover/step:block"
+                                        />
+                                      )}
                                       {canDelete && (
                                         <button
                                           type="button"
@@ -1157,7 +1239,7 @@ export default function TasksPanel({
                                       }))
                                     }
                                     onFocus={() => toggleStepRow(task._id)}
-                                    placeholder="Add a subtask…"
+                                    placeholder="Add a subtask… (date is capped by the task)"
                                     aria-label="New subtask"
                                     maxLength={280}
                                     className="h-8 rounded-lg text-xs"

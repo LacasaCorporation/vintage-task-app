@@ -374,10 +374,14 @@ export const removeAttachment = mutation({
 
 // ── Subtasks (steps) ────────────────────────────────────────────────────
 
-/** Add a step under a task. */
+/** Add a step under a task. Its due date can never pass the task's own. */
 export const addStep = mutation({
-  args: { taskId: v.id("tasks"), text: v.string() },
-  handler: async (ctx, { taskId, text }) => {
+  args: {
+    taskId: v.id("tasks"),
+    text: v.string(),
+    dueAt: v.optional(v.number()),
+  },
+  handler: async (ctx, { taskId, text, dueAt }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const task = await ctx.db.get(taskId);
@@ -386,12 +390,48 @@ export const addStep = mutation({
     const trimmed = text.trim();
     if (trimmed.length === 0) throw new Error("A step needs some words.");
     if (trimmed.length > MAX_TASK_LENGTH) throw new Error("That step is too long.");
+    // a subtask is never due later than the task it belongs to
+    const cappedDue =
+      dueAt !== undefined && task.dueAt !== undefined && dueAt > task.dueAt
+        ? task.dueAt
+        : dueAt;
     return await ctx.db.insert("taskSteps", {
       ownerId: userId,
       taskId,
       text: trimmed,
       isCompleted: false,
+      dueAt: cappedDue,
     });
+  },
+});
+
+/** Update a step's text and/or due date (due date capped by the parent task). */
+export const updateStep = mutation({
+  args: {
+    id: v.id("taskSteps"),
+    text: v.optional(v.string()),
+    dueAt: v.optional(v.number()),
+  },
+  handler: async (ctx, { id, text, dueAt }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const step = await ctx.db.get(id);
+    if (step === null) throw new Error("That step no longer exists.");
+    if (step.ownerId !== userId) throw new Error("Not your step.");
+    const patch: { text?: string; dueAt?: number } = {};
+    if (text !== undefined) {
+      const trimmed = text.trim();
+      if (trimmed.length === 0) throw new Error("A step needs some words.");
+      patch.text = trimmed;
+    }
+    if (dueAt !== undefined) {
+      const task = await ctx.db.get(step.taskId);
+      patch.dueAt =
+        task !== null && task.dueAt !== undefined && dueAt > task.dueAt
+          ? task.dueAt
+          : dueAt;
+    }
+    await ctx.db.patch(id, patch);
   },
 });
 
@@ -410,7 +450,10 @@ export const renameStep = mutation({
   },
 });
 
-/** Toggle a step's checkbox. */
+/**
+ * Toggle a step's checkbox. A task can only be checked off once every one of
+ * its subtasks is done, so reopening a subtask reopens the task as well.
+ */
 export const toggleStep = mutation({
   args: { id: v.id("taskSteps") },
   handler: async (ctx, { id }) => {
@@ -419,7 +462,21 @@ export const toggleStep = mutation({
     const step = await ctx.db.get(id);
     if (step === null) throw new Error("That step no longer exists.");
     if (step.ownerId !== userId) throw new Error("Not your step.");
-    await ctx.db.patch(id, { isCompleted: !step.isCompleted });
+    const nowCompleted = !step.isCompleted;
+    await ctx.db.patch(id, {
+      isCompleted: nowCompleted,
+      completedAt: nowCompleted ? Date.now() : undefined,
+    });
+
+    // finishing the last subtask doesn't auto-complete the task — the user
+    // checks the task off themselves — but reopening a subtask always
+    // reopens the task, so a task is never done with open subtasks
+    if (!nowCompleted) {
+      const task = await ctx.db.get(step.taskId);
+      if (task !== null && task.ownerId === userId && task.isCompleted) {
+        await ctx.db.patch(task._id, { isCompleted: false, completedAt: undefined });
+      }
+    }
   },
 });
 
@@ -467,6 +524,16 @@ export const toggle = mutation({
       throw new Error("That entry belongs to another ledger.");
     }
     const nowCompleted = !task.isCompleted;
+    if (nowCompleted) {
+      // a task can only be finished once every subtask is finished
+      const open = await ctx.db
+        .query("taskSteps")
+        .withIndex("by_task", (q) => q.eq("taskId", id))
+        .collect();
+      if (open.some((s) => !s.isCompleted)) {
+        throw new Error("Finish all subtasks before completing this task.");
+      }
+    }
     await ctx.db.patch(id, {
       isCompleted: nowCompleted,
       completedAt: nowCompleted ? Date.now() : undefined,
