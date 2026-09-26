@@ -49,6 +49,7 @@ import {
   type ProductFilter,
 } from "@/components/ProjectsTabs";
 import { projectStatusesOrDefaults } from "@/lib/project-statuses";
+import { currencySymbol } from "@/lib/currency";
 import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
 
 const PROJECT_FILTERS: readonly FilterOption<"all" | "flagged">[] = [
@@ -551,6 +552,9 @@ export default function ProjectsSheet({
   const allItems = useQuery(api.costing.listAllItems);
   const allJobs = useQuery(api.jobs.listJobs);
   const allCustomers = useQuery(api.contacts.listCustomers);
+  const workspaceCurrency = useQuery(api.settings.getCurrency);
+  /** The symbol to show when a record has none of its own. */
+  const defaultCurrency = currencySymbol(workspaceCurrency);
   const projectStatusesList = projectStatusesOrDefaults(
     useQuery(api.settings.listProjectStatuses),
   );
@@ -646,7 +650,7 @@ export default function ProjectsSheet({
         products: 0,
         cost: 0,
         total: 0,
-        currency: fg.currency ?? "$",
+        currency: fg.currency ?? defaultCurrency,
         fgIds: [],
         jobs: [],
       };
@@ -669,7 +673,7 @@ export default function ProjectsSheet({
         products: a?.products ?? 0,
         cost: a?.cost ?? 0,
         total: a?.total ?? 0,
-        currency: a?.currency ?? "$",
+        currency: a?.currency ?? defaultCurrency,
         fgIds: a?.fgIds ?? [],
         jobs: (allJobs ?? []).filter((j) => j.projectId === project._id),
       });
@@ -679,7 +683,7 @@ export default function ProjectsSheet({
       if (!out.has(name)) out.set(name, { ...a, jobs: [] as JobDoc[] });
     }
     return Array.from(out.values()).sort((x, y) => y.total - x.total);
-  }, [finishedGoods, projects, costByFg, allJobs]);
+  }, [finishedGoods, projects, costByFg, allJobs, defaultCurrency]);
 
   const filtered = useMemo(() => {
     let list = rows;

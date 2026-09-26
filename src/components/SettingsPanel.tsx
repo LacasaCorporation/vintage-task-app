@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import MasterDataManager from "@/components/MasterDataManager";
 import { useAppDialogs } from "@/components/AppDialogs";
+import CurrencyPicker from "@/components/CurrencyPicker";
 import { cn } from "@/lib/utils";
 import { downloadBackupFile } from "@/lib/backup-download";
 import {
@@ -1087,6 +1088,7 @@ export default function SettingsPanel() {
               </p>
             )}
           </div>
+          <CurrencyPicker canEdit={canManage} />
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed bg-muted/30 px-3 py-2.5 sm:col-span-2">
             <p className="text-xs text-muted-foreground">
               Give your team the app address, then the username and password you

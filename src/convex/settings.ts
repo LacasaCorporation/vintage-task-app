@@ -14,6 +14,11 @@ import {
   cleanProjectStatuses,
   projectStatusesOrDefaults,
 } from "../lib/project-statuses";
+import {
+  DEFAULT_CURRENCY,
+  cleanCurrency,
+  currencyOrDefault,
+} from "../lib/currency";
 
 /**
  * Workspace roles:
@@ -219,6 +224,40 @@ export const setProjectStatuses = mutation({
     const cleaned = cleanProjectStatuses(statuses);
     await ctx.db.patch(settingsDoc._id, { projectStatuses: cleaned });
     return cleaned;
+  },
+});
+
+/** Read the workspace currency, defaulting to US Dollar. */
+export const getCurrency = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return DEFAULT_CURRENCY;
+    const settingsDoc = await getSettings(ctx, userId);
+    return currencyOrDefault(settingsDoc?.currency);
+  },
+});
+
+/** Change the workspace currency. Existing prices keep their own values. */
+export const setCurrency = mutation({
+  args: { currency: v.string() },
+  handler: async (ctx, { currency }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const all = await ctx.db.query("settings").collect();
+    const row =
+      all.find((s) => s.ownerId === userId) ??
+      all.find((s) => s.members.some((m) => m.userId === userId));
+    const role =
+      row?.ownerId === userId
+        ? "super"
+        : row?.members.find((m) => m.userId === userId)?.role;
+    if (role !== "super" && role !== "admin")
+      throw new Error("Only an admin can change the workspace currency.");
+    const settingsDoc = await getOrCreateSettings(ctx, userId);
+    const clean = cleanCurrency(currency);
+    await ctx.db.patch(settingsDoc._id, { currency: clean });
+    return clean;
   },
 });
 

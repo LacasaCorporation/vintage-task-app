@@ -81,6 +81,8 @@ const settings = defineTable({
   /** Short code shown to users so they know where to sign in, e.g. "ORG-4F7K". */
   orgCode: v.optional(v.string()),
   orgCreatedAt: v.optional(v.number()),
+  /** Default currency symbol for the workspace, e.g. "$", "€", "£", "₹". */
+  currency: v.optional(v.string()),
   /** Ordered workflow statuses for Projects. Start and Finish are fixed. */
   projectStatuses: v.optional(v.array(v.string())),
   members: v.array(teamMemberValidator), // every user + role + restrictions

@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { syncProductionConsumption } from "./production";
+import { getSettings } from "./settings";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -8,6 +9,7 @@ import {
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
 } from "../lib/project-statuses";
+import { currencySymbol } from "../lib/currency";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -707,7 +709,11 @@ export const listFinishedGoods = query({
       .query("finishedGoods")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
-    return fgs.sort((a, b) => b._creationTime - a._creationTime);
+    // products saved before the workspace had a currency fall back to it here
+    const fallback = currencySymbol((await getSettings(ctx, userId))?.currency);
+    return fgs
+      .map((fg) => (fg.currency === undefined ? { ...fg, currency: fallback } : fg))
+      .sort((a, b) => b._creationTime - a._creationTime);
   },
 });
 
@@ -777,7 +783,9 @@ export const addFinishedGood = mutation({
       category: opts.category?.trim() || undefined,
       subCategory: opts.subCategory?.trim() || undefined,
       note: opts.note?.trim() || undefined,
-      currency: opts.currency?.trim().slice(0, 4) || "$",
+      currency:
+        opts.currency?.trim().slice(0, 4) ||
+        currencySymbol((await getSettings(ctx, userId))?.currency),
       markupPct: opts.markupPct ?? 0,
     });
   },
