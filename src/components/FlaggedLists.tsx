@@ -785,6 +785,13 @@ export function FlaggedProductsList({
 export function ProductionButton({ fg }: { fg: FgDoc }) {
   const startProduction = useMutation(api.production.start);
   const stopProduction = useMutation(api.production.stop);
+  // the running chip names the product's real status ("In production" by
+  // default, but whatever the firm calls that stage), never a fixed phrase
+  const configuredStatuses = useQuery(api.settings.listProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(
+    configuredStatuses ?? undefined,
+  );
+  const runningLabel = fgProjectStatus(fg, projectStatuses);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const running = fg.productionStartedAt !== undefined;
@@ -826,9 +833,9 @@ export function ProductionButton({ fg }: { fg: FgDoc }) {
       <span className="inline-flex shrink-0 items-center gap-1">
         <span
           className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
-          title={`Production running since ${new Date(fg.productionStartedAt as number).toLocaleString()}`}
+          title={`${runningLabel} — running since ${new Date(fg.productionStartedAt as number).toLocaleString()}`}
         >
-          In production
+          {runningLabel}
         </span>
         {/* an action, not a status — it stays out of the way of the status chip
             and only becomes obvious on hover or keyboard focus */}
