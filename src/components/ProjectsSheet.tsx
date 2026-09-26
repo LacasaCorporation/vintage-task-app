@@ -35,7 +35,6 @@ import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
-import ClientField from "@/components/ClientField";
 import CustomersPanel from "@/components/CustomersPanel";
 import { cn } from "@/lib/utils";
 
@@ -530,7 +529,6 @@ export default function ProjectsSheet({
   const setJobFlag = useMutation(api.jobs.setJobFlag);
   const setFgFlag = useMutation(api.costing.setFgFlag);
   const addProjectM = useMutation(api.costing.addProject);
-  const updateProjectM = useMutation(api.costing.updateProject);
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const { confirm } = useAppDialogs();
 
@@ -989,27 +987,12 @@ export default function ProjectsSheet({
                   </div>
 
                   {/* second line: description / client / assignee */}
-                  {(detail?.description || detail?.assignee || detail) && (
+                  {(detail?.description ||
+                    detail?.client ||
+                    detail?.assignee) && (
                     <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-6 text-[11px] text-muted-foreground">
-                      {detail && (
-                        <ClientField
-                          compact
-                          value={detail.client ?? ""}
-                          onChange={(next) => {
-                            const clean = next.trim();
-                            void updateProjectM({
-                              id: detail._id,
-                              client: clean.length > 0 ? clean : " ",
-                            }).catch((error) =>
-                              toast.error(
-                                error instanceof Error
-                                  ? error.message
-                                  : "Couldn't set the customer.",
-                              ),
-                            );
-                          }}
-                          className="min-w-[12rem] max-w-xs"
-                        />
+                      {detail?.client && (
+                        <span className="truncate">Client: {detail.client}</span>
                       )}
                       {detail?.assignee && (
                         <span className="inline-flex items-center gap-1 truncate">
