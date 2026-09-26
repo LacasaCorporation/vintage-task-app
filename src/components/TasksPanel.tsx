@@ -980,7 +980,7 @@ export default function TasksPanel({
                                             </span>
                                           )}
                                           {/* full tag text, never just a count */}
-                                          {step.tags!.slice(0, 3).map((tag) => (
+                                          {(step.tags ?? []).slice(0, 3).map((tag) => (
                                             <span
                                               key={tag}
                                               title={`Tag: #${tag}`}
@@ -989,12 +989,12 @@ export default function TasksPanel({
                                               #{tag}
                                             </span>
                                           ))}
-                                          {step.tags!.length > 3 && (
+                                          {(step.tags ?? []).length > 3 && (
                                             <span
                                               className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-primary"
-                                              title={step.tags!.map((t) => `#${t}`).join(" ")}
+                                              title={(step.tags ?? []).map((t) => `#${t}`).join(" ")}
                                             >
-                                              +{step.tags!.length - 3}
+                                              +{(step.tags ?? []).length - 3}
                                             </span>
                                           )}
                                           {(step.description ?? "").trim() !== "" && (
