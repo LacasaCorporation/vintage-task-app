@@ -44,9 +44,13 @@ export const list = query({
 export const create = mutation({
   args: {
     supplier: v.optional(v.string()),
+    supplierAddress: v.optional(v.string()),
     purchasedAt: v.optional(v.number()),
+    dueAt: v.optional(v.number()),
     note: v.optional(v.string()),
     currency: v.optional(v.string()),
+    discountPct: v.optional(v.number()),
+    taxPct: v.optional(v.number()),
     lines: v.array(
       v.object({
         materialId: v.id("rawMaterials"),
@@ -55,7 +59,8 @@ export const create = mutation({
       }),
     ),
   },
-  handler: async (ctx, { supplier, purchasedAt, note, currency, lines }) => {
+  handler: async (ctx, args) => {
+    const { supplier, supplierAddress, purchasedAt, dueAt, note, currency, discountPct, taxPct, lines } = args;
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     if (lines.length === 0) throw new Error("Add at least one material to the bill.");
@@ -83,15 +88,22 @@ export const create = mutation({
     }
 
     const cleanSupplier = (supplier ?? "").trim().slice(0, MAX_NAME_LENGTH);
+    const discount = Math.min(100, Math.max(0, discountPct ?? 0));
+    const tax = Math.max(0, taxPct ?? 0);
+    const grand = total - (total * discount) / 100 + ((total * (100 - discount)) / 100) * (tax / 100);
     return await ctx.db.insert("purchases", {
       ownerId: userId,
       number: await nextPurchaseNumber(ctx, userId),
       supplier: cleanSupplier || undefined,
+      supplierAddress: (supplierAddress ?? "").trim().slice(0, 240) || undefined,
       purchasedAt: purchasedAt ?? Date.now(),
+      dueAt,
       note: (note ?? "").trim().slice(0, 500) || undefined,
       currency: (currency ?? "").trim().slice(0, 8) || undefined,
+      discountPct: discount || undefined,
+      taxPct: tax || undefined,
       lines: resolved,
-      total,
+      total: Math.round(grand * 100) / 100,
       isPaid: undefined,
     });
   },

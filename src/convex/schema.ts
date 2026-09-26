@@ -268,9 +268,13 @@ const schema = defineSchema(
       ownerId: v.id("users"),
       number: v.string(), // auto PUR0001, PUR0002, …
       supplier: v.optional(v.string()),
+      supplierAddress: v.optional(v.string()),
       purchasedAt: v.number(), // ms
       note: v.optional(v.string()),
       currency: v.optional(v.string()),
+      discountPct: v.optional(v.number()),
+      taxPct: v.optional(v.number()),
+      dueAt: v.optional(v.number()),
       lines: v.array(
         v.object({
           materialId: v.id("rawMaterials"),
