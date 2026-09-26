@@ -8,18 +8,22 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   CheckCircle2,
+  Eye,
   FileText,
   List,
   Loader2,
+  Pencil,
   Plus,
   Receipt,
   Save,
+  Store,
   Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatDueLabel, toLocalInput } from "@/lib/task-utils";
+import ContactDialog from "@/components/ContactDialog";
 
 type MaterialDoc = Doc<"rawMaterials">;
 type PurchaseDoc = Doc<"purchases">;
@@ -52,10 +56,19 @@ export default function PurchasePanel({
 }) {
   const bills = useQuery(api.purchases.list);
   const createBill = useMutation(api.purchases.create);
+  const updateBill = useMutation(api.purchases.update);
   const setPaid = useMutation(api.purchases.setPaid);
   const removeBill = useMutation(api.purchases.remove);
+  const vendors = useQuery(api.contacts.listVendors);
+  const addVendor = useMutation(api.contacts.createVendor);
+  const editVendor = useMutation(api.contacts.updateVendor);
+  const dropVendor = useMutation(api.contacts.removeVendor);
 
   const [tab, setTab] = useState<"list" | "bill">("list");
+  const [editingId, setEditingId] = useState<Id<"purchases"> | null>(null);
+  const [viewingId, setViewingId] = useState<Id<"purchases"> | null>(null);
+  const [vendorPickerOpen, setVendorPickerOpen] = useState(false);
+  const [supplierId, setSupplierId] = useState<Id<"vendors"> | undefined>(undefined);
   const [supplier, setSupplier] = useState("");
   const [supplierAddress, setSupplierAddress] = useState("");
   const [purchasedOn, setPurchasedOn] = useState(todayInput);
@@ -66,6 +79,9 @@ export default function PurchasePanel({
   const [busy, setBusy] = useState(false);
 
   const materialOf = (id: Id<"rawMaterials"> | "") => materials.find((m) => m._id === id);
+
+  /** The bill the view tab is showing. */
+  const viewed = bills?.find((b) => b._id === viewingId) ?? null;
 
   const subtotal = useMemo(
     () => lines.reduce((sum, l) => sum + num(l.qty) * num(l.rate), 0),
@@ -82,6 +98,8 @@ export default function PurchasePanel({
     );
 
   const resetForm = () => {
+    setEditingId(null);
+    setSupplierId(undefined);
     setSupplier("");
     setSupplierAddress("");
     setPurchasedOn(todayInput());
@@ -89,6 +107,29 @@ export default function PurchasePanel({
     setDiscount("0");
     setTax("0");
     setLines([emptyLine()]);
+  };
+
+  /** Open a saved bill in the same form, pre-filled, for editing. */
+  const startEdit = (bill: PurchaseDoc) => {
+    setEditingId(bill._id);
+    setSupplierId(bill.supplierId);
+    setSupplier(bill.supplier ?? "");
+    setSupplierAddress(bill.supplierAddress ?? "");
+    setPurchasedOn(toLocalInput(new Date(bill.purchasedAt)));
+    setNote(bill.note ?? "");
+    setDiscount(String(bill.discountPct ?? 0));
+    setTax(String(bill.taxPct ?? 0));
+    setLines(
+      bill.lines.length > 0
+        ? bill.lines.map((line) => ({
+            materialId: line.materialId,
+            qty: String(line.qty),
+            rate: String(line.unitCost),
+          }))
+        : [emptyLine()],
+    );
+    setViewingId(null);
+    setTab("bill");
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -100,8 +141,9 @@ export default function PurchasePanel({
     }
     setBusy(true);
     try {
-      await createBill({
+      const args = {
         supplier: supplier.trim() || undefined,
+        supplierId,
         supplierAddress: supplierAddress.trim() || undefined,
         purchasedAt: purchasedOn ? new Date(purchasedOn).getTime() : undefined,
         note: note.trim() || undefined,
@@ -112,10 +154,18 @@ export default function PurchasePanel({
           qty: num(l.qty),
           unitCost: num(l.rate) || materialOf(l.materialId)?.pricePerUnit || 0,
         })),
-      });
+      };
+      if (editingId !== null) {
+        await updateBill({ id: editingId, ...args });
+        toast.success("Bill updated — stock adjusted.");
+      } else {
+        await createBill(args);
+        toast.success("Bill saved — stock updated.");
+      }
+      const wasEditing = editingId;
       resetForm();
       setTab("list");
-      toast.success("Bill saved — stock updated.");
+      if (wasEditing !== null) setViewingId(wasEditing);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't save the bill.");
     } finally {
@@ -127,7 +177,11 @@ export default function PurchasePanel({
     <button
       key={id}
       type="button"
-      onClick={() => setTab(id)}
+      onClick={() => {
+        setTab(id);
+        if (id === "list") setViewingId(null);
+        if (id === "bill") resetForm();
+      }}
       aria-pressed={tab === id}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
@@ -149,14 +203,28 @@ export default function PurchasePanel({
           {tabBtn("bill", "Bill entry", FileText)}
         </div>
         {canCreate && (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => setTab("bill")}
-            className="h-9 rounded-xl px-3 text-sm"
-          >
-            <Plus className="size-4" /> Add bill
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setVendorPickerOpen(true)}
+              className="h-9 rounded-xl px-3 text-sm"
+            >
+              <Store className="size-4" /> Vendors ({vendors?.length ?? 0})
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                resetForm();
+                setTab("bill");
+              }}
+              className="h-9 rounded-xl px-3 text-sm"
+            >
+              <Plus className="size-4" /> Add bill
+            </Button>
+          </div>
         )}
       </div>
 
@@ -167,7 +235,157 @@ export default function PurchasePanel({
       )}
 
       {/* ── Purchase list ───────────────────────────────────────────── */}
-      {tab === "list" && (
+      {tab === "list" && viewed !== null && (
+        <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 bg-muted/30 px-5 py-4">
+            <div>
+              <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                Purchase bill
+              </p>
+              <h2 className="font-display text-lg font-semibold font-mono">
+                {viewed.number}
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {viewed.supplier || "No supplier"} ·{" "}
+                {formatDueLabel(viewed.purchasedAt)}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                  viewed.isPaid
+                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                )}
+              >
+                {viewed.isPaid ? "Paid" : "Unpaid"}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setViewingId(null);
+                  setTab("list");
+                }}
+                className="h-8 rounded-lg text-xs"
+              >
+                <X className="size-3.5" /> Close
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-3">
+            <div>
+              <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                Supplier
+              </p>
+              <p className="text-sm">{viewed.supplier || "—"}</p>
+              {viewed.supplierAddress && (
+                <p className="text-xs text-muted-foreground">{viewed.supplierAddress}</p>
+              )}
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                Bill date
+              </p>
+              <p className="text-sm">{formatDueLabel(viewed.purchasedAt)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                Reference
+              </p>
+              <p className="text-sm">{viewed.note || "—"}</p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto px-5 py-4">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-border text-[11px] tracking-wide text-muted-foreground uppercase">
+                  <th className="w-8 py-1.5 text-left font-medium">#</th>
+                  <th className="py-1.5 text-left font-medium">Material</th>
+                  <th className="w-24 py-1.5 text-right font-medium">Qty</th>
+                  <th className="w-32 py-1.5 text-right font-medium">Rate</th>
+                  <th className="w-32 py-1.5 text-right font-medium">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {viewed.lines.map((line, index) => (
+                  <tr key={`${line.materialId}-${index}`} className="border-b border-border/50">
+                    <td className="py-2 text-xs text-muted-foreground tabular-nums">{index + 1}</td>
+                    <td className="py-2">{line.name}</td>
+                    <td className="py-2 text-right tabular-nums">
+                      {line.qty} {line.unit}
+                    </td>
+                    <td className="py-2 text-right tabular-nums">{money(line.unitCost)}</td>
+                    <td className="py-2 text-right font-medium tabular-nums">
+                      {money(line.qty * line.unitCost)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-5 py-4">
+            <p className="max-w-md text-xs text-muted-foreground">
+              {viewed.note || "No notes on this bill."}
+            </p>
+            <dl className="ml-auto space-y-1 text-sm">
+              <div className="flex items-center justify-between gap-8 text-muted-foreground">
+                <dt>Subtotal</dt>
+                <dd className="tabular-nums">
+                  {money(
+                    viewed.lines.reduce((sum, l) => sum + l.qty * l.unitCost, 0),
+                  )}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-8 text-muted-foreground">
+                <dt>Discount / Tax</dt>
+                <dd className="tabular-nums">
+                  {viewed.discountPct ?? 0}% / {viewed.taxPct ?? 0}%
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-8 border-t border-border pt-1 text-base font-semibold">
+                <dt>Total</dt>
+                <dd className="tabular-nums">{money(viewed.total)}</dd>
+              </div>
+            </dl>
+          </div>
+
+          {canEdit && (
+            <div className="flex justify-end gap-2 border-t border-border/60 px-5 py-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  void setPaid({ id: viewed._id, paid: !viewed.isPaid }).catch((error) =>
+                    toast.error(
+                      error instanceof Error ? error.message : "Couldn't update the bill.",
+                    ),
+                  )
+                }
+                className="h-9 rounded-lg text-xs"
+              >
+                <CheckCircle2 className="size-3.5" /> Mark {viewed.isPaid ? "unpaid" : "paid"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => startEdit(viewed)}
+                className="h-9 rounded-lg text-xs"
+              >
+                <Pencil className="size-3.5" /> Edit bill
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === "list" && viewed === null && (
         <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
           <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
             <h2 className="text-sm font-semibold">Purchase list</h2>
@@ -203,9 +421,25 @@ export default function PurchasePanel({
                 </thead>
                 <tbody className="divide-y divide-border/60">
                   {bills.map((bill: PurchaseDoc) => (
-                    <tr key={bill._id} className="transition-colors hover:bg-accent/40">
+                    <tr
+                      key={bill._id}
+                      onClick={() => setViewingId(bill._id)}
+                      className={cn(
+                        "cursor-pointer transition-colors hover:bg-accent/40",
+                        viewingId === bill._id && "bg-primary/[0.05]",
+                      )}
+                    >
                       <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap text-muted-foreground">
-                        {bill.number}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setViewingId(bill._id);
+                          }}
+                          className="cursor-pointer hover:underline"
+                        >
+                          {bill.number}
+                        </button>
                       </td>
                       <td className="px-3 py-2.5">
                         <p className="truncate font-medium">{bill.supplier || "No supplier"}</p>
@@ -240,25 +474,54 @@ export default function PurchasePanel({
                         />
                       </td>
                       <td className="px-2 py-2 text-center">
-                        {canDelete && (
+                        <div className="flex items-center justify-center gap-0.5">
                           <button
                             type="button"
-                            aria-label={`Delete bill ${bill.number}`}
-                            title="Delete bill (stock is taken back out)"
-                            onClick={() =>
-                              void removeBill({ id: bill._id }).catch((error) =>
-                                toast.error(
-                                  error instanceof Error
-                                    ? error.message
-                                    : "Couldn't delete the bill.",
-                                ),
-                              )
-                            }
-                            className="grid size-6 place-items-center rounded text-muted-foreground hover:text-destructive"
+                            aria-label={`View bill ${bill.number}`}
+                            title="View bill"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setViewingId(bill._id);
+                            }}
+                            className="grid size-6 place-items-center rounded text-muted-foreground hover:text-foreground"
                           >
-                            <Trash2 className="size-3.5" />
+                            <Eye className="size-3.5" />
                           </button>
-                        )}
+                          {canEdit && (
+                            <button
+                              type="button"
+                              aria-label={`Edit bill ${bill.number}`}
+                              title="Edit bill (stock is adjusted by the difference)"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startEdit(bill);
+                              }}
+                              className="grid size-6 place-items-center rounded text-muted-foreground hover:text-foreground"
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              aria-label={`Delete bill ${bill.number}`}
+                              title="Delete bill (stock is taken back out)"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void removeBill({ id: bill._id }).catch((error) =>
+                                  toast.error(
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Couldn't delete the bill.",
+                                  ),
+                                );
+                              }}
+                              className="grid size-6 place-items-center rounded text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -284,23 +547,51 @@ export default function PurchasePanel({
               </p>
             </div>
             <div className="text-right text-xs">
-              <p className="font-mono text-sm font-semibold">Auto PUR0001…</p>
-              <p className="text-muted-foreground">Date {formatDueLabel(Date.now())}</p>
+              <p className="font-mono text-sm font-semibold">
+                {editingId !== null
+                  ? `Editing ${bills?.find((b) => b._id === editingId)?.number ?? "bill"}`
+                  : "Auto PUR0001…"}
+              </p>
+              <p className="text-muted-foreground">
+                {editingId !== null
+                  ? "Saving adjusts stock by the difference"
+                  : `Date ${formatDueLabel(Date.now())}`}
+              </p>
             </div>
           </div>
 
           {/* supplier + dates */}
           <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
-                Supplier
-              </p>
-              <Input
-                value={supplier}
-                onChange={(e) => setSupplier(e.target.value)}
-                placeholder="Supplier / vendor name"
-                className="h-9 rounded-lg text-sm"
-              />
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                  Supplier
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setVendorPickerOpen(true)}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                >
+                  <Plus className="size-3" /> New vendor
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={supplier}
+                  onChange={(e) => {
+                    setSupplier(e.target.value);
+                    setSupplierId(undefined);
+                  }}
+                  placeholder="Supplier / vendor name"
+                  list="slate-vendors"
+                  className="h-9 rounded-lg text-sm"
+                />
+                <datalist id="slate-vendors">
+                  {(vendors ?? []).map((vendor) => (
+                    <option key={vendor._id} value={vendor.name} />
+                  ))}
+                </datalist>
+              </div>
               <Textarea
                 value={supplierAddress}
                 onChange={(e) => setSupplierAddress(e.target.value)}
@@ -519,7 +810,7 @@ export default function PurchasePanel({
                     onClick={resetForm}
                     className="h-9 rounded-lg text-xs"
                   >
-                    Clear
+                    {editingId !== null ? "Cancel edit" : "Clear"}
                   </Button>
                   <Button type="submit" disabled={busy} className="h-9 rounded-lg text-xs">
                     {busy ? (
@@ -527,7 +818,9 @@ export default function PurchasePanel({
                     ) : (
                       <Save className="size-3.5" />
                     )}
-                    Save bill &amp; add to stock
+                    {editingId !== null
+                      ? "Save changes & adjust stock"
+                      : "Save bill & add to stock"}
                   </Button>
                 </div>
               )}
@@ -536,8 +829,8 @@ export default function PurchasePanel({
         </form>
       )}
 
-      {/* recent activity, only on the list tab */}
-      {tab === "list" && (bills?.length ?? 0) > 0 && (
+      {/* recent activity, only on the list tab when no bill is open */}
+      {tab === "list" && viewed === null && (bills?.length ?? 0) > 0 && (
         <section className="rounded-2xl border bg-card p-4 shadow-sm">
           <h3 className="mb-2 text-sm font-semibold">What each bill added to stock</h3>
           <ul className="space-y-1">
@@ -559,6 +852,25 @@ export default function PurchasePanel({
           </ul>
         </section>
       )}
+
+      <ContactDialog
+        kind="vendor"
+        open={vendorPickerOpen}
+        onOpenChange={setVendorPickerOpen}
+        contacts={vendors}
+        onCreate={async (args) => addVendor(args)}
+        onUpdate={async (id, args) => {
+          await editVendor({ id: id as Id<"vendors">, ...args });
+        }}
+        onRemove={async (id) => {
+          await dropVendor({ id: id as Id<"vendors"> });
+        }}
+        onPick={(contact) => {
+          setSupplier(contact.name);
+          setSupplierId(contact.id as Id<"vendors"> | undefined);
+          if (contact.address) setSupplierAddress(contact.address);
+        }}
+      />
     </div>
   );
 }

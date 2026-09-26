@@ -268,6 +268,7 @@ const schema = defineSchema(
       ownerId: v.id("users"),
       number: v.string(), // auto PUR0001, PUR0002, …
       supplier: v.optional(v.string()),
+      supplierId: v.optional(v.id("vendors")),
       supplierAddress: v.optional(v.string()),
       purchasedAt: v.number(), // ms
       note: v.optional(v.string()),
@@ -287,6 +288,49 @@ const schema = defineSchema(
       total: v.number(),
       isPaid: v.optional(v.boolean()),
     }).index("by_owner", ["ownerId"]),
+
+    /**
+     * One row per line of a purchase bill, so an edited bill can take the old
+     * quantities back out of stock and put the new ones in. `purchases.lines`
+     * stays as the snapshot printed on the bill.
+     */
+    purchaseLines: defineTable({
+      ownerId: v.id("users"),
+      purchaseId: v.id("purchases"),
+      materialId: v.id("rawMaterials"),
+      name: v.string(),
+      unit: v.string(),
+      qty: v.number(),
+      unitCost: v.number(),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_purchase", ["purchaseId"]),
+
+    /** Suppliers / vendors that purchase bills can be raised against. */
+    vendors: defineTable({
+      ownerId: v.id("users"),
+      name: v.string(),
+      contactName: v.optional(v.string()),
+      email: v.optional(v.string()),
+      phone: v.optional(v.string()),
+      address: v.optional(v.string()),
+      note: v.optional(v.string()),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_name", ["name"]),
+
+    /** Customers that projects can be billed to. */
+    customers: defineTable({
+      ownerId: v.id("users"),
+      name: v.string(),
+      contactName: v.optional(v.string()),
+      email: v.optional(v.string()),
+      phone: v.optional(v.string()),
+      address: v.optional(v.string()),
+      note: v.optional(v.string()),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_name", ["name"]),
 
     // a costing sheet for a job / project / task
     costingSheets: defineTable({

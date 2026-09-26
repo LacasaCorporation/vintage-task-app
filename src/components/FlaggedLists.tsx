@@ -1131,6 +1131,7 @@ type ReportRow = {
   priority?: Priority;
 };
 
+
 /** The job a product belongs to, resolved from either jobId shape. */
 function productJob(fg: FgDoc, allJobs: JobDoc[]): JobDoc | undefined {
   const ids = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
