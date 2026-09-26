@@ -549,6 +549,7 @@ export default function TasksPanel({
       {/* ── Flagged jobs & products (from Projects) ─────────────────── */}
       {activeView === "flagged" && (
         <ProjectsWorkspace
+          canEdit={canEdit}
           projects={flaggedProjects}
           jobs={flaggedJobs}
           fgs={flaggedFgs}

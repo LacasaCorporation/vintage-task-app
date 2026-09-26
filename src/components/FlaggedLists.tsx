@@ -1527,39 +1527,6 @@ export function FlaggedDetail({
   const projectStatuses = projectStatusesOrDefaults(configuredStatusesQuery);
   const [busy, setBusy] = useState(false);
 
-  // ── product task features (same as a normal task) ──────────────────
-  const [fgAssignOpen, setFgAssignOpen] = useState(false);
-  const peopleById = useMemo(
-    () =>
-      new Map((peopleQuery?.people ?? []).map((p) => [p.userId, p] as const)),
-    [peopleQuery],
-  );
-  const groupsQuery = useQuery(api.userGroups.list);
-  const groupsById = useMemo(
-    () => new Map((groupsQuery ?? []).map((g) => [g._id, g] as const)),
-    [groupsQuery],
-  );
-  const fgRightsQuery = useQuery(
-    api.productTasks.myRights,
-    fg === null ? "skip" : { id: fg._id },
-  );
-  const fgStepsQuery = useQuery(
-    api.productTasks.listSteps,
-    fg === null ? "skip" : { fgId: fg._id },
-  );
-  const addFgStepM = useMutation(api.productTasks.addStep);
-  const toggleFgStepM = useMutation(api.productTasks.toggleStep);
-  const removeFgStepM = useMutation(api.productTasks.removeStep);
-  // the role still gates the panel; the product's own grant narrows it
-  const fgRights = fgRightsQuery;
-  const mayEditFg = fgRights?.canEdit ?? true;
-  const mayCompleteFg = fgRights?.canComplete ?? true;
-  const mayOptionsFg = fgRights?.canChangeOptions ?? true;
-  const fgAssignees = useMemo(
-    () => (fg === null ? [] : assigneesOfTask(fg, peopleById)),
-    [fg, peopleById],
-  );
-
   const selProject =
     selection.kind === "project"
       ? (projects.find((pp) => pp._id === selection.id) ?? null)

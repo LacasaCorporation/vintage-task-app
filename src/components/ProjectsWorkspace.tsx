@@ -9,6 +9,7 @@ import {
   Settings2,
 } from "lucide-react";
 import ProductPrintSheet from "@/components/ProductPrintSheet";
+import ProductTaskFeatures from "@/components/ProductTaskFeatures";
 import ProjectStatusSettings from "@/components/ProjectStatusSettings";
 import {
   JobFlatList,
@@ -65,6 +66,7 @@ export default function ProjectsWorkspace({
   busyKey,
   onToggleFg,
   onToggleJob,
+  canEdit = true,
 }: {
   projects: Doc<"projects">[] | undefined;
   jobs: JobDoc[] | undefined;
@@ -90,6 +92,8 @@ export default function ProjectsWorkspace({
   busyKey: string | null;
   onToggleFg: (fg: FgDoc) => void;
   onToggleJob: (job: JobDoc) => void;
+  /** False for viewers — the product's task features then read-only. */
+  canEdit?: boolean;
 }) {
   // The chosen view is only meaningful for the level it belongs to, so a view
   // carried over from another filter falls back to that filter's default.
@@ -326,6 +330,15 @@ export default function ProjectsWorkspace({
             onClose={() => onSelect(null)}
             onSelect={onSelect}
           />
+          {/* the task features a product needs: who is on it, what they may
+              do, tags, a reminder and steps */}
+          {selection.kind === "fg" &&
+            (() => {
+              const selected = fgs.find((f) => f._id === selection.id);
+              return selected !== undefined ? (
+                <ProductTaskFeatures fg={selected} canEdit={canEdit} />
+              ) : null;
+            })()}
         </div>
       )}
     </div>
