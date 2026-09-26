@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -111,6 +111,46 @@ export default function StepDetail({
   onClose: () => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
+  // Text fields are edited locally and saved on blur / Enter. Writing every
+  // keystroke straight to the server would re-render the field with the old
+  // value and drop characters, so the drafts hold the text until they settle.
+  const [title, setTitle] = useState(step.text);
+  const [notes, setNotes] = useState(step.description ?? "");
+  const [tagsText, setTagsText] = useState(
+    (step.tags ?? []).map((t) => `#${t}`).join(" "),
+  );
+  const [tagFocused, setTagFocused] = useState(false);
+
+  // a different subtask is open: reload every draft from it
+  useEffect(() => {
+    setTitle(step.text);
+    setNotes(step.description ?? "");
+    setTagsText((step.tags ?? []).map((t) => `#${t}`).join(" "));
+  }, [step._id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const parsedTags = tagsText
+    .split(/[\s,]+/)
+    .map((t) => t.replace(/^#/, "").trim().toLowerCase())
+    .filter(Boolean);
+
+  const commitTitle = () => {
+    const clean = title.trim();
+    if (clean === step.text) return;
+    // never let the field go blank — fall back to the saved text
+    setTitle(clean === "" ? step.text : clean);
+    if (clean !== "") onPatch({ text: clean });
+  };
+
+  const commitNotes = () => {
+    if (notes === (step.description ?? "")) return;
+    onPatch({ description: notes });
+  };
+
+  const commitTags = () => {
+    const current = (step.tags ?? []).join(",");
+    if (parsedTags.join(",") === current) return;
+    onPatch({ tags: parsedTags });
+  };
   const left = step.dueAt !== undefined ? daysLeftLabel(step.dueAt) : null;
   const attachments = parseAttachments(step.attachments);
   const disabled = !canEdit || busy;
@@ -192,7 +232,7 @@ export default function StepDetail({
             step.isCompleted && "text-muted-foreground line-through",
           )}
         >
-          {step.text}
+          {title}
         </span>
       </label>
 
@@ -208,7 +248,13 @@ export default function StepDetail({
           variant="outline"
           size="sm"
           disabled={busy}
-          onClick={() => onPatch({ copyFromTask: true })}
+          onClick={() => {
+            onPatch({ copyFromTask: true });
+            if (task) {
+              setNotes(task.description ?? "");
+              setTagsText((task.tags ?? []).map((t) => `#${t}`).join(" "));
+            }
+          }}
           className="mb-2 h-8 w-full rounded-lg border-amber-500/30 bg-card text-xs text-amber-800 hover:bg-amber-500/10 hover:text-amber-900 dark:text-amber-300"
         >
           <Copy className="size-3" /> Copy all details from the task
@@ -217,9 +263,16 @@ export default function StepDetail({
 
       <Row icon={ListTodo} label="Title">
         <Input
-          value={step.text}
+          value={title}
           disabled={disabled}
-          onChange={(e) => onPatch({ text: e.target.value })}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={commitTitle}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+          }}
           className="h-9 rounded-lg text-sm"
         />
       </Row>
@@ -340,28 +393,32 @@ export default function StepDetail({
 
       <Row icon={Tag} label="Tags">
         <Input
-          value={(step.tags ?? []).map((t) => `#${t}`).join(" ")}
+          value={tagsText}
           disabled={disabled}
           placeholder="#work #urgent"
-          onChange={(e) =>
-            onPatch({
-              tags: e.target.value
-                .split(/[\s,]+/)
-                .map((t) => t.replace(/^#/, "").trim().toLowerCase())
-                .filter(Boolean),
-            })
-          }
+          onChange={(e) => setTagsText(e.target.value)}
+          onFocus={() => setTagFocused(true)}
+          onBlur={() => {
+            setTagFocused(false);
+            commitTags();
+          }}
           className="h-9 rounded-lg text-sm"
         />
+        {tagFocused && parsedTags.length > 0 && (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Saved as {parsedTags.map((t) => `#${t}`).join(" ")}
+          </p>
+        )}
       </Row>
 
       <Row icon={FileText} label="Notes">
         <Textarea
-          value={step.description ?? ""}
+          value={notes}
           disabled={disabled}
           placeholder="Add more detail…"
           rows={4}
-          onChange={(e) => onPatch({ description: e.target.value })}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={commitNotes}
           className="rounded-lg text-sm"
         />
       </Row>
