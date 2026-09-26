@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import TaskDetail from "@/components/TaskDetail";
 import StepDetail from "@/components/StepDetail";
+import ProjectStatusSettings from "@/components/ProjectStatusSettings";
+import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
 import ProductPrintSheet from "@/components/ProductPrintSheet";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
@@ -479,36 +481,9 @@ export default function TasksPanel({
 
   return (
     <div>
-      {/* subtask details slide in from the right, over the workspace */}
-      {openStep !== null && openStep !== undefined && activeView !== "flagged" && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <button
-            type="button"
-            aria-label="Close subtask details"
-            onClick={() => setOpenStepId(null)}
-            className="flex-1 cursor-default bg-black/20 backdrop-blur-[1px]"
-          />
-          <div className="w-full max-w-md overflow-y-auto border-l bg-background p-4 shadow-2xl">
-            <StepDetail
-              step={openStep}
-              task={openStepTask}
-              canEdit={canEdit && canEditSteps}
-              canDelete={canDeleteSteps}
-              busy={stepBusy}
-              onPatch={(patch) => void patchOpenStep(patch)}
-              onToggle={() => void toggleStepM({ id: openStep._id })}
-              onDelete={() => {
-                setOpenStepId(null);
-                void removeStepM({ id: openStep._id });
-              }}
-              onClose={() => setOpenStepId(null)}
-            />
-          </div>
-        </div>
-      )}
       {/* ── Stats ───────────────────────────────────────────────────── */}
-      <section className="grid grid-cols-3 gap-3">
-        {[
+      <TaskStats
+        tiles={[
           {
             label: viewLabel,
             value:
@@ -522,43 +497,19 @@ export default function TasksPanel({
           },
           { label: "Completed", value: doneCount },
           { label: "Open", value: tasks.length },
-        ].map((stat) => (
-          <div key={stat.label} className="rounded-xl border bg-card p-4 text-center shadow-sm">
-            <p className="font-display text-2xl font-semibold tabular-nums">{stat.value}</p>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">{stat.label}</p>
-          </div>
-        ))}
-      </section>
+        ]}
+      />
 
       {/* ── Add a task ─────────────────────────────────────────── */}
-      {canCreate ? (
-        <form onSubmit={handleAdd} className="mt-4 flex gap-2" onFocus={askNotificationPermission}>
-          <Input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            maxLength={280}
-            placeholder={
-              activeList
-                ? `Add to “${activeList.name}”… use #tag for labels`
-                : "Add a task… #work for tags, “tomorrow 3pm” to schedule later"
-            }
-            aria-label="New task"
-            className="h-11 flex-1 rounded-xl bg-card shadow-sm placeholder:text-muted-foreground/70"
-          />
-          <Button
-            type="submit"
-            disabled={!draft.trim() || isAdding}
-            className="h-11 rounded-xl px-5 shadow-sm"
-          >
-            {isAdding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-            Add task
-          </Button>
-        </form>
-      ) : (
-        <p className="mt-4 rounded-xl border border-dashed bg-card px-4 py-3 text-center text-sm text-muted-foreground">
-          You can view tasks, but creating new ones isn't allowed for your role.
-        </p>
-      )}
+      <TaskQuickAdd
+        canCreate={canCreate}
+        draft={draft}
+        isAdding={isAdding}
+        listName={activeList?.name}
+        onDraftChange={setDraft}
+        onSubmit={handleAdd}
+        onFocus={askNotificationPermission}
+      />
 
       {/* ── Scope / sort / filter controls ───────────────────────────── */}
       <div className="mt-3 flex items-center justify-between gap-2">
@@ -700,48 +651,12 @@ export default function TasksPanel({
               </button>
             </div>
             {statusSettingsOpen && statusDraft !== null && (
-              <div className="mx-3 mb-2 rounded-xl border bg-card p-3 shadow-sm">
-                <div className="mb-2 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold">Custom Projects statuses</p>
-                    <p className="text-[11px] text-muted-foreground">Start and Finish stay fixed.</p>
-                  </div>
-                  <button type="button" onClick={() => setStatusSettingsOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close status settings">
-                    <X className="size-4" />
-                  </button>
-                </div>
-                <div className="space-y-1.5">
-                  {statusDraft.map((status, index) => {
-                    const locked = index === 0 || index === statusDraft.length - 1;
-                    return (
-                      <div key={`${index}-${status}`} className="flex items-center gap-1.5">
-                        <Input
-                          value={status}
-                          disabled={locked}
-                          onChange={(e) => setStatusDraft((current) => current?.map((item, i) => i === index ? e.target.value : item) ?? null)}
-                          className="h-8 text-xs"
-                        />
-                        {!locked && (
-                          <button type="button" onClick={() => setStatusDraft((current) => current?.filter((_, i) => i !== index) ?? null)} className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`Remove ${status}`}>
-                            <X className="size-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="mt-2 flex justify-between">
-                  <button
-                    type="button"
-                    disabled={statusDraft.length >= 11}
-                    onClick={() => setStatusDraft((current) => current ? [...current.slice(0, -1), "", "Finish"] : null)}
-                    className="inline-flex items-center gap-1 text-xs text-primary disabled:opacity-40"
-                  >
-                    <Plus className="size-3" /> Add middle status
-                  </button>
-                  <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => void saveProjectStatuses()}>Save</Button>
-                </div>
-              </div>
+              <ProjectStatusSettings
+                value={statusDraft}
+                onChange={(next) => setStatusDraft(next)}
+                onClose={() => setStatusSettingsOpen(false)}
+                onSave={() => void saveProjectStatuses()}
+              />
             )}
             <div className="flex items-center gap-1">
               {flagFilter === "products" ? (
@@ -1346,7 +1261,22 @@ export default function TasksPanel({
             </div>
 
             {/* detail editor (slides in beside the list on wide screens) */}
-            {openTask && (
+            {openStep !== null ? (
+              <StepDetail
+                step={openStep}
+                task={openStepTask}
+                canEdit={canEdit && canEditSteps}
+                canDelete={canDeleteSteps}
+                busy={stepBusy}
+                onPatch={(patch) => void patchOpenStep(patch)}
+                onToggle={() => void toggleStepM({ id: openStep._id })}
+                onDelete={() => {
+                  setOpenStepId(null);
+                  void removeStepM({ id: openStep._id });
+                }}
+                onClose={() => setOpenStepId(null)}
+              />
+            ) : openTask && (
               <TaskDetail
                 task={openTask}
                 lists={lists}

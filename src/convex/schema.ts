@@ -232,8 +232,12 @@ const schema = defineSchema(
       isCompleted: v.boolean(),
       description: v.optional(v.string()),
       dueAt: v.optional(v.number()),
+      remindAt: v.optional(v.number()),
       priority: v.optional(taskPriorityValidator),
+      starred: v.optional(v.boolean()),
       tags: v.optional(v.array(v.string())),
+      recurrence: v.optional(taskRecurrenceValidator),
+      attachments: v.optional(v.string()),
       completedAt: v.optional(v.number()),
     })
       .index("by_task", ["taskId"])

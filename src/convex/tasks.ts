@@ -381,12 +381,17 @@ export const addStep = mutation({
     text: v.string(),
     description: v.optional(v.string()),
     dueAt: v.optional(v.number()),
+    remindAt: v.optional(v.number()),
     priority: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
     tags: v.optional(v.array(v.string())),
-    /** Copy the parent task's due date, priority, description and tags. */
+    starred: v.optional(v.boolean()),
+    recurrence: v.optional(v.union(v.literal("daily"), v.literal("weekly"), v.literal("monthly"))),
+    attachments: v.optional(v.string()),
+    /** Copy every detail field from the parent task. */
     copyFromTask: v.optional(v.boolean()),
   },
-  handler: async (ctx, { taskId, text, description, dueAt, priority, tags, copyFromTask }) => {
+  handler: async (ctx, args) => {
+    const { taskId, text, copyFromTask } = args;
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const task = await ctx.db.get(taskId);
@@ -395,8 +400,10 @@ export const addStep = mutation({
     const trimmed = text.trim();
     if (trimmed.length === 0) throw new Error("A step needs some words.");
     if (trimmed.length > MAX_TASK_LENGTH) throw new Error("That step is too long.");
+    const pick = <T,>(fromTask: T | undefined, own: T | undefined) =>
+      copyFromTask ? fromTask : own;
     // a subtask is never due later than the task it belongs to
-    const rawDue = copyFromTask ? task.dueAt : dueAt;
+    const rawDue = pick(task.dueAt, args.dueAt);
     const cappedDue =
       rawDue !== undefined && task.dueAt !== undefined && rawDue > task.dueAt
         ? task.dueAt
@@ -406,10 +413,14 @@ export const addStep = mutation({
       taskId,
       text: trimmed,
       isCompleted: false,
-      description: copyFromTask ? task.description : description,
+      description: pick(task.description, args.description),
       dueAt: cappedDue,
-      priority: copyFromTask ? task.priority : priority,
-      tags: copyFromTask ? task.tags : tags,
+      remindAt: pick(task.remindAt, args.remindAt),
+      priority: pick(task.priority, args.priority),
+      tags: pick(task.tags, args.tags),
+      starred: pick(task.starred, args.starred),
+      recurrence: pick(task.recurrence, args.recurrence),
+      attachments: pick(task.attachments, args.attachments),
     });
   },
 });
@@ -424,44 +435,53 @@ export const updateStep = mutation({
     text: v.optional(v.string()),
     description: v.optional(v.string()),
     dueAt: v.optional(v.number()),
+    remindAt: v.optional(v.number()),
     priority: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
     tags: v.optional(v.array(v.string())),
-    /** Copy the parent task's due date, priority, description and tags over. */
+    starred: v.optional(v.boolean()),
+    recurrence: v.optional(v.union(v.literal("daily"), v.literal("weekly"), v.literal("monthly"))),
+    attachments: v.optional(v.string()),
+    /** Copy every detail field from the parent task. */
     copyFromTask: v.optional(v.boolean()),
   },
-  handler: async (ctx, { id, text, description, dueAt, priority, tags, copyFromTask }) => {
+  handler: async (ctx, args) => {
+    const { id, text, copyFromTask } = args;
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const step = await ctx.db.get(id);
     if (step === null) throw new Error("That step no longer exists.");
     if (step.ownerId !== userId) throw new Error("Not your step.");
     const task = await ctx.db.get(step.taskId);
-    const patch: {
-      text?: string;
-      description?: string;
-      dueAt?: number;
-      priority?: "high" | "medium" | "low";
-      tags?: string[];
-    } = {};
+    const patch: Partial<typeof step> = {};
     if (text !== undefined) {
       const trimmed = text.trim();
       if (trimmed.length === 0) throw new Error("A step needs some words.");
       patch.text = trimmed;
     }
-    if (description !== undefined) patch.description = description;
-    if (priority !== undefined) patch.priority = priority;
-    if (tags !== undefined) patch.tags = tags;
+    if (args.description !== undefined) patch.description = args.description;
+    if (args.priority !== undefined) patch.priority = args.priority;
+    if (args.tags !== undefined) patch.tags = args.tags;
+    if (args.starred !== undefined) patch.starred = args.starred;
+    if (args.recurrence !== undefined) patch.recurrence = args.recurrence;
+    if (args.remindAt !== undefined) patch.remindAt = args.remindAt;
+    if (args.attachments !== undefined) patch.attachments = args.attachments;
     if (copyFromTask === true && task !== null) {
       patch.description = task.description;
+      patch.dueAt = task.dueAt;
+      patch.remindAt = task.remindAt;
       patch.priority = task.priority;
       patch.tags = task.tags;
-    }
-    const rawDue = copyFromTask ? task?.dueAt : dueAt;
-    if (rawDue !== undefined || copyFromTask === true) {
-      patch.dueAt =
-        task !== null && task.dueAt !== undefined && rawDue !== undefined && rawDue > task.dueAt
-          ? task.dueAt
-          : rawDue;
+      patch.starred = task.starred;
+      patch.recurrence = task.recurrence;
+      patch.attachments = task.attachments;
+    } else {
+      const rawDue = args.dueAt;
+      if (rawDue !== undefined) {
+        patch.dueAt =
+          task !== null && task.dueAt !== undefined && rawDue > task.dueAt
+            ? task.dueAt
+            : rawDue;
+      }
     }
     await ctx.db.patch(id, patch);
   },
