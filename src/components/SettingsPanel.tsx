@@ -151,6 +151,8 @@ const SETTINGS_TABS = [
   ["data", "Backup & restore", DatabaseBackup],
 ] as const;
 
+type SettingsTabId = (typeof SETTINGS_TABS)[number][0];
+
 /** Readable, easy-to-dictate password for a freshly created login. */
 function makePassword(): string {  const words = [
     "slate",
@@ -500,15 +502,11 @@ export default function SettingsPanel() {
   // Each settings area is its own tab, so only one section is on screen.
   // The order here must match SETTINGS_SECTIONS in index.css, which hides the
   // other sections by their position among the sibling <section> elements.
-  const [settingsTab, setSettingsTab] = useState<
-    | "organisation"
-    | "people"
-    | "team"
-    | "credentials"
-    | "roles"
-    | "catalog"
-    | "data"
-  >("people");
+  const [pickedTab, setPickedTab] = useState<SettingsTabId | null>(null);
+  /** A brand-new super admin has no organisation yet, so open them straight
+   *  on it; everyone else starts on the people list. */
+  const settingsTab =
+    pickedTab ?? (organisation?.createdAt ? "people" : "organisation");
 
   const saveCredential = async (login: ProvisionedLogin) => {
     const password = (credDrafts[login._id] ?? "").trim();
@@ -1004,7 +1002,7 @@ export default function SettingsPanel() {
             type="button"
             aria-current={settingsTab === id ? "page" : undefined}
             aria-pressed={settingsTab === id}
-            onClick={() => setSettingsTab(id)}
+            onClick={() => setPickedTab(id)}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
               settingsTab === id
