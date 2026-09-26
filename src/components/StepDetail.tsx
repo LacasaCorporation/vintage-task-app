@@ -23,6 +23,7 @@ import {
   Flag,
   ListTodo,
   Paperclip,
+  Plus,
   Repeat,
   Star,
   Tag,
@@ -150,6 +151,15 @@ export default function StepDetail({
     const current = (step.tags ?? []).join(",");
     if (parsedTags.join(",") === current) return;
     onPatch({ tags: parsedTags });
+  };
+
+  /** The + button: merge whatever is typed into the saved tags, then clear. */
+  const addTags = () => {
+    if (parsedTags.length === 0) return;
+    const merged = [...new Set([...(step.tags ?? []), ...parsedTags])];
+    setTagsText("");
+    if (merged.join(",") === (step.tags ?? []).join(",")) return;
+    onPatch({ tags: merged });
   };
   const left = step.dueAt !== undefined ? daysLeftLabel(step.dueAt) : null;
   const attachments = parseAttachments(step.attachments);
@@ -391,22 +401,67 @@ export default function StepDetail({
         </div>
       </Row>
 
-      <Row icon={Tag} label="Tags">
-        <Input
-          value={tagsText}
-          disabled={disabled}
-          placeholder="#work #urgent"
-          onChange={(e) => setTagsText(e.target.value)}
-          onFocus={() => setTagFocused(true)}
-          onBlur={() => {
-            setTagFocused(false);
-            commitTags();
+      <Row
+        icon={Tag}
+        label="Tags"
+        onClear={step.tags !== undefined ? () => onPatch({ tags: undefined }) : undefined}
+      >
+        {(step.tags ?? []).length > 0 && (
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            {(step.tags ?? []).map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+              >
+                #{tag}
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-label={`Remove tag ${tag}`}
+                  className="text-primary/60 hover:text-primary"
+                  onClick={() =>
+                    onPatch({
+                      tags: (step.tags ?? []).filter((t) => t !== tag),
+                    })
+                  }
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            addTags();
           }}
-          className="h-9 rounded-lg text-sm"
-        />
+          className="flex gap-1.5"
+        >
+          <Input
+            value={tagsText}
+            disabled={disabled}
+            placeholder="Add a tag…"
+            onChange={(e) => setTagsText(e.target.value)}
+            onFocus={() => setTagFocused(true)}
+            onBlur={() => {
+              setTagFocused(false);
+              commitTags();
+            }}
+            className="h-9 rounded-lg text-sm"
+          />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={disabled || parsedTags.length === 0}
+            className="h-9 shrink-0 rounded-lg px-2.5"
+          >
+            <Plus className="size-3.5" /> Add
+          </Button>
+        </form>
         {tagFocused && parsedTags.length > 0 && (
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Saved as {parsedTags.map((t) => `#${t}`).join(" ")}
+            Will save as {parsedTags.map((t) => `#${t}`).join(" ")}
           </p>
         )}
       </Row>

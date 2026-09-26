@@ -485,6 +485,14 @@ export default function TaskDetail({
                   placeholder="Add tag and press Enter…"
                   className="h-8 rounded-lg text-sm"
                 />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!tagDraft.trim()}
+                  className="h-8 shrink-0 rounded-lg px-2.5"
+                >
+                  <Plus className="size-3.5" /> Add
+                </Button>
               </form>
             </Row>
 
