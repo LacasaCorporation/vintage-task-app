@@ -92,6 +92,37 @@ export async function activeFirmSettings(
     .unique();
 }
 
+/**
+ * Who the caller counts as "theirs" in the active firm: themselves plus
+ * everyone under them in the management chain, at any depth.
+ *
+ * The Mine / All filter uses this. "Mine" is just the caller's own rows; "All"
+ * is this list — so a manager sees their reports' work, while a sibling
+ * manager's work stays hidden. A member with nobody under them gets exactly
+ * the same rows in both, which is the honest answer rather than leaking the
+ * whole firm.
+ */
+export async function firmTeam(
+  ctx: Ctx,
+  userId: Id<"users">,
+): Promise<Id<"users">[]> {
+  const firm = await activeFirmSettings(ctx, userId);
+  if (firm === null) return [userId];
+  const team = new Set<Id<"users">>([userId]);
+  const frontier: Id<"users">[] = [userId];
+  while (frontier.length > 0) {
+    const current = frontier.shift() as Id<"users">;
+    for (const m of firm.members) {
+      if (m.managerId === undefined) continue;
+      if ((m.managerId as Id<"users">) === current && !team.has(m.userId)) {
+        team.add(m.userId);
+        frontier.push(m.userId);
+      }
+    }
+  }
+  return [...team];
+}
+
 /** Remember which firm this user is working in. */
 export async function rememberActiveFirm(
   ctx: MutationCtx,

@@ -480,13 +480,18 @@ export default function TasksPanel({
           <span className="mr-1">Show</span>
           {(
             [
-              ["mine", "Mine"],
-              ["all", "ALL"],
-            ] as ["mine" | "all", string][]
-          ).map(([mode, label]) => (
+              ["mine", "Mine", "Only the tasks you own"],
+              [
+                "all",
+                "ALL",
+                "Your tasks plus those of everyone who reports to you",
+              ],
+            ] as ["mine" | "all", string, string][]
+          ).map(([mode, label, hint]) => (
             <button
               key={mode}
               type="button"
+              title={hint}
               onClick={() => onScopeChange(mode)}
               className={cn(
                 "rounded-full border px-2.5 py-1 transition-colors",

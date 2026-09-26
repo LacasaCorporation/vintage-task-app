@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
-import { activeFirmSettings, scopeUserId } from "./org";
+import { activeFirmSettings, firmTeam, scopeUserId } from "./org";
 import { v } from "convex/values";
 
 const MAX_TASK_LENGTH = 280;
@@ -164,9 +164,10 @@ export const removeList = mutation({
 // ── Tasks ───────────────────────────────────────────────────────────────
 
 /**
- * All tasks for the signed-in user, newest first (filtered client-side).
- * scope "mine" (default) → only the caller's own tasks; "all" → the whole
- * workspace's tasks (org-scoped rows). Used by the Mine / ALL filter.
+ * All tasks the caller may see, newest first (filtered client-side).
+ * scope "mine" (default) → only the caller's own tasks; "all" → the caller's
+ * plus their subordinates' (see firmTeam: everyone under them in the firm's
+ * management chain, at any depth). A sibling manager's tasks stay hidden.
  */
 export const list = query({
   args: { scope: v.optional(v.union(v.literal("mine"), v.literal("all"))) },
@@ -180,7 +181,10 @@ export const list = query({
         .query("tasks")
         .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
         .collect();
-      return all.sort((a, b) => b._creationTime - a._creationTime);
+      const team = new Set(await firmTeam(ctx, userId));
+      return all
+        .filter((t) => team.has(t.assigneeId ?? t.ownerId))
+        .sort((a, b) => b._creationTime - a._creationTime);
     }
     const mine = await ctx.db
       .query("tasks")

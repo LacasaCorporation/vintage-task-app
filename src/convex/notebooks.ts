@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
-import { scopeUserId } from "./org";
+import { firmTeam, scopeUserId } from "./org";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 
@@ -43,7 +43,8 @@ const MAX_BODY_LENGTH = 20000;
 /**
  * All notebooks the caller can see, newest first.
  * scope "mine" (default) → notebooks created by the caller; "all" → the
- * whole workspace's notebooks. Used by the Mine / ALL filter in Notes.
+ * caller's plus their subordinates', so a manager sees their team's work.
+ * Used by the Mine / ALL filter in Notes.
  */
 export const listNotebooks = query({
   args: { scope: v.optional(v.union(v.literal("mine"), v.literal("all"))) },
@@ -56,10 +57,15 @@ export const listNotebooks = query({
       .query("notebooks")
       .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
       .collect();
-    const visible =
-      scope === "all"
-        ? notebooks
-        : notebooks.filter((nb) => (nb.createdBy ?? nb.ownerId) === userId);
+    if (scope === "all") {
+      const team = new Set(await firmTeam(ctx, userId));
+      return notebooks
+        .filter((nb) => team.has(nb.createdBy ?? nb.ownerId))
+        .sort((a, b) => b._creationTime - a._creationTime);
+    }
+    const visible = notebooks.filter(
+      (nb) => (nb.createdBy ?? nb.ownerId) === userId,
+    );
     return visible.sort((a, b) => b._creationTime - a._creationTime);
   },
 });
@@ -181,10 +187,13 @@ export const listAllPages = query({
       .query("notePages")
       .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
       .collect();
-    const visible =
-      scope === "all"
-        ? pages
-        : pages.filter((p) => (p.createdBy ?? p.ownerId) === userId);
+    if (scope === "all") {
+      const team = new Set(await firmTeam(ctx, userId));
+      return pages
+        .filter((p) => team.has(p.createdBy ?? p.ownerId))
+        .sort((a, b) => (a.order ?? a._creationTime) - (b.order ?? b._creationTime));
+    }
+    const visible = pages.filter((p) => (p.createdBy ?? p.ownerId) === userId);
     return visible.sort(
       (a, b) =>
         (a.order ?? a._creationTime) - (b.order ?? b._creationTime),
