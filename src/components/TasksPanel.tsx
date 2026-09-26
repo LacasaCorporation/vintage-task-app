@@ -1096,8 +1096,13 @@ export default function TasksPanel({
                                 </p>
                               ) : (
                                 <ul className="space-y-1">
-                                  {taskSteps.map((step) => (
-                                    <li key={step._id} className="group/step flex items-center gap-2">
+                                  {taskSteps.map((step) => (                                        <li
+                                          key={step._id}
+                                          className={cn(
+                                            "group/step flex items-center gap-2 rounded-md px-1",
+                                            openStepId === step._id && "bg-amber-500/10",
+                                          )}
+                                        >
                                       <Checkbox
                                         checked={step.isCompleted}
                                         disabled={!canEdit}
@@ -1109,16 +1114,24 @@ export default function TasksPanel({
                                         }
                                         className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
                                       />
-                                      <span
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setOpenStepId((current) =>
+                                            current === step._id ? null : step._id,
+                                          )
+                                        }
+                                        title="Open subtask details"
                                         className={cn(
-                                          "min-w-0 flex-1 truncate text-xs",
+                                          "min-w-0 flex-1 cursor-pointer truncate text-left text-xs hover:underline",
                                           step.isCompleted
                                             ? "text-muted-foreground line-through"
                                             : "text-foreground",
+                                          openStepId === step._id && "text-amber-700 dark:text-amber-400",
                                         )}
                                       >
                                         {step.text}
-                                      </span>
+                                      </button>
                                       {step.dueAt !== undefined && (
                                         <span
                                           className={cn(
