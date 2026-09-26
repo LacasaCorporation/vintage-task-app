@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import MasterDataManager from "@/components/MasterDataManager";
 import { useAppDialogs } from "@/components/AppDialogs";
 import CurrencyPicker from "@/components/CurrencyPicker";
+import { CreateFirmButton } from "@/components/FirmSwitcher";
 import { cn } from "@/lib/utils";
 import { downloadBackupFile } from "@/lib/backup-download";
 import {
@@ -1041,6 +1042,7 @@ export default function SettingsPanel() {
             <Building2 className="size-4" />
             {organisation?.createdAt ? "Organisation" : "Create organisation"}
           </Button>
+          <CreateFirmButton className="ml-auto" />
         </header>
         <div className="grid gap-4 px-5 py-4 sm:grid-cols-2">
           <div className="min-w-0">

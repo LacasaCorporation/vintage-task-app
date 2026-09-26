@@ -195,6 +195,9 @@ const schema = defineSchema(
       email: v.optional(v.string()), // email of the user. do not remove
       emailVerificationTime: v.optional(v.number()), // email verification time. do not remove
       isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
+      /** Which firm this person is working in — the ownerId of a settings row.
+       *  Someone can belong to several firms and picks the active one here. */
+      activeFirmId: v.optional(v.id("users")),
 
       role: v.optional(roleValidator), // role of the user. do not remove
     }).index("email", ["email"]), // index for the email. do not remove or modify

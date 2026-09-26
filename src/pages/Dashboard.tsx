@@ -1,6 +1,7 @@
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useAuth } from "@/hooks/use-auth";
+import FirmSwitcher from "@/components/FirmSwitcher";
 import { Button } from "@/components/ui/button";
 import NotesSidebar from "@/components/NotesSidebar";
 import TasksSidebar from "@/components/TasksSidebar";
@@ -932,6 +933,7 @@ export default function Dashboard() {
               })}
             </div>
             <div className="flex items-center gap-3">
+              <FirmSwitcher />
               {(firstName || identity) && (
                 <span className="hidden min-w-0 text-right sm:block">
                   {firstName && (

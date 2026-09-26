@@ -5,48 +5,127 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 type Ctx = QueryCtx | MutationCtx;
 
 /**
- * The settings row the given user belongs to — either because they own it
- * (super admin) or because they are listed in `members`.
+ * A firm is a `settings` row. It is identified everywhere by its owner's user
+ * id, which is also the id every organisation-owned row is scoped by — so
+ * supporting several firms per person needs no change to the data tables,
+ * only a way to choose which firm is active.
  */
-export async function settingsForUser(
+export type Firm = Doc<"settings">;
+
+/** "ORG-4F7K" style code an admin can read out to their team. */
+export function makeOrgCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < 4; i += 1) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return `ORG-${out}`;
+}
+
+/** Every firm this user owns or is listed in, as settings rows. */
+export async function firmsForUser(
   ctx: Ctx,
   userId: Id<"users">,
-): Promise<Doc<"settings"> | null> {
-  const rows = await ctx.db.query("settings").collect();
-  const owned = rows.find((s) => s.ownerId === userId);
-  if (owned !== undefined) return owned;
-  return (
-    rows.find((s) => s.members.some((m) => m.userId === userId)) ?? null
+): Promise<Firm[]> {
+  const all = await ctx.db.query("settings").collect();
+  return all.filter(
+    (s) => s.ownerId === userId || s.members.some((m) => m.userId === userId),
   );
 }
 
+/** The firm this user owns, if they own one. At most one, always. */
+export async function ownedFirmSettings(
+  ctx: Ctx,
+  userId: Id<"users">,
+): Promise<Firm | null> {
+  return await ctx.db
+    .query("settings")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .unique();
+}
+
 /**
- * The id every organisation-owned row is scoped by.
- *
- * Members share their super admin's owner id, so tasks, notes, lists,
- * materials, products and projects belong to the *organisation* rather than to
- * one login. Users with no organisation yet fall back to their own id.
+ * A firm this user belongs to, ignoring which one is active. Use this when
+ * resolving *somebody else's* firm (their manager's, a login's org) — the
+ * active-firm lookup would answer for the wrong person.
+ */
+export async function firmOfMembership(
+  ctx: Ctx,
+  userId: Id<"users">,
+): Promise<Firm | null> {
+  const rows = await ctx.db.query("settings").collect();
+  const owned = rows.find((s) => s.ownerId === userId);
+  if (owned !== undefined) return owned;
+  return rows.find((s) => s.members.some((m) => m.userId === userId)) ?? null;
+}
+
+/**
+ * The firm the user is working in right now: their last choice, falling back to
+ * the firm they own and then to any firm they belong to. A stored choice that
+ * is no longer valid (left the firm, or it was deleted) is ignored.
+ */
+export async function activeFirmId(
+  ctx: Ctx,
+  userId: Id<"users">,
+): Promise<Id<"users"> | null> {
+  const me = await ctx.db.get(userId);
+  const chosen = me?.activeFirmId ?? null;
+  const firms = await firmsForUser(ctx, userId);
+  if (chosen !== null && firms.some((s) => s.ownerId === chosen)) {
+    return chosen;
+  }
+  const owned = firms.find((s) => s.ownerId === userId);
+  if (owned !== undefined) return owned.ownerId;
+  return firms[0]?.ownerId ?? null;
+}
+
+/** The active firm as a settings row, or null when the user has none yet. */
+export async function activeFirmSettings(
+  ctx: Ctx,
+  userId: Id<"users">,
+): Promise<Firm | null> {
+  const firmId = await activeFirmId(ctx, userId);
+  if (firmId === null) return null;
+  return await ctx.db
+    .query("settings")
+    .withIndex("by_owner", (q) => q.eq("ownerId", firmId))
+    .unique();
+}
+
+/** Remember which firm this user is working in. */
+export async function rememberActiveFirm(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  firmId: Id<"users">,
+): Promise<void> {
+  await ctx.db.patch(userId, { activeFirmId: firmId });
+}
+
+/**
+ * The id every organisation-owned row is scoped by — the *active firm's*
+ * owner id, so members share their super admin's id and each firm keeps its
+ * own tasks, notes, materials, products and projects. Users with no firm yet
+ * fall back to their own id.
  *
  * Every data module resolves its scope through this, so nothing else has to
- * know about organisations.
+ * know about firms.
  */
 export async function scopeUserId(ctx: Ctx): Promise<Id<"users"> | null> {
   const userId = await getAuthUserId(ctx);
   if (userId === null) return null;
-  const settings = await settingsForUser(ctx, userId);
-  return settings?.ownerId ?? userId;
+  return (await activeFirmId(ctx, userId)) ?? userId;
 }
 
-/** Signed-in user + their organisation, for the account-management functions. */
+/** Signed-in user + their active firm, for the account-management functions. */
 export async function orgContext(ctx: Ctx): Promise<{
   userId: Id<"users">;
-  settings: Doc<"settings"> | null;
+  settings: Firm | null;
   orgId: Id<"users">;
   isSuper: boolean;
 }> {
   const userId = await getAuthUserId(ctx);
   if (userId === null) throw new Error("Sign in first.");
-  const settings = await settingsForUser(ctx, userId);
+  const settings = await activeFirmSettings(ctx, userId);
   return {
     userId,
     settings,

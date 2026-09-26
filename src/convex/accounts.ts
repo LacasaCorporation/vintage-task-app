@@ -3,7 +3,11 @@ import { action, internalMutation, internalQuery, mutation, query } from "./_gen
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { settingsForUser } from "./org";
+import {
+  activeFirmSettings,
+  firmOfMembership,
+  ownedFirmSettings,
+} from "./org";
 
 type WorkspaceRole = "super" | "admin" | "user" | "member";
 
@@ -65,7 +69,7 @@ export const authoriseActor = internalQuery({
   handler: async (ctx, { needsOrg }): Promise<ActorInfo> => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
-    const settingsDoc = await settingsForUser(ctx, userId);
+    const settingsDoc = await activeFirmSettings(ctx, userId);
     if (settingsDoc === null) {
       if (needsOrg) throw new Error("Create your organisation first.");
       return { userId, orgId: userId, isSuper: true, role: "super" as WorkspaceRole };
@@ -90,7 +94,7 @@ export const authoriseActor = internalQuery({
 export const reassignTeamInternal = internalMutation({
   args: { oldManagerId: v.id("users"), newManagerId: v.id("users") },
   handler: async (ctx, { oldManagerId, newManagerId }) => {
-    const settingsDoc = await settingsForUser(ctx, oldManagerId);
+    const settingsDoc = await firmOfMembership(ctx, oldManagerId);
     if (settingsDoc === null) return;
     await ctx.db.patch(settingsDoc._id, {
       members: settingsDoc.members.map((m) =>
@@ -158,7 +162,7 @@ export const registerLogin = internalMutation({
       createdBy: args.createdBy,
       createdAt: Date.now(),
     });
-    const settingsDoc = await settingsForUser(ctx, args.orgId);
+    const settingsDoc = await ownedFirmSettings(ctx, args.orgId);
     if (settingsDoc === null) return;
     if (settingsDoc.members.some((m) => m.userId === args.userId)) return;
     await ctx.db.patch(settingsDoc._id, {
@@ -185,7 +189,7 @@ export const setOrganisationName = mutation({
   handler: async (ctx, { name }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
-    const settingsDoc = await settingsForUser(ctx, userId);
+    const settingsDoc = await activeFirmSettings(ctx, userId);
     if (settingsDoc === null || settingsDoc.ownerId !== userId) {
       throw new Error("Only the super admin can rename the organisation.");
     }
@@ -205,7 +209,7 @@ export const createOrganisation = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
 
-    let settingsDoc = await settingsForUser(ctx, userId);
+    let settingsDoc = await activeFirmSettings(ctx, userId);
     if (settingsDoc === null) {
       const id = await ctx.db.insert("settings", {
         ownerId: userId,
@@ -232,15 +236,17 @@ export const getOrganisation = query({
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return null;
-    const settingsDoc = await settingsForUser(ctx, userId);
+    const settingsDoc = await activeFirmSettings(ctx, userId);
     const mine = await ctx.db
       .query("credentials")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .first();
     return {
+      firmId: settingsDoc?.ownerId ?? null,
       name: settingsDoc?.workspaceName ?? null,
       code: settingsDoc?.orgCode ?? null,
       createdAt: settingsDoc?.orgCreatedAt ?? null,
+      memberCount: settingsDoc?.members.length ?? 0,
       isSuper: settingsDoc === null || settingsDoc.ownerId === userId,
       myUsername: mine?.username ?? null,
       myLastLoginAt: mine?.lastLoginAt ?? null,
@@ -271,7 +277,7 @@ export const listLogins = query({
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return null;
-    const settingsDoc = await settingsForUser(ctx, userId);
+    const settingsDoc = await activeFirmSettings(ctx, userId);
     if (settingsDoc === null) return [];
     const me = settingsDoc.members.find((m) => m.userId === userId);
     const role = settingsDoc.ownerId === userId ? "super" : me?.role;
@@ -428,7 +434,7 @@ export const deleteLoginInternal = internalMutation({
 
     // remove from the organisation's member list; their juniors move up under
     // the removed person's own manager so nobody is orphaned
-    const settingsDoc = await settingsForUser(ctx, row.orgId);
+    const settingsDoc = await ownedFirmSettings(ctx, row.orgId);
     if (settingsDoc !== null) {
       const target = settingsDoc.members.find((m) => m.userId === row.userId);
       await ctx.db.patch(settingsDoc._id, {

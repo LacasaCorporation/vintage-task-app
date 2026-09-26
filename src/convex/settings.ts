@@ -2,6 +2,8 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { activeFirmSettings, ownedFirmSettings } from "./org";
 import { permissionsValidator } from "./schema";
 import type {
   ActionKey,
@@ -99,18 +101,11 @@ function juniorsOf(
  * caller simply isn't a member of an initialized workspace).
  */
 export async function getSettings(
-  ctx: { db: any },
+  ctx: QueryCtx | MutationCtx,
   userId: Id<"users">,
 ): Promise<Doc<"settings"> | null> {
-  const all = await ctx.db.query("settings").collect();
-  // The super admin owns the row; everyone else is listed in `members`.
-  const owned = all.find((s: Doc<"settings">) => s.ownerId === userId);
-  if (owned !== undefined) return owned;
-  return (
-    all.find((s: Doc<"settings">) =>
-      s.members.some((m) => m.userId === userId),
-    ) ?? null
-  );
+  // The firm the user is working in right now — they may belong to several.
+  return await activeFirmSettings(ctx, userId);
 }
 
 /** Users a given role may manage (strictly below itself; super can also manage admins). */
@@ -125,7 +120,7 @@ function canManage(actor: WorkspaceRole, target: WorkspaceRole): boolean {
  * to run this becomes the workspace's super user.
  */
 async function getOrCreateSettings(
-  ctx: { db: any },
+  ctx: MutationCtx,
   userId: Id<"users">,
 ): Promise<Doc<"settings">> {
   const existing = await getSettings(ctx, userId);
@@ -284,7 +279,9 @@ export const claimPendingInvite = mutation({
     const invite = invites.find((i) => i.email === email);
     if (invite === undefined) return;
 
-    const settingsDoc = await getSettings(ctx, invite.ownerId);
+    // The invite names the firm that sent it (by its owner id) — not whichever
+    // firm the person signing in is currently working in.
+    const settingsDoc = await ownedFirmSettings(ctx, invite.ownerId);
     if (settingsDoc === null) {
       await ctx.db.delete(invite._id);
       return;
