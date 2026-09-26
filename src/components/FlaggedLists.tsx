@@ -4,6 +4,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import type { Priority } from "@/lib/task-utils";
 import { daysLeftLabel, formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import {
+  AlertTriangle,
   Briefcase,
   CalendarDays,
   CheckCircle2,
@@ -15,7 +16,9 @@ import {
   GanttChartSquare,
   GripVertical,
   History,
+  Loader2,
   Package,
+  Play,
   Star,
   Tag,
   X,
@@ -752,9 +755,106 @@ export function FlaggedProductsList({
           />
           {showTags && parentJob && <span className={tagChip}>{data.projectNameOf(parentJob)}</span>}
           <span className={tagChip}>{fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}</span>
+          <ProductionButton fg={fg} />
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * Start production on a product: it gets flagged so it opens in the
+ * workspace, and the raw materials its costing sheet needs leave the stock.
+ * Stopping or editing a running production always asks for confirmation
+ * first, because it puts consumed stock back or changes what was used.
+ */
+function ProductionButton({ fg }: { fg: FgDoc }) {
+  const startProduction = useMutation(api.production.start);
+  const stopProduction = useMutation(api.production.stop);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const running = fg.productionStartedAt !== undefined;
+
+  const run = async (
+    action: () => Promise<unknown>,
+    message: string,
+    done: string,
+  ) => {
+    setBusy(true);
+    try {
+      await action();
+      toast.success(done);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : message);
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  };
+
+  if (!running) {
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void run(() => startProduction({ fgId: fg._id }), "Couldn't start production.", "Production started — materials taken out of stock.")}
+        title="Flag this product and take its materials out of stock"
+        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400"
+      >
+        {busy ? <Loader2 className="size-2.5 animate-spin" /> : <Play className="size-2.5" />}
+        Start production
+      </button>
+    );
+  }
+
+  if (!confirming) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1">
+        <span
+          className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+          title={`Production running since ${new Date(fg.productionStartedAt as number).toLocaleString()}`}
+        >
+          In production
+        </span>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setConfirming(true)}
+          title="Stop production"
+          className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        >
+          Stop
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
+      <AlertTriangle className="size-2.5" />
+      Stop and return the used stock?
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() =>
+          void run(
+            () => stopProduction({ fgId: fg._id }),
+            "Couldn't stop production.",
+            "Production stopped — stock returned.",
+          )
+        }
+        className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground disabled:opacity-50"
+      >
+        Yes
+      </button>
+      <button
+        type="button"
+        onClick={() => setConfirming(false)}
+        className="rounded-full border border-border px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground"
+      >
+        No
+      </button>
+    </span>
   );
 }
 

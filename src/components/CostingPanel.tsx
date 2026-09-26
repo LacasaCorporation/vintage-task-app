@@ -9,6 +9,7 @@ import type { CostingView } from "@/components/CostingSidebar";
 import PurchasePanel from "@/components/PurchasePanel";
 import {
   ChevronDown,
+  AlertTriangle,
   Download,
   Factory,
   FileSpreadsheet,
@@ -182,6 +183,20 @@ export default function CostingPanel({
     { id: Id<"costingItems">; label: string; qty: number; unitPrice: number }[]
   >([]);
   const [savingSheet, setSavingSheet] = useState(false);
+  /** A change waiting on the "production is running, continue?" warning. */
+  const [pendingEdit, setPendingEdit] = useState<{
+    label: string;
+    run: () => void | Promise<void>;
+  } | null>(null);
+
+  /**
+   * Editing a product whose production is running always warns first — the
+   * sheet is what decides which materials leave the stock.
+   */
+  const guardProduction = (label: string, run: () => void | Promise<void>) => {
+    if (activeFg?.productionStartedAt === undefined) return void run();
+    setPendingEdit({ label, run });
+  };
 
   const activeFg =
     view?.kind === "fg"
@@ -244,28 +259,31 @@ export default function CostingPanel({
 
   const saveSheet = async () => {
     if (!activeFg) return;
-    setSavingSheet(true);
-    try {
-      for (const r of rows) {
-        const d = drafts.find((x) => x.id === r._id);
-        if (!d) continue;
-        const changed =
-          d.label !== r.label || d.qty !== r.qty || d.unitPrice !== r.unitPrice;
-        if (changed) {
-          await updateItem({
-            id: r._id,
-            label: d.label,
-            qty: d.qty,
-            unitPrice: d.unitPrice,
-          });
+    const run = async () => {
+      setSavingSheet(true);
+      try {
+        for (const r of rows) {
+          const d = drafts.find((x) => x.id === r._id);
+          if (!d) continue;
+          const changed =
+            d.label !== r.label || d.qty !== r.qty || d.unitPrice !== r.unitPrice;
+          if (changed) {
+            await updateItem({
+              id: r._id,
+              label: d.label,
+              qty: d.qty,
+              unitPrice: d.unitPrice,
+            });
+          }
         }
+        toast.success("Sheet saved.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Couldn't save the sheet.");
+      } finally {
+        setSavingSheet(false);
       }
-      toast.success("Sheet saved.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save the sheet.");
-    } finally {
-      setSavingSheet(false);
-    }
+    };
+    guardProduction("Saving the sheet", run);
   };
 
   // Ctrl/Cmd+S saves the sheet.
@@ -320,6 +338,9 @@ export default function CostingPanel({
       toast.error(error instanceof Error ? error.message : "Couldn't update the line.");
     }
   };
+  const editRow = (
+    row: { _id: Id<"costingItems">; label: string; qty: number; unitPrice: number },
+  ) => guardProduction("Editing a line", () => void handleEditRow(row));
 
   const addMaterialRow = async () => {
     if (!activeFg || !addingMaterialId) return;
@@ -340,6 +361,8 @@ export default function CostingPanel({
       toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
     }
   };
+  const addMaterialRowGuarded = () =>
+    guardProduction("Adding a material", () => void addMaterialRow());
 
   const addCustomRow = async () => {
     if (!activeFg) return;
@@ -507,6 +530,38 @@ export default function CostingPanel({
 
   return (
     <div>
+      {/* ── Production warning: editing a running product asks first ── */}
+      {pendingEdit !== null && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <strong>Production is running</strong> — {pendingEdit.label} will change the
+            materials this production uses. Continue?
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 rounded-lg bg-amber-600 px-3 text-xs text-white hover:bg-amber-700"
+            onClick={() => {
+              const run = pendingEdit.run;
+              setPendingEdit(null);
+              void run();
+            }}
+          >
+            Continue
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-lg px-3 text-xs"
+            onClick={() => setPendingEdit(null)}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+
       {/* ── Open product chip (navigation lives in the sidebar) ──────── */}
       {activeFg && (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -711,7 +766,7 @@ export default function CostingPanel({
                   size="sm"
                   className="h-9 rounded-lg"
                   disabled={!addingMaterialId || items === undefined}
-                  onClick={() => void addMaterialRow()}
+                  onClick={addMaterialRowGuarded}
                 >
                   <Plus className="size-3.5" />
                 </Button>
@@ -763,7 +818,7 @@ export default function CostingPanel({
                   variant="outline"
                   className="h-9 rounded-lg"
                   disabled={items === undefined}
-                  onClick={() => void addCustomRow()}
+                  onClick={() => guardProduction("Adding a custom line", () => void addCustomRow())}
                 >
                   <Plus className="size-3.5" />
                 </Button>
@@ -841,7 +896,7 @@ export default function CostingPanel({
                                 aria-label={`Edit ${row.label}`}
                                 title="Edit line"
                                 className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
-                                onClick={() => void handleEditRow(row)}
+                                onClick={() => editRow(row)}
                               >
                                 <Pencil className="size-3.5" />
                               </button>
