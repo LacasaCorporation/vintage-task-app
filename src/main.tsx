@@ -11,10 +11,41 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
 // Lazy load route components for better code splitting
-const Landing = lazy(() => import("./pages/Landing.tsx"));
-const AuthPage = lazy(() => import("./pages/Auth.tsx"));
-const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
-const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+//
+// A route chunk that fails to fetch ("Failed to fetch dynamically imported
+// module") is almost never a bug in the route: it means the browser asked for
+// that JS and didn't get it back — a stale cached entry, or a dev server that
+// was rebuilding when the request landed. Reloading once gets a fresh module
+// graph; the session guard means a genuinely missing module can never put the
+// page in a reload loop, and any chunk that loads clears the guard so a later
+// failure is still free to retry.
+const ROUTE_RELOAD_GUARD = "slate:route-reload";
+
+function lazyRoute<P>(loader: () => Promise<{ default: React.ComponentType<P> }>) {
+  return lazy(() =>
+    loader().then(
+      (mod) => {
+        window.sessionStorage.removeItem(ROUTE_RELOAD_GUARD);
+        return mod;
+      },
+      (error: unknown) => {
+        if (window.sessionStorage.getItem(ROUTE_RELOAD_GUARD) === null) {
+          window.sessionStorage.setItem(ROUTE_RELOAD_GUARD, "1");
+          console.warn("Route chunk failed to load; reloading once.", error);
+          window.location.reload();
+          // the reload replaces this page, so this never settles
+          return new Promise<never>(() => {});
+        }
+        throw error;
+      },
+    ),
+  );
+}
+
+const Landing = lazyRoute(() => import("./pages/Landing.tsx"));
+const AuthPage = lazyRoute(() => import("./pages/Auth.tsx"));
+const Dashboard = lazyRoute(() => import("./pages/Dashboard.tsx"));
+const NotFound = lazyRoute(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -63,17 +94,33 @@ class RootErrorBoundary extends React.Component<
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-background text-foreground p-6">
-          <div className="max-w-lg text-center">
-            <p className="text-sm font-semibold">Preview runtime error</p>
-            <p className="mt-2 text-xs text-muted-foreground break-words">
-              {this.state.message}
-            </p>
-            {this.state.stack && (
-              <pre className="mt-3 text-left text-[10px] leading-4 text-muted-foreground/80 max-h-40 overflow-auto rounded border border-border/60 p-2">
-                {this.state.stack}
-              </pre>
-            )}
+        <div className="max-w-lg text-center">
+          <p className="text-sm font-semibold">Preview runtime error</p>
+          <p className="mt-2 text-xs text-muted-foreground break-words">
+            {this.state.message}
+          </p>
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={() => {
+                window.sessionStorage.removeItem(ROUTE_RELOAD_GUARD);
+                window.location.reload();
+              }}
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+            >
+              Reload
+            </button>
           </div>
+          <p className="mt-2 text-[11px] text-muted-foreground/80">
+            A route that fails to load is usually a stale cached file rather
+            than a problem with the page — reloading fetches the current one.
+          </p>
+          {this.state.stack && (
+            <pre className="mt-3 text-left text-[10px] leading-4 text-muted-foreground/80 max-h-40 overflow-auto rounded border border-border/60 p-2">
+              {this.state.stack}
+            </pre>
+          )}
+        </div>
         </div>
       );
     }
