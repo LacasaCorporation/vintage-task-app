@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
-import { scopeUserId } from "./org";
+import { activeFirmSettings, scopeUserId } from "./org";
 import { v } from "convex/values";
 
 const MAX_TASK_LENGTH = 280;
@@ -190,6 +190,39 @@ export const list = query({
     return mine
       .filter((t) => (t.assigneeId ?? t.ownerId) === userId)
       .sort((a, b) => b._creationTime - a._creationTime);
+  },
+});
+
+/**
+ * Who each task belongs to, keyed by user id, so a task row can name its owner
+ * inline. Any member may read it: it only names people who already share the
+ * caller's firm, the same way the sidebar names them.
+ */
+export const owners = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    const firm = await activeFirmSettings(ctx, userId);
+    const ids =
+      firm === null
+        ? [userId]
+        : [firm.ownerId, ...firm.members.map((m) => m.userId)];
+    return await Promise.all(
+      [...new Set(ids)].map(async (id) => {
+        const user = await ctx.db.get(id);
+        const login = await ctx.db
+          .query("credentials")
+          .withIndex("by_user", (q) => q.eq("userId", id))
+          .first();
+        return {
+          userId: id,
+          // name → sign-in username → email, the same order the sidebar uses
+          label: user?.name ?? login?.username ?? user?.email ?? "Someone",
+          isFirmOwner: firm !== null && id === firm.ownerId,
+        };
+      }),
+    );
   },
 });
 

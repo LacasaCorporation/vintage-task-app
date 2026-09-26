@@ -30,6 +30,7 @@ import {
   CalendarDays,
   ChevronDown,
   Clock,
+  Crown,
   FileText,
   Flag,
   History,
@@ -41,6 +42,7 @@ import {
   Repeat,
   Star,
   Trash2,
+  UserRound,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -99,6 +101,19 @@ export default function TasksPanel({
   const toggleTask = useMutation(api.tasks.toggle);
   const removeTask = useMutation(api.tasks.remove);
   const updateTask = useMutation(api.tasks.update);
+  // who each task belongs to (its creator, unless reassigned) — one query for
+  // the whole firm, so every row can name its owner without a query per row
+  const taskOwners = useQuery(api.tasks.owners);
+  const ownersById = useMemo(() => {
+    const map = new Map<
+      string,
+      { label: string; isFirmOwner: boolean }
+    >();
+    for (const person of taskOwners ?? []) {
+      map.set(person.userId, person);
+    }
+    return map;
+  }, [taskOwners]);
   // subtasks (steps) for the whole scope in one query, so each row can show
   // its own subtask dropdown without a query per row
   const allSteps = useQuery(api.tasks.listAllSteps);
@@ -590,6 +605,11 @@ export default function TasksPanel({
                 {tasks.map((task) => {
                   const isOpen = openTaskId === task._id;
                   const overdue = isOverdue(task);
+                  // legacy rows made before assignment existed have no
+                  // assigneeId, so they fall back to the firm owner
+                  const taskOwner = ownersById.get(
+                    task.assigneeId ?? task.ownerId,
+                  );
                   const taskSteps = stepsByTask.get(task._id) ?? [];
                   const stepsDone = taskSteps.filter((s) => s.isCompleted).length;
                   const stepsOpen = openStepRows.has(task._id);
@@ -640,6 +660,30 @@ export default function TasksPanel({
                             {task.text}
                           </span>
                           <span className="flex shrink-0 items-center gap-1.5">
+                            {taskOwner && (
+                              <span
+                                className={cn(
+                                  "inline-flex max-w-40 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                                  taskOwner.isFirmOwner
+                                    ? "bg-primary/10 text-primary"
+                                    : "bg-muted text-muted-foreground",
+                                )}
+                                title={
+                                  taskOwner.isFirmOwner
+                                    ? `${taskOwner.label} — owns this firm`
+                                    : `Task owner: ${taskOwner.label}`
+                                }
+                              >
+                                {taskOwner.isFirmOwner ? (
+                                  <Crown className="size-2.5" />
+                                ) : (
+                                  <UserRound className="size-2.5" />
+                                )}
+                                <span className="truncate">
+                                  {taskOwner.label}
+                                </span>
+                              </span>
+                            )}
                             <span
                               className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
                               title={`Created ${new Date(task._creationTime).toLocaleString()}`}
