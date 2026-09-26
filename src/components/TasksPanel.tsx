@@ -1174,84 +1174,88 @@ export default function TasksPanel({
                                         (step.tags ?? []).length > 0 ||
                                         (step.description ?? "").trim() !== "" ||
                                         parseAttachments(step.attachments).length > 0) && (
-                                        <span className="flex shrink-0 items-center gap-1 text-muted-foreground/70">
+                                        <span className="flex shrink-0 items-center gap-1">
                                           {step.remindAt !== undefined && (
-                                            <span title={`Reminds ${formatDueLabel(step.remindAt)}`}>
+                                            <span
+                                              title={`Reminds ${formatDueLabel(step.remindAt)}`}
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                                            >
                                               <AlarmClock className="size-3" />
                                             </span>
                                           )}
                                           {step.priority !== undefined && (
                                             <span
                                               className={cn(
-                                                "size-2 rounded-full",
-                                                PRIORITY_META[step.priority].dot,
+                                                "inline-flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[10px] font-medium capitalize",
+                                                PRIORITY_META[step.priority].chip,
                                               )}
                                               title={`Priority: ${step.priority}`}
-                                            />
+                                            >
+                                              <span
+                                                className={cn(
+                                                  "size-1.5 rounded-full",
+                                                  PRIORITY_META[step.priority].dot,
+                                                )}
+                                              />
+                                              {step.priority[0]}
+                                            </span>
                                           )}
                                           {step.recurrence !== undefined && (
                                             <span
                                               title={`Repeats ${RECURRENCE_LABEL[step.recurrence]}`}
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-violet-500/10 px-1 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-400"
                                             >
                                               <Repeat className="size-3" />
+                                              {RECURRENCE_LABEL[step.recurrence].replace("Every ", "")}
                                             </span>
                                           )}
                                           {(step.tags ?? []).length > 0 && (
                                             <span
                                               title={`Tags: ${(step.tags ?? []).map((t) => `#${t}`).join(" ")}`}
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 px-1 py-0.5 text-[10px] font-medium text-primary"
                                             >
                                               <Tag className="size-3" />
+                                              {step.tags!.length}
                                             </span>
                                           )}
                                           {(step.description ?? "").trim() !== "" && (
-                                            <span title="Has notes">
+                                            <span
+                                              title="Has notes"
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                            >
                                               <FileText className="size-3" />
                                             </span>
                                           )}
                                           {parseAttachments(step.attachments).length > 0 && (
                                             <span
                                               title={`${parseAttachments(step.attachments).length} attachment(s)`}
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 px-1 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-400"
                                             >
                                               <Paperclip className="size-3" />
+                                              {parseAttachments(step.attachments).length}
                                             </span>
                                           )}
                                           {step.starred === true && (
-                                            <span title="Starred" className="text-amber-500">
+                                            <span
+                                              title="Starred"
+                                              className="inline-flex items-center rounded-full bg-amber-400/15 px-1 py-0.5 text-amber-600 dark:text-amber-400"
+                                            >
                                               <Star className="size-3 fill-amber-400" />
                                             </span>
                                           )}
                                         </span>
                                       )}
                                       {canEdit && (
-                                        <input
-                                          type="datetime-local"
-                                          value={
-                                            step.dueAt !== undefined
-                                              ? toLocalInput(new Date(step.dueAt))
-                                              : ""
-                                          }
-                                          max={
-                                            task.dueAt !== undefined
-                                              ? toLocalInput(new Date(task.dueAt))
-                                              : undefined
-                                          }
-                                          onChange={(e) =>
-                                            void updateStepM({
-                                              id: step._id,
-                                              dueAt: e.target.value
-                                                ? new Date(e.target.value).getTime()
-                                                : undefined,
-                                            }).catch(() =>
-                                              toast.error("Couldn't update the subtask due date."),
-                                            )
-                                          }
+                                        <span
                                           title={
                                             task.dueAt !== undefined
                                               ? `Subtask due date — can't be later than the task (${formatDueLabel(task.dueAt)})`
                                               : "Subtask due date"
                                           }
-                                          className="hidden w-44 shrink-0 rounded-md border bg-card px-1.5 py-0.5 text-[10px] outline-none focus:ring-2 focus:ring-primary/30 group-hover/step:block"
-                                        />
+                                          className="hidden shrink-0 items-center text-[10px] text-muted-foreground/70 group-hover/step:hidden"
+                                        >
+                                          <CalendarDays className="size-3" />
+                                        </span>
                                       )}
                                       {canDelete && (
                                         <button
