@@ -914,7 +914,7 @@ export default function TasksPanel({
                             transition={{ duration: 0.18 }}
                             className="overflow-hidden"
                           >
-                            <div className="space-y-1 border-t border-border/60 bg-muted/30 px-4 py-2.5 sm:px-5">
+                            <div className="space-y-1 border-t border-border/60 bg-muted/30 py-2.5 pr-4 pl-1 sm:pr-5 sm:pl-2">
                               {taskSteps.length === 0 ? (
                                 <p className="pl-1 text-xs text-muted-foreground">
                                   No subtasks yet — add the first one below.
@@ -924,7 +924,7 @@ export default function TasksPanel({
                                   {taskSteps.map((step) => (                                        <li
                                           key={step._id}
                                           className={cn(
-                                            "group/step flex items-center gap-2 rounded-md px-1",
+                                            "group/step flex items-center gap-2 rounded-md px-1.5",
                                             openStepId === step._id && "bg-amber-500/10",
                                           )}
                                         >
