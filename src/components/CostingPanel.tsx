@@ -44,9 +44,6 @@ export default function CostingPanel({
   loading,
   view,
   onSelectView,
-  onNewFg,
-  onRenameFg,
-  onDeleteFg,
   onEditFg,
   onNewProduct,
   onNewProject,
@@ -74,9 +71,6 @@ export default function CostingPanel({
   loading: boolean;
   view: CostingView;
   onSelectView: (view: CostingView) => void;
-  onNewFg: (projectName: string) => void;
-  onRenameFg: (fg: FgDoc) => void;
-  onDeleteFg: (fg: FgDoc) => void;
   onEditFg: (fg: FgDoc) => void;
   onNewProduct?: (projectName: string) => void;
   onNewProject?: () => void;
@@ -202,7 +196,7 @@ export default function CostingPanel({
     api.costing.listFgItems,
     view?.kind === "fg" ? { fgId: view.fgId } : "skip",
   );
-  const rows = items ?? [];
+  const rows = useMemo(() => items ?? [], [items]);
 
   // Collapse duplicate rows (same description/price/unit) once per sheet open.
   useEffect(() => {
@@ -232,12 +226,13 @@ export default function CostingPanel({
   // ── Draft (save-button) logic ─────────────────────────────────────
   // Keep a local draft of every visible row; reset it when the sheet's
   // server data changes shape (rows added/removed or another FG opened).
-  useEffect(() => {
+  const [syncedItems, setSyncedItems] = useState(items);
+  if (items !== syncedItems) {
+    setSyncedItems(items);
     setDrafts(
       rows.map((r) => ({ id: r._id, label: r.label, qty: r.qty, unitPrice: r.unitPrice })),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, activeFg?._id]);
+  }
 
   const isDirty = useMemo(() => {
     if (drafts.length !== rows.length) return rows.length > 0;

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useQuery } from "convex/react";
@@ -176,6 +176,8 @@ export default function ProjectsPrintSheet({
   const configuredStatuses = useQuery(api.settings.listProjectStatuses);
   const { format: money, code: currencyCode } = useWorkspaceCurrency();
   const projectStatuses = projectStatusesOrDefaults(configuredStatuses);
+  // captured once so the printed timestamp stays stable across re-renders
+  const [printedAt] = useState(() => Date.now());
 
   // the browser dialog needs the sheet mounted for a tick before it opens
   useEffect(() => {
@@ -236,7 +238,7 @@ export default function ProjectsPrintSheet({
           </p>
         </div>
         <p className="text-right text-[11px] text-slate-600">
-          Printed {formatDueLabel(Date.now())}
+          Printed {formatDueLabel(printedAt)}
           <br />
           Grouped by status
           <br />

@@ -4,24 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import TaskDetail from "@/components/TaskDetail";
 import StepDetail from "@/components/StepDetail";
-import ProjectStatusSettings from "@/components/ProjectStatusSettings";
 import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
 import ProjectsWorkspace from "@/components/ProjectsWorkspace";
 import {
   DEFAULT_VIEW_BY_FILTER,
   type WorkspaceView,
 } from "@/components/FlaggedViews";
-import ProductPrintSheet from "@/components/ProductPrintSheet";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
 import {
@@ -33,39 +23,30 @@ import {
   isOverdue,
   parseAttachments,
   parseQuickAdd,
-  toLocalInput,
 } from "@/lib/task-utils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlarmClock,
-  BarChart3,
   CalendarDays,
   ChevronDown,
   Clock,
-  Columns3,
   FileText,
   Flag,
   History,
   Inbox,
-  List,
   ListTodo,
   Loader2,
   Paperclip,
   Plus,
-  Printer,
   Repeat,
-  Settings2,
   Star,
-  Tag,
   Trash2,
-  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  DEFAULT_PROJECT_STATUSES,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
   projectStatusesOrDefaults,
@@ -73,12 +54,6 @@ import {
 import {
   PRIORITY_META,
   PRIORITY_RANK,
-  FlaggedBoard,
-  FlaggedDetail,
-  FlaggedItemsList,
-  FlaggedProductsList,
-  FlaggedProjectsList,
-  ProductionReport,
   daysLeftLabel,
   type FlagFilter,
   type FlagStatusFilter,
@@ -159,9 +134,7 @@ export default function TasksPanel({
   const flaggedFgs = useQuery(api.costing.listFinishedGoods);
   const flaggedProjects = useQuery(api.costing.listProjects);
   const setFgCompletedM = useMutation(api.costing.setFgCompleted);
-  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
   const setJobProjectStatusM = useMutation(api.jobs.setJobProjectStatus);
-  const updateJobM = useMutation(api.jobs.updateJob);
   const projectStatusesQuery = useQuery(api.settings.listProjectStatuses);
   const setProjectStatusesM = useMutation(api.settings.setProjectStatuses);
   const projectStatuses = projectStatusesOrDefaults(projectStatusesQuery);
@@ -187,11 +160,11 @@ export default function TasksPanel({
   const [statusDraft, setStatusDraft] = useState<string[] | null>(null);
 
   // Projects should always open as a list when selected from the sidebar.
-  useEffect(() => {
-    if (activeView === "flagged") {
-      setFlagView("list");
-    }
-  }, [activeView]);
+  const [lastActiveView, setLastActiveView] = useState(activeView);
+  if (lastActiveView !== activeView) {
+    setLastActiveView(activeView);
+    if (activeView === "flagged") setFlagView("list");
+  }
 
   // ── reminder notifications (in-app while the app is open) ──────────
   useEffect(() => {
@@ -308,37 +281,6 @@ export default function TasksPanel({
       toast.error(error instanceof Error ? error.message : "Couldn't add that task.");
     } finally {
       setIsAdding(false);
-    }
-  };
-
-  const handleToggle = async (id: Id<"tasks">) => {
-    try {
-      await toggleTask({ id });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update that task.");
-    }
-  };
-
-  /** Check off (or reopen) a flagged product in the todo list. */
-  const handleSetFlaggedFgStatus = async (fg: FgDoc, status: string) => {
-    setFlaggedBusy(`f:${fg._id}`);
-    try {
-      await setFgProjectStatusM({ id: fg._id, status });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the product status.");
-    } finally {
-      setFlaggedBusy(null);
-    }
-  };
-
-  const handleSetFlaggedJobStatus = async (job: JobDoc, status: string) => {
-    setFlaggedBusy(`j:${job._id}`);
-    try {
-      await setJobProjectStatusM({ id: job._id, status });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the job status.");
-    } finally {
-      setFlaggedBusy(null);
     }
   };
 
@@ -1185,7 +1127,6 @@ export default function TasksPanel({
             ) : openTask && (
               <TaskDetail
                 task={openTask}
-                lists={lists}
                 canEdit={canEdit}
                 canDelete={canDelete}
                 canCreateSteps={canCreateSteps}

@@ -303,7 +303,7 @@ export const removePage = mutation({
       }
     }
     for (const pid of toDelete) {
-      const doc = await ctx.db.get(pid as any);
+      const doc = await ctx.db.get(pid);
       if (doc !== null) await ctx.db.delete(doc._id);
     }
   },

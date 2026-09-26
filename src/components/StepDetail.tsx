@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -123,11 +123,13 @@ export default function StepDetail({
   const [tagFocused, setTagFocused] = useState(false);
 
   // a different subtask is open: reload every draft from it
-  useEffect(() => {
+  const [draftStepId, setDraftStepId] = useState(step._id);
+  if (draftStepId !== step._id) {
+    setDraftStepId(step._id);
     setTitle(step.text);
     setNotes(step.description ?? "");
     setTagsText((step.tags ?? []).map((t) => `#${t}`).join(" "));
-  }, [step._id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   const parsedTags = tagsText
     .split(/[\s,]+/)

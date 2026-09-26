@@ -305,7 +305,6 @@ export default function ProjectsWorkspace({
             onSelect={onSelect}
             busyKey={busyKey}
             onToggleJob={onToggleJob}
-            onToggleFg={onToggleFg}
           />
         )}
         {printing && items !== null && (

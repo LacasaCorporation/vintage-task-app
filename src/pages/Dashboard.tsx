@@ -78,9 +78,10 @@ export default function Dashboard() {
     return canDo(s, "view");
   };
   // If restrictions deny the current section, fall back to the first allowed.
-  useEffect(() => {
-    if (!myAccess) return;
-    if (!sectionAllowed(section)) {
+  const [lastAccess, setLastAccess] = useState<typeof myAccess>(undefined);
+  if (myAccess !== lastAccess) {
+    setLastAccess(myAccess);
+    if (myAccess && !sectionAllowed(section)) {
       setSection(
         sectionAllowed("tasks")
           ? "tasks"
@@ -91,8 +92,7 @@ export default function Dashboard() {
               : "tasks",
       );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myAccess]);
+  }
 
   // ── Mine / ALL scope filter (tasks & notes default to the user's own) ─
   const [dataScope, setDataScope] = useState<"mine" | "all">("mine");
@@ -444,12 +444,6 @@ export default function Dashboard() {
   const [costingView, setCostingView] = useState<CostingView>({
     kind: "projects",
   });
-  const [projectDialog, setProjectDialog] = useState<
-    | { mode: "create" }
-    | { mode: "edit"; project: Doc<"projects"> }
-    | null
-  >(null);
-
   type ProjectFields = {
     name: string;
     client: string;
@@ -531,7 +525,6 @@ export default function Dashboard() {
           `Project “${name}” created — add products to it from the Products tab.`,
         );
       }
-      setProjectDialog(null);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Couldn't save the project.",
@@ -983,9 +976,6 @@ export default function Dashboard() {
               loading={finishedGoods === undefined}
               view={costingView}
               onSelectView={setCostingView}
-              onNewFg={(p) => void handleNewFg(p)}
-              onRenameFg={(fg) => void handleRenameFg(fg)}
-              onDeleteFg={(fg) => void handleDeleteFg(fg)}
               onEditFg={(fg) => void handleEditFg(fg)}
               onNewProduct={(name) => void handleNewFg(name)}
               onNewProject={canDoItem("projects", "create") ? () => void handleNewProject() : undefined}

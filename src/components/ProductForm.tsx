@@ -22,7 +22,7 @@ import {
   Sigma,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
@@ -124,11 +124,14 @@ export default function ProductForm({
   const [showForm, setShowForm] = useState(false);
 
   // when arriving from the Projects tab, pre-filter and pre-select that project
-  useEffect(() => {
-    if (!initialProject) return;
+  const [lastInitialProject, setLastInitialProject] = useState<string | null>(
+    null,
+  );
+  if (initialProject && initialProject !== lastInitialProject) {
+    setLastInitialProject(initialProject);
     setProjectFilter(initialProject);
     setProject(initialProject);
-  }, [initialProject]);
+  }
 
   // product costs across all FGs (single query, grouped client-side)
   const allItems = useQuery(api.costing.listAllItems);

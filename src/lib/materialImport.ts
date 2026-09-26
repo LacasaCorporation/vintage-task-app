@@ -752,7 +752,7 @@ export async function exportMaterials(
   units: MasterItem[],
   categories: MasterItem[],
 ) {
-  const rows = materials.map((m, i) => [
+  const rows = materials.map((m) => [
     m.code ?? "",
     m.name,
     m.category ?? "",

@@ -68,7 +68,7 @@ import {
   X,
 } from "lucide-react";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 type Role = "super" | "admin" | "user" | "member";
@@ -102,14 +102,6 @@ type CustomRole = {
   createdAt: number;
 };
 
-type PendingInvite = {
-  _id: Id<"pendingInvites">;
-  email: string;
-  role: AssignableRole;
-  customRoleId?: Id<"customRoles">;
-  createdAt: number;
-};
-
 /** A sign-in provisioned by the super admin (Settings → Sign-ins). */
 type ProvisionedLogin = {
   _id: Id<"credentials">;
@@ -123,19 +115,6 @@ type ProvisionedLogin = {
   role: Role;
   customRoleId: Id<"customRoles"> | null;
 };
-
-/** My position in the management chain (api.settings.getMyTeam). */
-type MyTeam = {
-  manager: { userId: Id<"users">; role: Role; name?: string } | null;
-  isSuper: boolean;
-  directReports: Array<{
-    userId: Id<"users">;
-    role: Role;
-    customRoleId?: Id<"customRoles">;
-    name?: string;
-    email?: string;
-  }>;
-} | null;
 
 /**
  * The settings tabs, in the same order as the <section> elements below and in
@@ -428,7 +407,6 @@ export default function SettingsPanel() {
   // organisation + provisioned sign-ins
   const organisation = useQuery(api.accounts.getOrganisation);
   const logins = useQuery(api.accounts.listLogins);
-  const myTeam = useQuery(api.settings.getMyTeam) as MyTeam;
   const setMemberManager = useMutation(api.settings.setMemberManager);
   const createOrganisation = useMutation(api.accounts.createOrganisation);
   const createUserLogin = useAction(api.accounts.createUserLogin);
@@ -534,9 +512,12 @@ export default function SettingsPanel() {
   // collapsed nodes in the team hierarchy tree
   const [collapsedNodes, setCollapsedNodes] = useState<Set<Id<"users">>>(new Set());
 
-  useEffect(() => {
-    if (organisation?.name) setOrgName(organisation.name);
-  }, [organisation?.name]);
+  // mirror the saved name into the editable field once it loads
+  const [syncedOrgName, setSyncedOrgName] = useState<string | null>(null);
+  if (organisation?.name && organisation.name !== syncedOrgName) {
+    setSyncedOrgName(organisation.name);
+    setOrgName(organisation.name);
+  }
 
   // role editor dialog state (create + edit share one dialog)
   const [roleEditorOpen, setRoleEditorOpen] = useState(false);

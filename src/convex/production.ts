@@ -146,7 +146,7 @@ export const editConsumption = mutation({
         stock: (material.stock ?? 0) + used.qty,
       });
     }
-    for (const [materialId, qty] of next) {
+    for (const materialId of next.keys()) {
       const material = await ctx.db.get(materialId);
       if (material === null || material.ownerId !== userId)
         throw new Error("A material this product needs no longer exists.");
@@ -178,9 +178,6 @@ export const stop = mutation({
       throw new Error("That product no longer exists.");
     if (fg.productionStartedAt === undefined)
       throw new Error("Production isn't running for this product.");
-    const statuses = projectStatusesOrDefaults(
-      (await getSettings(ctx, userId))?.projectStatuses,
-    );
 
     for (const used of fg.productionConsumed ?? []) {
       const material = await ctx.db.get(used.materialId);

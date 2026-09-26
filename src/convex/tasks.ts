@@ -2,7 +2,6 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
 
 const MAX_TASK_LENGTH = 280;
 const MAX_DESCRIPTION_LENGTH = 4000;

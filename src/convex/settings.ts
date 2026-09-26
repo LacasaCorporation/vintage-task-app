@@ -141,7 +141,7 @@ async function getOrCreateSettings(
 
 /** Find a user by email (case-insensitive). */
 async function findUserByEmail(
-  ctx: { db: any },
+  ctx: QueryCtx | MutationCtx,
   email: string,
 ): Promise<Doc<"users"> | null> {
   const users = await ctx.db.query("users").collect();
@@ -155,7 +155,7 @@ async function findUserByEmail(
 
 /** Resolve the caller's member entry + role (null role if not a member yet). */
 async function actorRole(
-  ctx: { db: any },
+  ctx: QueryCtx | MutationCtx,
   settingsDoc: Doc<"settings">,
   userId: Id<"users">,
 ): Promise<WorkspaceRole | null> {

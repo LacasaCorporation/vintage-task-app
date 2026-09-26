@@ -4,7 +4,6 @@ import {
   type FormatState,
   applyFontFamily,
   applyFontSize,
-  formatSelection,
 } from "@/components/RichTextEditor";
 import ColorPalette, {
   HIGHLIGHT_COLORS,

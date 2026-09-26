@@ -34,6 +34,7 @@ import {
   Plus,
   StickyNote,
   Eraser,
+  ListOrdered,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -489,6 +490,7 @@ function PageCanvas({
               onChange={canEdit ? handleBodyChange : () => {}}
               editorRef={editorRef}
               readOnly={!canEdit}
+              numbered={numbered}
               placeholder="Start writing… select letters to format, press Flag for tasks, or insert pictures."
               fontClass="text-[15px]"
               onFormatStateChange={(state) => {
@@ -500,7 +502,27 @@ function PageCanvas({
         </div>
 
         {/* minimal footer */}
-        <div className="flex items-center border-t border-border/60 px-4 py-2 sm:px-10">
+        <div className="flex items-center gap-2 border-t border-border/60 px-4 py-2 sm:px-10">
+          <button
+            type="button"
+            disabled={!canEdit}
+            aria-pressed={numbered}
+            title="Number every line of this note"
+            onClick={() => {
+              const next = !numbered;
+              setNumbered(next);
+              scheduleSave({ numbered: next });
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50",
+              numbered
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <ListOrdered className="size-3.5" />
+            Number lines
+          </button>
           <span className="ml-auto text-[11px] text-muted-foreground">
             {savedTick > 0 ? "Saved ✓" : "Autosaves as you type"}
           </span>

@@ -320,8 +320,12 @@ export function RichTextEditor({
 }) {
   const innerRef = useRef<HTMLDivElement>(null);
   const ref = editorRef ?? innerRef;
+  // kept in a ref so DOM events always see the latest handler; writing it in an
+  // effect (not during render) keeps render pure
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   // Sync external value into the DOM when it changes externally.
   useEffect(() => {
@@ -329,7 +333,7 @@ export function RichTextEditor({
     if (el && el.innerHTML !== value) {
       el.innerHTML = value;
     }
-  }, [value]);
+  }, [value, ref]);
 
   // Enter creates paragraphs so line numbering stays consistent.
   useEffect(() => {

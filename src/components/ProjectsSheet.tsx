@@ -22,7 +22,7 @@ import {
   User,
   Users,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -196,8 +196,12 @@ export default function ProjectsSheet({
     useQuery(api.settings.listProjectStatuses),
   );
   /** The project a job sits under, for search and print labels. */
-  const projectNameForJob = (job: JobDoc) =>
-    (projects ?? []).find((p) => p._id === job.projectId)?.name ?? "Unassigned";
+  const projectNameForJob = useCallback(
+    (job: JobDoc) =>
+      (projects ?? []).find((p) => p._id === job.projectId)?.name ??
+      "Unassigned",
+    [projects],
+  );
   const pauseJob = useMutation(api.jobs.pauseJob);
   const resumeJob = useMutation(api.jobs.resumeJob);
   const completeJob = useMutation(api.jobs.completeJob);
@@ -458,7 +462,7 @@ export default function ProjectsSheet({
         (fg.category ?? "").toLowerCase().includes(q)
       );
     });
-  }, [tab, projects, allJobs, finishedGoods, costByFg, filtered, search, jobFilter, productFilter, projectStatusesList]);
+  }, [tab, projects, allJobs, finishedGoods, costByFg, filtered, search, jobFilter, productFilter, projectStatusesList, projectNameForJob]);
 
   /** What the print header should say about the active filter. */
   const printFilterLabel =

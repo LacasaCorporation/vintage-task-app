@@ -7,7 +7,6 @@ import {
   CalendarDays,
   CheckSquare,
   ChevronRight,
-  Flag,
   Folder,
   FolderInput,
   Inbox,
@@ -19,7 +18,6 @@ import {
 } from "lucide-react";
 
 type ListId = Id<"taskLists">;
-type FolderId = Id<"taskFolders">;
 
 /** null = All tasks; "today" / "starred" / "flagged" are smart views; otherwise a list id. */
 export type ActiveTaskView = ListId | "today" | "starred" | "flagged" | null;

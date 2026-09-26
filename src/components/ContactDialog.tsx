@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -95,10 +95,12 @@ export default function ContactDialog({
   };
 
   // an edit button elsewhere (a list row) can open the popup already filled in
-  useEffect(() => {
-    if (open && editTarget) openForm(editTarget);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, editTarget?._id]);
+  const [prefilledId, setPrefilledId] = useState<string | null>(null);
+  const prefillTargetId = open && editTarget ? editTarget._id : null;
+  if (prefillTargetId !== prefilledId) {
+    setPrefilledId(prefillTargetId);
+    if (editTarget) openForm(editTarget);
+  }
 
   const close = (next: boolean) => {
     if (!next) {

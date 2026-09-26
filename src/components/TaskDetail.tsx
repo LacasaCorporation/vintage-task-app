@@ -1,5 +1,4 @@
 import { api } from "@/convex/_generated/api";
-import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -80,7 +79,6 @@ const chipBase =
 /** Slide-in editor showing every detail of one task. */
 export default function TaskDetail({
   task,
-  lists,
   canEdit = true,
   canDelete = true,
   canCreateSteps = true,
@@ -89,7 +87,6 @@ export default function TaskDetail({
   onClose,
 }: {
   task: TaskDoc;
-  lists: { _id: Id<"taskLists">; name: string }[];
   canEdit?: boolean;
   canDelete?: boolean;
   /** Subtasks & attachments item permissions (finer than canEdit/canDelete). */

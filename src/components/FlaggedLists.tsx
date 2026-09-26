@@ -924,7 +924,9 @@ function BoardCardView({
           <span
             className={cn(
               "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-              (card.fg.dueAt ?? 0) < Date.now() && !done
+              card.fg.dueAt !== undefined &&
+                daysLeftLabel(card.fg.dueAt).overdue &&
+                !done
                 ? "bg-rose-500/10 text-rose-700 dark:text-rose-400"
                 : "bg-muted text-muted-foreground",
             )}
@@ -1153,8 +1155,12 @@ export function ProductionReport({
   projectStatuses?: string[];
 }) {
   const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
-  const projectStatuses = projectStatusesOrDefaults(
-    configuredProjectStatuses ?? configuredStatusesQuery,
+  const projectStatuses = useMemo(
+    () =>
+      projectStatusesOrDefaults(
+        configuredProjectStatuses ?? configuredStatusesQuery,
+      ),
+    [configuredProjectStatuses, configuredStatusesQuery],
   );
 
   const rows: ReportRow[] = useMemo(
@@ -1224,16 +1230,18 @@ export function ProductionReport({
   }, [rows]);
 
   const byStatus = useMemo(() => {
-    const counts = new Map<string, { total: number; done: number }>();
-    for (const row of rows) {
-      const entry = counts.get(row.status) ?? { total: 0, done: 0 };
-      entry.total += 1;
-      if (row.finished) entry.done += 1;
-      counts.set(row.status, entry);
+    const out: { status: string; total: number; done: number }[] = [];
+    for (const status of projectStatuses) {
+      let total = 0;
+      let done = 0;
+      for (const row of rows) {
+        if (row.status !== status) continue;
+        total += 1;
+        if (row.finished) done += 1;
+      }
+      if (total > 0) out.push({ status, total, done });
     }
-    return projectStatuses
-      .filter((status) => counts.has(status))
-      .map((status) => ({ status, ...counts.get(status)! }));
+    return out;
   }, [rows, projectStatuses]);
 
   const stat = (label: string, value: number, hint: string, tone: string) => (

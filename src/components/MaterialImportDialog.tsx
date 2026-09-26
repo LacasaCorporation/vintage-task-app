@@ -30,7 +30,7 @@ import {
   Upload,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useAction, useMutation } from "convex/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -95,19 +95,22 @@ export default function MaterialImportDialog({
   >({});
 
   // reset when reopened
-  useEffect(() => {
-    if (!open) return;
-    setStage("pick");
-    setFileName("");
-    setBaseInputs([]);
-    setOverrides({});
-    setExcluded(new Set());
-    setFilter("all");
-    setReading(false);
-    setImporting(false);
-    setAiChecking(false);
-    setAiVerdicts({});
-  }, [open]);
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setStage("pick");
+      setFileName("");
+      setBaseInputs([]);
+      setOverrides({});
+      setExcluded(new Set());
+      setFilter("all");
+      setReading(false);
+      setImporting(false);
+      setAiChecking(false);
+      setAiVerdicts({});
+    }
+  }
 
   const inputs = useMemo(
     () =>

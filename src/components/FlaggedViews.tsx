@@ -111,6 +111,8 @@ export function ProjectHierarchy({
     configuredProjectStatuses ?? configuredStatusesQuery,
   );
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  // stable key so the memo below only re-runs when the status list changes
+  const statusKey = projectStatuses.join("|");
   const toggle = (key: string) =>
     setCollapsed((current) => {
       const next = new Set(current);
@@ -129,7 +131,7 @@ export function ProjectHierarchy({
         ),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projects, statusFilter, projectStatuses.join("|")],
+    [projects, statusFilter, statusKey],
   );
 
   if (visible.length === 0) {
@@ -448,7 +450,6 @@ export function JobFlatList({
   onSelect,
   busyKey,
   onToggleJob,
-  onToggleFg,
 }: {
   data: FlaggedData;
   allJobs: JobDoc[];
@@ -460,7 +461,6 @@ export function JobFlatList({
   onSelect?: (sel: FlaggedSel) => void;
   busyKey: string | null;
   onToggleJob: (job: JobDoc) => void;
-  onToggleFg: (fg: FgDoc) => void;
 }) {
   const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
   const projectStatuses = projectStatusesOrDefaults(

@@ -116,7 +116,9 @@ export const exportBackup = query({
       // tag each row with a stable temp key so cross-references can be
       // remapped on restore regardless of insertion order
       data[table] = rows.map((row, index) => {
-        const { _id, _creationTime, ...rest } = row as Record<string, unknown>;
+        const rest = { ...(row as Record<string, unknown>) };
+        delete rest._id;
+        delete rest._creationTime;
         return { ...rest, _key: `${table}:${index}` };
       });
       totalRows += rows.length;

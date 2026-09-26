@@ -74,6 +74,8 @@ export default function PurchasePanel({
   const [supplier, setSupplier] = useState("");
   const [supplierAddress, setSupplierAddress] = useState("");
   const [purchasedOn, setPurchasedOn] = useState(todayInput);
+  // captured once so the header label stays stable across re-renders
+  const [openedAt] = useState(() => Date.now());
   const [note, setNote] = useState("");
   const [discount, setDiscount] = useState("0");
   const [tax, setTax] = useState("0");
@@ -719,7 +721,7 @@ export default function PurchasePanel({
               <p className="text-muted-foreground">
                 {editingId !== null
                   ? "Saving adjusts stock by the difference"
-                  : `Date ${formatDueLabel(Date.now())}`}
+                  : `Date ${formatDueLabel(openedAt)}`}
               </p>
             </div>
           </div>

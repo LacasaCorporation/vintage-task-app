@@ -219,8 +219,6 @@ export function ImageLayer({
     [images, onChange, onActiveChange],
   );
 
-  const editing = selectedId !== null;
-
   return (
     <div
       ref={wrapRef}

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { formatDueLabel } from "@/lib/task-utils";
-import { PROJECT_STATUS_FINISH, projectStatusesOrDefaults } from "@/lib/project-statuses";
+import { projectStatusesOrDefaults } from "@/lib/project-statuses";
 import {
   daysLeftLabel,
   fgProjectStatus,
