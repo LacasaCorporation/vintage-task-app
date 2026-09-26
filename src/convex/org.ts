@@ -123,6 +123,32 @@ export async function firmTeam(
   return [...team];
 }
 
+/**
+ * Everyone above this person in the firm's management chain, nearest first.
+ * The counterpart to firmTeam (which walks down): together they decide who can
+ * see a task and who may be given one.
+ */
+export async function firmAncestors(
+  ctx: Ctx,
+  userId: Id<"users">,
+): Promise<Id<"users">[]> {
+  const firm = await activeFirmSettings(ctx, userId);
+  if (firm === null) return [];
+  const out: Id<"users">[] = [];
+  const seen = new Set<Id<"users">>([userId]);
+  let current = userId;
+  for (;;) {
+    const entry = firm.members.find((m) => m.userId === current);
+    const managerId = entry?.managerId as Id<"users"> | undefined;
+    // an unset or cyclic manager ends the chain
+    if (managerId === undefined || seen.has(managerId)) break;
+    out.push(managerId);
+    seen.add(managerId);
+    current = managerId;
+  }
+  return out;
+}
+
 /** Remember which firm this user is working in. */
 export async function rememberActiveFirm(
   ctx: MutationCtx,

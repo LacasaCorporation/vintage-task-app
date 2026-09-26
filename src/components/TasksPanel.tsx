@@ -102,19 +102,13 @@ export default function TasksPanel({
   const toggleTask = useMutation(api.tasks.toggle);
   const removeTask = useMutation(api.tasks.remove);
   const updateTask = useMutation(api.tasks.update);
-  // who each task belongs to (its creator, unless reassigned) — one query for
-  // the whole firm, so every row can name its owner without a query per row
-  const taskOwners = useQuery(api.tasks.owners);
-  const ownersById = useMemo(() => {
-    const map = new Map<
-      string,
-      { label: string; isFirmOwner: boolean }
-    >();
-    for (const person of taskOwners ?? []) {
-      map.set(person.userId, person);
-    }
-    return map;
-  }, [taskOwners]);
+  // everyone in the firm with their manager — one query, so every row can name
+  // its assignees without a query per row
+  const peopleData = useQuery(api.tasks.people);
+  const peopleById = useMemo(
+    () => new Map((peopleData?.people ?? []).map((p) => [p.userId, p])),
+    [peopleData],
+  );
   // subtasks (steps) for the whole scope in one query, so each row can show
   // its own subtask dropdown without a query per row
   const allSteps = useQuery(api.tasks.listAllSteps);
@@ -614,13 +608,19 @@ export default function TasksPanel({
                   // A task written before ownership was tracked carries the
                   // firm's own id in assigneeId, and its real author was never
                   // stored — show it as shared rather than blame the owner.
-                  const taskOwner =
+                  const stampedOwner =
                     task.assigneeId === undefined
                       ? null
-                      : (ownersById.get(task.assigneeId) ?? null);
+                      : (peopleById.get(task.assigneeId) ?? null);
                   const taskIsShared =
-                    taskOwner === null ||
-                    (taskOwner.isFirmOwner && task.assignedAt === undefined);
+                    stampedOwner === null ||
+                    (stampedOwner.isFirmOwner && task.assignedAt === undefined);
+                  const taskAssignees = taskIsShared
+                    ? []
+                    : (task.assigneeIds ??
+                      (task.assigneeId === undefined
+                        ? []
+                        : [task.assigneeId]));
                   const taskSteps = stepsByTask.get(task._id) ?? [];
                   const stepsDone = taskSteps.filter((s) => s.isCompleted).length;
                   const stepsOpen = openStepRows.has(task._id);
@@ -671,33 +671,58 @@ export default function TasksPanel({
                             {task.text}
                           </span>
                           <span className="flex shrink-0 items-center gap-1.5">
-                            {taskOwner && !taskIsShared ? (
+                            {taskAssignees.length === 1 ? (
                               <span
                                 className={cn(
                                   "inline-flex max-w-40 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-                                  taskOwner.isFirmOwner
+                                  peopleById.get(taskAssignees[0])?.isFirmOwner
                                     ? "bg-primary/10 text-primary"
                                     : "bg-muted text-muted-foreground",
                                 )}
                                 title={
-                                  taskOwner.isFirmOwner
-                                    ? `${taskOwner.label} — owns this firm`
-                                    : `Task owner: ${taskOwner.label}`
+                                  peopleById.get(taskAssignees[0])?.isFirmOwner === true
+                                    ? `${peopleById.get(taskAssignees[0])?.label} — owns this firm`
+                                    : `Assigned to ${peopleById.get(taskAssignees[0])?.label ?? "someone"}`
                                 }
                               >
-                                {taskOwner.isFirmOwner ? (
+                                {peopleById.get(taskAssignees[0])?.isFirmOwner ? (
                                   <Crown className="size-2.5" />
                                 ) : (
                                   <UserRound className="size-2.5" />
                                 )}
                                 <span className="truncate">
-                                  {taskOwner.label}
+                                  {peopleById.get(taskAssignees[0])?.label ??
+                                    "Someone"}
+                                </span>
+                              </span>
+                            ) : taskAssignees.length > 1 ? (
+                              <span
+                                className="inline-flex max-w-56 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                title={taskAssignees
+                                  .map(
+                                    (id) =>
+                                      peopleById.get(id)?.label ?? "Someone",
+                                  )
+                                  .join(", ")}
+                              >
+                                <Users className="size-2.5" />
+                                <span className="truncate">
+                                  {taskAssignees
+                                    .slice(0, 2)
+                                    .map(
+                                      (id) =>
+                                        peopleById.get(id)?.label ?? "Someone",
+                                    )
+                                    .join(", ")}
+                                  {taskAssignees.length > 2
+                                    ? ` +${taskAssignees.length - 2}`
+                                    : ""}
                                 </span>
                               </span>
                             ) : (
                               <span
                                 className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                                title="Nobody owns this task yet — it is shared with everyone in the firm"
+                                title="Nobody is assigned to this task yet — it is shared with everyone in the firm"
                               >
                                 <Users className="size-2.5" />
                                 Not assigned

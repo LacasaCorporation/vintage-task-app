@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
-import { activeFirmSettings, firmTeam, scopeUserId } from "./org";
+import { activeFirmSettings, firmAncestors, firmTeam, scopeUserId } from "./org";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 
@@ -183,11 +183,35 @@ function ownerOf(
   return task.assigneeId;
 }
 
+/** Everyone a task is assigned to. Falls back to its single owner. */
+function assigneesOf(
+  task: Doc<"tasks">,
+  firmOwnerId: Id<"users">,
+): Id<"users">[] {
+  if (task.assigneeIds !== undefined && task.assigneeIds.length > 0) {
+    return task.assigneeIds;
+  }
+  const owner = ownerOf(task, firmOwnerId);
+  return owner === undefined ? [] : [owner];
+}
+
+/** The distinct people attached to a task: its owner plus its assignees. */
+function peopleOf(
+  task: Doc<"tasks">,
+  firmOwnerId: Id<"users">,
+): Id<"users">[] {
+  return [...new Set([...assigneesOf(task, firmOwnerId), ownerOf(task, firmOwnerId)].filter(
+    (id): id is Id<"users"> => id !== undefined,
+  ))];
+}
+
 /**
  * All tasks the caller may see, newest first (filtered client-side).
- * scope "mine" (default) → the caller's own tasks; "all" → the caller's plus
- * their subordinates' (see firmTeam: everyone under them in the firm's
- * management chain, at any depth). A sibling manager's tasks stay hidden.
+ *
+ * scope "mine" (default) → tasks the caller owns or is assigned. "all" →
+ * everything they are allowed to know about: their own, their reports' (the
+ * down line) and their managers' (the up line). The firm's top user sees the
+ * whole firm, and a sibling manager's tasks stay hidden from each other.
  *
  * A task with no known owner is shared: it appears in both, because we cannot
  * know who wrote it and hiding it would make a task disappear.
@@ -203,49 +227,113 @@ export const list = query({
       .query("tasks")
       .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
       .collect();
-    const owners = all.map((t) => ownerOf(t, orgId));
+    const people = all.map((t) => peopleOf(t, orgId));
     if (scope === "all") {
-      const team = new Set(await firmTeam(ctx, userId));
+      const [down, up] = await Promise.all([
+        firmTeam(ctx, userId),
+        firmAncestors(ctx, userId),
+      ]);
+      const reachable = new Set([...down, ...up]);
+      // the top user has the whole firm in view
+      const isTopUser = userId === orgId;
       return all
-        .filter((_, i) => owners[i] === undefined || team.has(owners[i] as Id<"users">))
+        .filter((_, i) => {
+          const who = people[i];
+          if (who.length === 0) return true;
+          return isTopUser || who.some((id) => reachable.has(id));
+        })
         .sort((a, b) => b._creationTime - a._creationTime);
     }
     return all
-      .filter((_, i) => owners[i] === undefined || owners[i] === userId)
+      .filter((_, i) => {
+        const who = people[i];
+        return who.length === 0 || who.includes(userId);
+      })
       .sort((a, b) => b._creationTime - a._creationTime);
   },
 });
 
 /**
- * Who each task belongs to, keyed by user id, so a task row can name its owner
- * inline. Any member may read it: it only names people who already share the
- * caller's firm, the same way the sidebar names them.
+ * Everyone in the active firm with a display label and their manager, plus the
+ * caller's own place in the chain. That is enough for the client to render the
+ * team tree, work out who may be handed a task, and name a task's assignees.
+ * Any member may read it: it only describes people in their own firm.
  */
-export const owners = query({
+export const people = query({
   args: {},
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
-    if (userId === null) return [];
+    if (userId === null) return { me: null, firmOwnerId: null, people: [] };
     const firm = await activeFirmSettings(ctx, userId);
     const ids =
       firm === null
         ? [userId]
         : [firm.ownerId, ...firm.members.map((m) => m.userId)];
-    return await Promise.all(
+    const rows = await Promise.all(
       [...new Set(ids)].map(async (id) => {
         const user = await ctx.db.get(id);
         const login = await ctx.db
           .query("credentials")
           .withIndex("by_user", (q) => q.eq("userId", id))
           .first();
+        const member = firm?.members.find((m) => m.userId === id);
         return {
           userId: id,
           // name → sign-in username → email, the same order the sidebar uses
           label: user?.name ?? login?.username ?? user?.email ?? "Someone",
+          managerId: (member?.managerId as Id<"users"> | undefined) ?? null,
           isFirmOwner: firm !== null && id === firm.ownerId,
         };
       }),
     );
+    return { me: userId, firmOwnerId: firm?.ownerId ?? null, people: rows };
+  },
+});
+
+/**
+ * Hand a task to one or more people, or take it off everyone.
+ *
+ * The task's owner, anyone above them in the chain, and the firm's top user may
+ * reassign — and only to themselves or their own down line, which is what makes
+ * "give this to my whole team" one safe action rather than a way to hand work
+ * sideways to a peer. A task nobody owns can be claimed by any member.
+ */
+export const assign = mutation({
+  args: {
+    id: v.id("tasks"),
+    userIds: v.array(v.id("users")),
+  },
+  handler: async (ctx, { id, userIds }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) throw new Error("Sign in first.");
+    const task = await ctx.db.get(id);
+    if (task === null || task.ownerId !== orgId) {
+      throw new Error("That entry no longer exists.");
+    }
+    const current = peopleOf(task, orgId);
+    const up = await firmAncestors(ctx, userId);
+    const mayReassign =
+      current.length === 0 ||
+      userId === orgId ||
+      current.some((id) => id === userId || up.includes(id));
+    if (!mayReassign) {
+      throw new Error(
+        "Only the task owner, their manager, or the firm owner can assign this task.",
+      );
+    }
+    const down = new Set(await firmTeam(ctx, userId));
+    const targets = [...new Set(userIds)];
+    if (targets.some((id) => !down.has(id))) {
+      throw new Error(
+        "You can only assign a task to yourself or to someone who reports to you.",
+      );
+    }
+    await ctx.db.patch(id, {
+      assigneeIds: targets.length > 0 ? targets : undefined,
+    });
+    return { assigneeIds: targets };
   },
 });
 
@@ -325,6 +413,8 @@ export const add = mutation({
       ownerId: userId,
       assigneeId: creator,
       assignedAt: Date.now(),
+      // the creator owns it and starts out assigned to it
+      assigneeIds: [creator],
       text: trimmed,
       isCompleted: false,
       listId,
@@ -662,6 +752,7 @@ export const toggle = mutation({
         // whether that owner was ever actually recorded
         assigneeId: task.assigneeId,
         assignedAt: task.assignedAt,
+        assigneeIds: task.assigneeIds,
         text: task.text,
         isCompleted: false,
         listId: task.listId,

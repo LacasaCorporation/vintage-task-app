@@ -210,6 +210,10 @@ const schema = defineSchema(
        *  tracked and were stamped with the *firm's* id, so their real owner is
        *  unknown and they are shown as shared instead of being misattributed. */
       assignedAt: v.optional(v.number()),
+      /** Everyone the task is assigned to — a task can have several.
+       *  assigneeId above stays the person who created it, i.e. the task owner
+       *  who is allowed to reassign it. */
+      assigneeIds: v.optional(v.array(v.id("users"))),
       text: v.string(), // the task itself, e.g. "Read Ch. 4 of Biology"
       isCompleted: v.boolean(), // false until the task is checked off
       listId: v.optional(v.id("taskLists")), // which named list it belongs to
