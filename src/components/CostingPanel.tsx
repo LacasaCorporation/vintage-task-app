@@ -536,7 +536,8 @@ export default function CostingPanel({
           <AlertTriangle className="size-4 shrink-0" />
           <span className="min-w-0 flex-1">
             <strong>Production is running</strong> — {pendingEdit.label} will change the
-            materials this production uses. Continue?
+            materials this production uses. Stock is adjusted by the difference right
+            away, and stopping production returns whatever is left. Continue?
           </span>
           <Button
             type="button"

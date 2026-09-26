@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
+import { syncProductionConsumption } from "./production";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -1264,9 +1265,10 @@ export const addFgItem = mutation({
       );
       if (twin) {
         await ctx.db.patch(twin._id, { qty: twin.qty + qty });
+        await syncProductionConsumption(ctx, fg);
         return twin._id;
       }
-      return await ctx.db.insert("costingItems", {
+      const newId = await ctx.db.insert("costingItems", {
         ownerId: userId,
         fgId,
         materialId,
@@ -1275,6 +1277,8 @@ export const addFgItem = mutation({
         unitPrice: material.pricePerUnit,
         unit: material.unit,
       });
+      await syncProductionConsumption(ctx, fg);
+      return newId;
     }
 
     const clean = label?.trim();
@@ -1312,6 +1316,14 @@ export const updateItem = mutation({
       patch.label = clean.slice(0, MAX_NAME_LENGTH);
     }
     await ctx.db.patch(id, patch);
+    // changing the qty of a line on a product that is in production moves the
+    // stock by the difference, so stopping it returns the right amounts
+    if (patch.qty !== undefined && item.fgId !== undefined) {
+      const fg = await ctx.db.get(item.fgId);
+      if (fg !== null && fg.ownerId === userId) {
+        await syncProductionConsumption(ctx, fg);
+      }
+    }
   },
 });
 
@@ -1324,7 +1336,12 @@ export const removeItem = mutation({
     const item = await ctx.db.get(id);
     if (item === null) throw new Error("That line no longer exists.");
     if (item.ownerId !== userId) throw new Error("Not your line.");
+    const fg = item.fgId !== undefined ? await ctx.db.get(item.fgId) : null;
     await ctx.db.delete(id);
+    // the removed material goes back into stock while production is running
+    if (fg !== null && fg.ownerId === userId) {
+      await syncProductionConsumption(ctx, fg);
+    }
   },
 });
 

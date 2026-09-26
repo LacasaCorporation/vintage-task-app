@@ -155,7 +155,7 @@ export const adjustStock = mutation({
     const material = await ctx.db.get(id);
     if (material === null) throw new Error("That material no longer exists.");
     if (material.ownerId !== userId) throw new Error("Not your material.");
-    if (stock < 0) throw new Error("Stock can't be negative.");
+    // negative stock is a real state (a shortage) and is shown, not blocked
     await ctx.db.patch(id, { stock });
   },
 });

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import MaterialImportDialog from "@/components/MaterialImportDialog";
 import {
+  AlertTriangle,
   ChevronDown,
   Download,
   FileSpreadsheet,
@@ -481,12 +482,21 @@ export default function MaterialsSheet({
                       <span
                         className={cn(
                           "font-medium",
-                          (m.stock ?? 0) > 0
-                            ? "text-foreground"
-                            : "text-muted-foreground/60",
+                          (m.stock ?? 0) < 0
+                            ? "text-destructive"
+                            : (m.stock ?? 0) > 0
+                              ? "text-foreground"
+                              : "text-muted-foreground/60",
                         )}
-                        title={`${(m.stock ?? 0).toLocaleString()} ${m.unit} on hand`}
+                        title={
+                          (m.stock ?? 0) < 0
+                            ? `Short ${Math.abs(m.stock ?? 0).toLocaleString()} ${m.unit} — top up with a purchase bill`
+                            : `${(m.stock ?? 0).toLocaleString()} ${m.unit} on hand`
+                        }
                       >
+                        {(m.stock ?? 0) < 0 && (
+                          <AlertTriangle className="mr-1 inline size-3 align-[-2px]" />
+                        )}
                         {(m.stock ?? 0).toLocaleString()}
                       </span>
                       <span className="ml-1 text-[10px] text-muted-foreground">{m.unit}</span>

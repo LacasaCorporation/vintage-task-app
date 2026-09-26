@@ -1,7 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { getSettings } from "./settings";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import {
   PROJECT_STATUS_FINISH,
@@ -9,6 +10,51 @@ import {
   middleProjectStatus,
   projectStatusesOrDefaults,
 } from "../lib/project-statuses";
+
+/**
+ * Re-read a product's costing sheet and move the raw-material stock to match.
+ * Used whenever a sheet line is added, edited or deleted while the product is
+ * in production, so the running run always reflects the sheet. Stock is
+ * allowed to go negative: a shortage is a real state the user needs to see.
+ */
+export async function syncProductionConsumption(
+  ctx: MutationCtx,
+  fg: Doc<"finishedGoods">,
+): Promise<void> {
+  if (fg.productionStartedAt === undefined) return;
+  const lines = await ctx.db
+    .query("costingItems")
+    .withIndex("by_fg", (q) => q.eq("fgId", fg._id))
+    .collect();
+  const next = new Map<Id<"rawMaterials">, number>();
+  for (const line of lines) {
+    if (line.materialId === undefined) continue;
+    next.set(line.materialId, (next.get(line.materialId) ?? 0) + (line.qty || 0));
+  }
+
+  // put back everything the previous run took out
+  for (const used of fg.productionConsumed ?? []) {
+    const material = await ctx.db.get(used.materialId);
+    if (material === null) continue;
+    await ctx.db.patch(used.materialId, {
+      stock: (material.stock ?? 0) + used.qty,
+    });
+  }
+  // then take the amounts the sheet calls for now
+  for (const [materialId, qty] of next) {
+    if (qty <= 0) continue;
+    const material = await ctx.db.get(materialId);
+    if (material === null) continue;
+    await ctx.db.patch(materialId, { stock: (material.stock ?? 0) - qty });
+  }
+
+  await ctx.db.patch(fg._id, {
+    productionConsumed: [...next.entries()].map(([materialId, qty]) => ({
+      materialId,
+      qty,
+    })),
+  });
+}
 
 /**
  * Start production on a product: it is flagged so it opens in the Projects
@@ -43,22 +89,12 @@ export const start = mutation({
       );
     }
 
-    // check every line up front so a shortage never half-consumes the stock
-    for (const [materialId, qty] of needed) {
-      const material = await ctx.db.get(materialId);
-      if (material === null || material.ownerId !== userId)
-        throw new Error("A material this product needs no longer exists.");
-      if ((material.stock ?? 0) < qty) {
-        throw new Error(
-          `Not enough stock of ${material.name} — need ${qty} ${material.unit}, have ${material.stock ?? 0}.`,
-        );
-      }
-    }
-
+    // a shortage is allowed: the stock simply goes negative so it is visible
     for (const [materialId, qty] of needed) {
       if (qty <= 0) continue;
       const material = await ctx.db.get(materialId);
-      if (material === null) continue;
+      if (material === null || material.ownerId !== userId)
+        throw new Error("A material this product needs no longer exists.");
       await ctx.db.patch(materialId, {
         stock: (material.stock ?? 0) - qty,
       });
@@ -101,7 +137,8 @@ export const editConsumption = mutation({
     const next = new Map<Id<"rawMaterials">, number>();
     for (const line of lines) next.set(line.materialId, Math.max(0, line.qty));
 
-    // put back what was consumed, then take the new amounts
+    // put back what was consumed, then take the new amounts (stock may go
+    // negative so a shortage stays visible instead of being blocked)
     for (const used of fg.productionConsumed ?? []) {
       const material = await ctx.db.get(used.materialId);
       if (material === null || material.ownerId !== userId) continue;
@@ -113,11 +150,6 @@ export const editConsumption = mutation({
       const material = await ctx.db.get(materialId);
       if (material === null || material.ownerId !== userId)
         throw new Error("A material this product needs no longer exists.");
-      if ((material.stock ?? 0) < qty) {
-        throw new Error(
-          `Not enough stock of ${material.name} — need ${qty} ${material.unit}, have ${material.stock ?? 0}.`,
-        );
-      }
     }
     for (const [materialId, qty] of next) {
       if (qty <= 0) continue;
