@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import ProductPrintSheet from "@/components/ProductPrintSheet";
 import ProductDetailPanel from "@/components/ProductDetailPanel";
+import StatusSelect from "@/components/StatusSelect";
 import ProjectStatusSettings from "@/components/ProjectStatusSettings";
 import {
   JobFlatList,
@@ -128,33 +129,15 @@ export default function ProjectsWorkspace({
               </button>
             ))}
             <span className="mx-1 h-4 w-px bg-border" />
-            <button
-              type="button"
-              onClick={() => onStatusChange("all")}
-              className={cn(
-                "rounded-full border px-2.5 py-1 transition-colors",
-                status === "all"
-                  ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400"
-                  : "border-border bg-card hover:bg-accent hover:text-foreground",
-              )}
-            >
-              Any status
-            </button>
-            {projectStatuses.map((entry) => (
-              <button
-                key={entry}
-                type="button"
-                onClick={() => onStatusChange(entry)}
-                className={cn(
-                  "rounded-full border px-2.5 py-1 transition-colors",
-                  status === entry
-                    ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400"
-                    : "border-border bg-card hover:bg-accent hover:text-foreground",
-                )}
-              >
-                {entry}
-              </button>
-            ))}
+            {/* the statuses live in one dropdown rather than a strip of chips */}
+            <StatusSelect
+              value={status}
+              statuses={projectStatuses}
+              allLabel="Any status"
+              size="md"
+              title="Filter by status"
+              onChange={(next) => onStatusChange(next as FlagStatusFilter)}
+            />
             <button
               type="button"
               onClick={onToggleStatusSettings}
