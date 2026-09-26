@@ -672,7 +672,7 @@ export default function TasksPanel({
                         isOpen && "bg-primary/[0.04]",
                       )}
                     >
-                      <div className="flex items-center gap-3 px-4 py-3.5 sm:px-5">
+                      <div className="flex flex-wrap items-center gap-3 px-4 py-3.5 sm:px-5">
                         <Checkbox
                           checked={task.isCompleted}
                           disabled={!canEdit}
@@ -687,17 +687,17 @@ export default function TasksPanel({
                         <button
                           type="button"
                           onClick={() => setOpenTaskId(isOpen ? null : task._id)}
-                          className="min-w-0 flex-1 text-left"
+                          className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-left"
                         >
                           <span
                             className={cn(
-                              "block text-[15px] leading-relaxed transition-colors",
+                              "text-[15px] leading-relaxed transition-colors",
                               task.isCompleted && "text-muted-foreground line-through",
                             )}
                           >
                             {task.text}
                           </span>
-                          <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <span className="flex shrink-0 items-center gap-1.5">
                             <span
                               className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
                               title={`Created ${new Date(task._creationTime).toLocaleString()}`}
@@ -719,7 +719,7 @@ export default function TasksPanel({
                             </span>
                           </span>
                           {(hasExtras || task.starred) && (
-                            <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <span className="flex shrink-0 flex-wrap items-center gap-1.5">
                               {/* once a task is done the tags lead the row */}
                               {task.isCompleted &&
                                 (task.tags ?? []).map((tag) => (
@@ -791,9 +791,6 @@ export default function TasksPanel({
                                     #{tag}
                                   </span>
                                 ))}
-                              {task.description !== undefined && (
-                                <FileText className="size-3 text-muted-foreground/70" />
-                              )}
                               {parseAttachments(task.attachments).length > 0 && (
                                 <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
                                   <Paperclip className="size-2.5" />
@@ -897,6 +894,15 @@ export default function TasksPanel({
                             )}
                           />
                         </span>
+                        {/* notes get their own line under the task */}
+                        {(task.description ?? "").trim() !== "" && (
+                          <p className="flex w-full basis-full items-start gap-1.5 pl-8 text-xs leading-relaxed text-muted-foreground">
+                            <FileText className="mt-0.5 size-3 shrink-0 text-muted-foreground/60" />
+                            <span className="min-w-0 break-words">
+                              {(task.description ?? "").trim()}
+                            </span>
+                          </p>
+                        )}
                       </div>
                       {/* subtasks: a dropdown under the row */}
                       <AnimatePresence initial={false}>
