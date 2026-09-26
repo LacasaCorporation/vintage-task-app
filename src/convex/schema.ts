@@ -205,7 +205,11 @@ const schema = defineSchema(
     // the student's task ledger. one row per task entry.
     tasks: defineTable({
       ownerId: v.id("users"), // the workspace this entry belongs to
-      assigneeId: v.optional(v.id("users")), // who the task belongs to (defaults to its creator)
+      assigneeId: v.optional(v.id("users")), // who the task belongs to
+      /** When assigneeId was recorded. Rows without it predate ownership being
+       *  tracked and were stamped with the *firm's* id, so their real owner is
+       *  unknown and they are shown as shared instead of being misattributed. */
+      assignedAt: v.optional(v.number()),
       text: v.string(), // the task itself, e.g. "Read Ch. 4 of Biology"
       isCompleted: v.boolean(), // false until the task is checked off
       listId: v.optional(v.id("taskLists")), // which named list it belongs to

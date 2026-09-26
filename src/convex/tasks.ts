@@ -2,6 +2,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { activeFirmSettings, firmTeam, scopeUserId } from "./org";
 import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
 
 const MAX_TASK_LENGTH = 280;
 const MAX_DESCRIPTION_LENGTH = 4000;
@@ -164,10 +165,32 @@ export const removeList = mutation({
 // ── Tasks ───────────────────────────────────────────────────────────────
 
 /**
+ * Who a task really belongs to, or undefined when nobody was ever recorded.
+ *
+ * Rows written before ownership was tracked carry the *firm's* owner id in
+ * assigneeId — the author was never stored, so it cannot be recovered. Those
+ * are reported as unowned (shared) rather than pinned to the wrong person,
+ * which is what made "Mine" empty and every row look like it was the owner's.
+ */
+function ownerOf(
+  task: Doc<"tasks">,
+  firmOwnerId: Id<"users">,
+): Id<"users"> | undefined {
+  if (task.assigneeId === undefined) return undefined;
+  if (task.assigneeId === firmOwnerId && task.assignedAt === undefined) {
+    return undefined;
+  }
+  return task.assigneeId;
+}
+
+/**
  * All tasks the caller may see, newest first (filtered client-side).
- * scope "mine" (default) → only the caller's own tasks; "all" → the caller's
- * plus their subordinates' (see firmTeam: everyone under them in the firm's
+ * scope "mine" (default) → the caller's own tasks; "all" → the caller's plus
+ * their subordinates' (see firmTeam: everyone under them in the firm's
  * management chain, at any depth). A sibling manager's tasks stay hidden.
+ *
+ * A task with no known owner is shared: it appears in both, because we cannot
+ * know who wrote it and hiding it would make a task disappear.
  */
 export const list = query({
   args: { scope: v.optional(v.union(v.literal("mine"), v.literal("all"))) },
@@ -176,23 +199,19 @@ export const list = query({
     if (userId === null) return [];
     const orgId = await scopeUserId(ctx);
     if (orgId === null) return [];
-    if (scope === "all") {
-      const all = await ctx.db
-        .query("tasks")
-        .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
-        .collect();
-      const team = new Set(await firmTeam(ctx, userId));
-      return all
-        .filter((t) => team.has(t.assigneeId ?? t.ownerId))
-        .sort((a, b) => b._creationTime - a._creationTime);
-    }
-    const mine = await ctx.db
+    const all = await ctx.db
       .query("tasks")
       .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
       .collect();
-    // legacy rows created before assignment existed belong to their creator
-    return mine
-      .filter((t) => (t.assigneeId ?? t.ownerId) === userId)
+    const owners = all.map((t) => ownerOf(t, orgId));
+    if (scope === "all") {
+      const team = new Set(await firmTeam(ctx, userId));
+      return all
+        .filter((_, i) => owners[i] === undefined || team.has(owners[i] as Id<"users">))
+        .sort((a, b) => b._creationTime - a._creationTime);
+    }
+    return all
+      .filter((_, i) => owners[i] === undefined || owners[i] === userId)
       .sort((a, b) => b._creationTime - a._creationTime);
   },
 });
@@ -282,6 +301,12 @@ export const add = mutation({
     if (userId === null) {
       throw new Error("Sign in to write in your ledger.");
     }
+    // ownerId scopes the row to the firm; assigneeId must be the *person*
+    // writing it, or "Mine" could never match anyone but the firm owner.
+    const creator = await getAuthUserId(ctx);
+    if (creator === null) {
+      throw new Error("Sign in to write in your ledger.");
+    }
     if (listId !== undefined) {
       const list = await ctx.db.get(listId);
       if (list === null || list.ownerId !== userId) {
@@ -298,7 +323,8 @@ export const add = mutation({
     const tags = extra.tags?.map((t) => t.trim().replace(/^#/, "")).filter(Boolean) ?? [];
     return await ctx.db.insert("tasks", {
       ownerId: userId,
-      assigneeId: userId,
+      assigneeId: creator,
+      assignedAt: Date.now(),
       text: trimmed,
       isCompleted: false,
       listId,
@@ -632,6 +658,10 @@ export const toggle = mutation({
       const base = task.dueAt ?? Date.now();
       await ctx.db.insert("tasks", {
         ownerId: userId,
+        // the follow-up belongs to whoever owns the original, and inherits
+        // whether that owner was ever actually recorded
+        assigneeId: task.assigneeId,
+        assignedAt: task.assignedAt,
         text: task.text,
         isCompleted: false,
         listId: task.listId,

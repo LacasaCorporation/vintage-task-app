@@ -60,11 +60,12 @@ export const listNotebooks = query({
     if (scope === "all") {
       const team = new Set(await firmTeam(ctx, userId));
       return notebooks
-        .filter((nb) => team.has(nb.createdBy ?? nb.ownerId))
+        .filter((nb) => nb.createdBy === undefined || team.has(nb.createdBy))
         .sort((a, b) => b._creationTime - a._creationTime);
     }
+    // a notebook with no recorded author is shared rather than hidden
     const visible = notebooks.filter(
-      (nb) => (nb.createdBy ?? nb.ownerId) === userId,
+      (nb) => nb.createdBy === undefined || nb.createdBy === userId,
     );
     return visible.sort((a, b) => b._creationTime - a._creationTime);
   },
@@ -80,6 +81,10 @@ export const ensureDefaultWorkbook = mutation({
   handler: async (ctx) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    // ownerId scopes the rows to the firm; createdBy is the person, so the
+    // Mine / All filter can tell whose notebook this really is
+    const creator = await getAuthUserId(ctx);
+    if (creator === null) throw new Error("Sign in first.");
     const existing = await ctx.db
       .query("notebooks")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
@@ -87,11 +92,13 @@ export const ensureDefaultWorkbook = mutation({
     if (existing.length > 0) return null;
     const notebookId = await ctx.db.insert("notebooks", {
       ownerId: userId,
+      createdBy: creator,
       title: "My Workbook",
       color: "default",
     });
     await ctx.db.insert("notePages", {
       ownerId: userId,
+      createdBy: creator,
       notebookId,
       title: "Untitled page",
       body: "",
@@ -111,11 +118,17 @@ export const addNotebook = mutation({
   handler: async (ctx, { title }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in to create a notebook.");
+    const creator = await getAuthUserId(ctx);
+    if (creator === null) throw new Error("Sign in to create a notebook.");
     const cleanTitle = title.trim();
     if (cleanTitle.length === 0) throw new Error("Give the notebook a title.");
     if (cleanTitle.length > MAX_TITLE_LENGTH)
       throw new Error("That title is too long.");
-    return await ctx.db.insert("notebooks", { ownerId: userId, title: cleanTitle });
+    return await ctx.db.insert("notebooks", {
+      ownerId: userId,
+      createdBy: creator,
+      title: cleanTitle,
+    });
   },
 });
 
@@ -190,10 +203,12 @@ export const listAllPages = query({
     if (scope === "all") {
       const team = new Set(await firmTeam(ctx, userId));
       return pages
-        .filter((p) => team.has(p.createdBy ?? p.ownerId))
+        .filter((p) => p.createdBy === undefined || team.has(p.createdBy))
         .sort((a, b) => (a.order ?? a._creationTime) - (b.order ?? b._creationTime));
     }
-    const visible = pages.filter((p) => (p.createdBy ?? p.ownerId) === userId);
+    const visible = pages.filter(
+      (p) => p.createdBy === undefined || p.createdBy === userId,
+    );
     return visible.sort(
       (a, b) =>
         (a.order ?? a._creationTime) - (b.order ?? b._creationTime),
@@ -247,6 +262,8 @@ export const addPage = mutation({
   handler: async (ctx, { notebookId, title, parentId }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in to create a page.");
+    const creator = await getAuthUserId(ctx);
+    if (creator === null) throw new Error("Sign in to create a page.");
     const nb = await ctx.db.get(notebookId);
     if (nb === null) throw new Error("That notebook no longer exists.");
     if (nb.ownerId !== userId) throw new Error("That notebook belongs to another account.");
@@ -260,6 +277,7 @@ export const addPage = mutation({
     const maxOrder = siblings.reduce((m, p) => Math.max(m, p.order ?? 0), 0);
     return await ctx.db.insert("notePages", {
       ownerId: userId,
+      createdBy: creator,
       notebookId,
       title: title?.trim() || "Untitled page",
       body: "",

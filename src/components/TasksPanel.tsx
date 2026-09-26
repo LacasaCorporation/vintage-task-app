@@ -43,6 +43,7 @@ import {
   Star,
   Trash2,
   UserRound,
+  Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -610,11 +611,16 @@ export default function TasksPanel({
                 {tasks.map((task) => {
                   const isOpen = openTaskId === task._id;
                   const overdue = isOverdue(task);
-                  // legacy rows made before assignment existed have no
-                  // assigneeId, so they fall back to the firm owner
-                  const taskOwner = ownersById.get(
-                    task.assigneeId ?? task.ownerId,
-                  );
+                  // A task written before ownership was tracked carries the
+                  // firm's own id in assigneeId, and its real author was never
+                  // stored — show it as shared rather than blame the owner.
+                  const taskOwner =
+                    task.assigneeId === undefined
+                      ? null
+                      : (ownersById.get(task.assigneeId) ?? null);
+                  const taskIsShared =
+                    taskOwner === null ||
+                    (taskOwner.isFirmOwner && task.assignedAt === undefined);
                   const taskSteps = stepsByTask.get(task._id) ?? [];
                   const stepsDone = taskSteps.filter((s) => s.isCompleted).length;
                   const stepsOpen = openStepRows.has(task._id);
@@ -665,7 +671,7 @@ export default function TasksPanel({
                             {task.text}
                           </span>
                           <span className="flex shrink-0 items-center gap-1.5">
-                            {taskOwner && (
+                            {taskOwner && !taskIsShared ? (
                               <span
                                 className={cn(
                                   "inline-flex max-w-40 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
@@ -687,6 +693,14 @@ export default function TasksPanel({
                                 <span className="truncate">
                                   {taskOwner.label}
                                 </span>
+                              </span>
+                            ) : (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                title="Nobody owns this task yet — it is shared with everyone in the firm"
+                              >
+                                <Users className="size-2.5" />
+                                Not assigned
                               </span>
                             )}
                             <span
