@@ -2,6 +2,8 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
 import StatusSelect from "@/components/StatusSelect";
+import AssigneeChip from "@/components/AssigneeChip";
+import { assigneesOfTask } from "@/lib/task-people";
 import type { Priority } from "@/lib/task-utils";
 import { daysLeftLabel, formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import {
@@ -704,6 +706,12 @@ export function FlaggedProductsList({
     return { fg, parentJob };
   });
   const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
+  // one people query for the whole list, so every row can name its assignees
+  const peopleData = useQuery(api.tasks.people);
+  const rowPeopleById = useMemo(
+    () => new Map((peopleData?.people ?? []).map((p) => [p.userId, p] as const)),
+    [peopleData],
+  );
 
   if (rows.length === 0) {
     return (
@@ -762,6 +770,10 @@ export function FlaggedProductsList({
             )}
           />
           <Package className="size-3.5 shrink-0 text-sky-500/80" />
+          <AssigneeChip
+            userIds={assigneesOfTask(fg, rowPeopleById)}
+            peopleById={rowPeopleById}
+          />
           {fg.code && (
             <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
               {fg.code}
@@ -925,6 +937,13 @@ function BoardCardView({
 }) {
   const done = card.status === PROJECT_STATUS_FINISH;
   const busy = busyKey === `f:${card.fg._id}`;
+  // the owner / assignees, in the same chip a normal task row uses
+  const peopleData = useQuery(api.tasks.people);
+  const peopleById = useMemo(
+    () => new Map((peopleData?.people ?? []).map((p) => [p.userId, p] as const)),
+    [peopleData],
+  );
+  const assignees = assigneesOfTask(card.fg, peopleById);
   return (
     <motion.div layout className={BOARD_CARD}>
       <span
@@ -965,6 +984,7 @@ function BoardCardView({
         />
       </div>
       <div className="flex flex-wrap items-center gap-1">
+        <AssigneeChip userIds={assignees} peopleById={peopleById} />
         {card.fg.dueAt !== undefined && (
           <span
             className={cn(

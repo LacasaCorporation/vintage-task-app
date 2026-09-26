@@ -30,7 +30,6 @@ import {
   CalendarDays,
   ChevronDown,
   Clock,
-  Crown,
   FileText,
   Flag,
   History,
@@ -42,12 +41,11 @@ import {
   Repeat,
   Star,
   Trash2,
-  UserRound,
-  Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
+import AssigneeChip from "@/components/AssigneeChip";
 import { cn } from "@/lib/utils";
 import {
   PROJECT_STATUS_FINISH,
@@ -681,63 +679,10 @@ export default function TasksPanel({
                             {task.text}
                           </span>
                           <span className="flex shrink-0 items-center gap-1.5">
-                            {taskAssignees.length === 1 ? (
-                              <span
-                                className={cn(
-                                  "inline-flex max-w-40 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-                                  peopleById.get(taskAssignees[0])?.isFirmOwner
-                                    ? "bg-primary/10 text-primary"
-                                    : "bg-muted text-muted-foreground",
-                                )}
-                                title={
-                                  peopleById.get(taskAssignees[0])?.isFirmOwner === true
-                                    ? `${peopleById.get(taskAssignees[0])?.label} — owns this firm`
-                                    : `Assigned to ${peopleById.get(taskAssignees[0])?.label ?? "someone"}`
-                                }
-                              >
-                                {peopleById.get(taskAssignees[0])?.isFirmOwner ? (
-                                  <Crown className="size-2.5" />
-                                ) : (
-                                  <UserRound className="size-2.5" />
-                                )}
-                                <span className="truncate">
-                                  {peopleById.get(taskAssignees[0])?.label ??
-                                    "Someone"}
-                                </span>
-                              </span>
-                            ) : taskAssignees.length > 1 ? (
-                              <span
-                                className="inline-flex max-w-56 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                                title={taskAssignees
-                                  .map(
-                                    (id) =>
-                                      peopleById.get(id)?.label ?? "Someone",
-                                  )
-                                  .join(", ")}
-                              >
-                                <Users className="size-2.5" />
-                                <span className="truncate">
-                                  {taskAssignees
-                                    .slice(0, 2)
-                                    .map(
-                                      (id) =>
-                                        peopleById.get(id)?.label ?? "Someone",
-                                    )
-                                    .join(", ")}
-                                  {taskAssignees.length > 2
-                                    ? ` +${taskAssignees.length - 2}`
-                                    : ""}
-                                </span>
-                              </span>
-                            ) : (
-                              <span
-                                className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-                                title="Nobody is assigned to this task yet — it is shared with everyone in the firm"
-                              >
-                                <Users className="size-2.5" />
-                                Not assigned
-                              </span>
-                            )}
+                            <AssigneeChip
+                              userIds={taskAssignees}
+                              peopleById={peopleById}
+                            />
                             <span
                               className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
                               title={`Created ${new Date(task._creationTime).toLocaleString()}`}
