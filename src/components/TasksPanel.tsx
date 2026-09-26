@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import TaskDetail from "@/components/TaskDetail";
+import StepDetail from "@/components/StepDetail";
 import ProductPrintSheet from "@/components/ProductPrintSheet";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
@@ -123,6 +124,8 @@ export default function TasksPanel({
   const removeStepM = useMutation(api.tasks.removeStep);
   const updateStepM = useMutation(api.tasks.updateStep);
   const [openStepRows, setOpenStepRows] = useState<Set<string>>(() => new Set());
+  const [openStepId, setOpenStepId] = useState<Id<"taskSteps"> | null>(null);
+  const [stepBusy, setStepBusy] = useState(false);
   const [stepDrafts, setStepDrafts] = useState<Record<string, string>>({});
 
   const stepsByTask = useMemo(() => {
@@ -347,6 +350,35 @@ export default function TasksPanel({
    * Mount the hidden print sheet, let it paint, then open the browser print
    * dialog and unmount it again so it never lingers in the app.
    */
+  const openStep = useMemo(
+    () => (openStepId !== null ? (allSteps ?? []).find((s) => s._id === openStepId) ?? null : null),
+    [allSteps, openStepId],
+  );
+  const openStepTask = useMemo(
+    () => (openStep ? (allTasks ?? []).find((t) => t._id === openStep.taskId) ?? null : null),
+    [allTasks, openStep],
+  );
+
+  /** Save one field of the open subtask, keeping the panel in sync. */
+  const patchOpenStep = async (patch: {
+    text?: string;
+    description?: string;
+    dueAt?: number;
+    priority?: Priority;
+    tags?: string[];
+    copyFromTask?: boolean;
+  }) => {
+    if (openStep === null) return;
+    setStepBusy(true);
+    try {
+      await updateStepM({ id: openStep._id, ...patch });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the subtask.");
+    } finally {
+      setStepBusy(false);
+    }
+  };
+
   /**
    * Check a task off — blocked server-side while any subtask is open, so the
    * client shows a hint tooltip instead of letting the click fail silently.
@@ -447,6 +479,33 @@ export default function TasksPanel({
 
   return (
     <div>
+      {/* subtask details slide in from the right, over the workspace */}
+      {openStep !== null && openStep !== undefined && activeView !== "flagged" && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <button
+            type="button"
+            aria-label="Close subtask details"
+            onClick={() => setOpenStepId(null)}
+            className="flex-1 cursor-default bg-black/20 backdrop-blur-[1px]"
+          />
+          <div className="w-full max-w-md overflow-y-auto border-l bg-background p-4 shadow-2xl">
+            <StepDetail
+              step={openStep}
+              task={openStepTask}
+              canEdit={canEdit && canEditSteps}
+              canDelete={canDeleteSteps}
+              busy={stepBusy}
+              onPatch={(patch) => void patchOpenStep(patch)}
+              onToggle={() => void toggleStepM({ id: openStep._id })}
+              onDelete={() => {
+                setOpenStepId(null);
+                void removeStepM({ id: openStep._id });
+              }}
+              onClose={() => setOpenStepId(null)}
+            />
+          </div>
+        </div>
+      )}
       {/* ── Stats ───────────────────────────────────────────────────── */}
       <section className="grid grid-cols-3 gap-3">
         {[
@@ -1213,6 +1272,24 @@ export default function TasksPanel({
                                           <Trash2 className="size-3" />
                                         </button>
                                       )}
+                                      <button
+                                        type="button"
+                                        aria-label={`Open details for subtask “${step.text}”`}
+                                        title="Subtask details"
+                                        className={cn(
+                                          "grid size-6 shrink-0 place-items-center rounded transition-colors",
+                                          openStepId === step._id
+                                            ? "bg-primary/10 text-primary"
+                                            : "text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover/step:opacity-100",
+                                        )}
+                                        onClick={() =>
+                                          setOpenStepId((current) =>
+                                            current === step._id ? null : step._id,
+                                          )
+                                        }
+                                      >
+                                        <ListTodo className="size-3" />
+                                      </button>
                                     </li>
                                   ))}
                                 </ul>
@@ -1238,7 +1315,10 @@ export default function TasksPanel({
                                         [task._id]: e.target.value,
                                       }))
                                     }
-                                    onFocus={() => toggleStepRow(task._id)}
+                                    onFocus={() => {
+                                      // only open — focusing must never close the panel
+                                      if (!openStepRows.has(task._id)) toggleStepRow(task._id);
+                                    }}
                                     placeholder="Add a subtask… (date is capped by the task)"
                                     aria-label="New subtask"
                                     maxLength={280}

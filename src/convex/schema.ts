@@ -222,14 +222,18 @@ const schema = defineSchema(
       folderId: v.optional(v.id("taskFolders")), // grouping into folders
     }).index("by_owner", ["ownerId"]),
 
-    // subtasks (steps) that break a big task into pieces; a subtask's due
-    // date is capped by its parent task's due date on the server
+    // subtasks (steps) that break a big task into pieces; they carry the same
+    // detail fields as a task, and a subtask's due date is capped by its
+    // parent task's due date on the server
     taskSteps: defineTable({
       ownerId: v.id("users"),
       taskId: v.id("tasks"),
       text: v.string(),
       isCompleted: v.boolean(),
+      description: v.optional(v.string()),
       dueAt: v.optional(v.number()),
+      priority: v.optional(taskPriorityValidator),
+      tags: v.optional(v.array(v.string())),
       completedAt: v.optional(v.number()),
     })
       .index("by_task", ["taskId"])

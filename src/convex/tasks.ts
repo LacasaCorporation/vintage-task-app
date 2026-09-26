@@ -379,9 +379,14 @@ export const addStep = mutation({
   args: {
     taskId: v.id("tasks"),
     text: v.string(),
+    description: v.optional(v.string()),
     dueAt: v.optional(v.number()),
+    priority: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
+    tags: v.optional(v.array(v.string())),
+    /** Copy the parent task's due date, priority, description and tags. */
+    copyFromTask: v.optional(v.boolean()),
   },
-  handler: async (ctx, { taskId, text, dueAt }) => {
+  handler: async (ctx, { taskId, text, description, dueAt, priority, tags, copyFromTask }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const task = await ctx.db.get(taskId);
@@ -391,45 +396,72 @@ export const addStep = mutation({
     if (trimmed.length === 0) throw new Error("A step needs some words.");
     if (trimmed.length > MAX_TASK_LENGTH) throw new Error("That step is too long.");
     // a subtask is never due later than the task it belongs to
+    const rawDue = copyFromTask ? task.dueAt : dueAt;
     const cappedDue =
-      dueAt !== undefined && task.dueAt !== undefined && dueAt > task.dueAt
+      rawDue !== undefined && task.dueAt !== undefined && rawDue > task.dueAt
         ? task.dueAt
-        : dueAt;
+        : rawDue;
     return await ctx.db.insert("taskSteps", {
       ownerId: userId,
       taskId,
       text: trimmed,
       isCompleted: false,
+      description: copyFromTask ? task.description : description,
       dueAt: cappedDue,
+      priority: copyFromTask ? task.priority : priority,
+      tags: copyFromTask ? task.tags : tags,
     });
   },
 });
 
-/** Update a step's text and/or due date (due date capped by the parent task). */
+/**
+ * Update a step's details — the same fields a task has. The due date is always
+ * capped by the parent task's due date.
+ */
 export const updateStep = mutation({
   args: {
     id: v.id("taskSteps"),
     text: v.optional(v.string()),
+    description: v.optional(v.string()),
     dueAt: v.optional(v.number()),
+    priority: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
+    tags: v.optional(v.array(v.string())),
+    /** Copy the parent task's due date, priority, description and tags over. */
+    copyFromTask: v.optional(v.boolean()),
   },
-  handler: async (ctx, { id, text, dueAt }) => {
+  handler: async (ctx, { id, text, description, dueAt, priority, tags, copyFromTask }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const step = await ctx.db.get(id);
     if (step === null) throw new Error("That step no longer exists.");
     if (step.ownerId !== userId) throw new Error("Not your step.");
-    const patch: { text?: string; dueAt?: number } = {};
+    const task = await ctx.db.get(step.taskId);
+    const patch: {
+      text?: string;
+      description?: string;
+      dueAt?: number;
+      priority?: "high" | "medium" | "low";
+      tags?: string[];
+    } = {};
     if (text !== undefined) {
       const trimmed = text.trim();
       if (trimmed.length === 0) throw new Error("A step needs some words.");
       patch.text = trimmed;
     }
-    if (dueAt !== undefined) {
-      const task = await ctx.db.get(step.taskId);
+    if (description !== undefined) patch.description = description;
+    if (priority !== undefined) patch.priority = priority;
+    if (tags !== undefined) patch.tags = tags;
+    if (copyFromTask === true && task !== null) {
+      patch.description = task.description;
+      patch.priority = task.priority;
+      patch.tags = task.tags;
+    }
+    const rawDue = copyFromTask ? task?.dueAt : dueAt;
+    if (rawDue !== undefined || copyFromTask === true) {
       patch.dueAt =
-        task !== null && task.dueAt !== undefined && dueAt > task.dueAt
+        task !== null && task.dueAt !== undefined && rawDue !== undefined && rawDue > task.dueAt
           ? task.dueAt
-          : dueAt;
+          : rawDue;
     }
     await ctx.db.patch(id, patch);
   },
