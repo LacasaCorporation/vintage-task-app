@@ -1,0 +1,323 @@
+import type { Doc, Id } from "@/convex/_generated/dataModel";
+import { Briefcase, Package, Search as SearchIcon, Sigma } from "lucide-react";
+import { useMemo } from "react";
+import { ProductionButton } from "@/components/FlaggedLists";
+
+type FgDoc = Doc<"finishedGoods">;
+type JobDoc = Doc<"projectJobs">;
+type ProjectDoc = Doc<"projects">;
+
+const money = (n: number) =>
+  n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Shared filter bar so every tab filters the same way. */
+function ListHeader({
+  title,
+  count,
+  countLabel,
+  right,
+  search,
+  onSearch,
+}: {
+  title: string;
+  count: number;
+  countLabel: string;
+  right?: React.ReactNode;
+  search: string;
+  onSearch: (next: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
+      <p className="text-sm font-semibold">
+        {title}
+        <span className="ml-2 text-xs font-normal text-muted-foreground">
+          {count} {countLabel}
+        </span>
+      </p>
+      <div className="flex items-center gap-2">
+        <div className="relative">
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground/60" />
+          <input
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            placeholder={`Search ${title.toLowerCase()}…`}
+            aria-label={`Search ${title.toLowerCase()}`}
+            className="w-40 rounded-lg border bg-background py-1 pr-2 pl-7 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
+          />
+        </div>
+        {right}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Jobs tab: one flat row per job with the project it belongs to and the cost
+ * and sales value of the products under it, so jobs can be compared without
+ * expanding every project first.
+ */
+export function JobsList({
+  jobs,
+  projects,
+  finishedGoods,
+  costByFg,
+  search,
+  onSearch,
+  onOpenProject,
+}: {
+  jobs: JobDoc[];
+  projects: ProjectDoc[] | undefined;
+  finishedGoods: FgDoc[];
+  costByFg: Map<Id<"finishedGoods">, number>;
+  search: string;
+  onSearch: (next: string) => void;
+  onOpenProject?: (projectName: string) => void;
+}) {
+  const rows = useMemo(() => {
+    const projectNameOf = (job: JobDoc) =>
+      projects?.find((p) => p._id === job.projectId)?.name ?? "Unassigned";
+    return jobs.map((job) => {
+      const products = finishedGoods.filter(
+        (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
+      );
+      let cost = 0;
+      let total = 0;
+      for (const fg of products) {
+        const c = costByFg.get(fg._id) ?? 0;
+        cost += c;
+        total += c * (1 + (fg.markupPct ?? 0) / 100);
+      }
+      return { job, projectName: projectNameOf(job), products, cost, total };
+    });
+  }, [jobs, projects, finishedGoods, costByFg]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (row) =>
+        row.job.name.toLowerCase().includes(q) ||
+        row.projectName.toLowerCase().includes(q) ||
+        (row.job.code ?? "").toLowerCase().includes(q),
+    );
+  }, [rows, search]);
+
+  return (
+    <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <ListHeader
+        title="Job list"
+        count={filtered.length}
+        countLabel={filtered.length === 1 ? "job" : "jobs"}
+        search={search}
+        onSearch={onSearch}
+        right={
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {money(filtered.reduce((s, r) => s + r.total, 0))} total
+          </span>
+        }
+      />
+      {filtered.length === 0 ? (
+        <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+          {search
+            ? `Nothing matches “${search}”.`
+            : "No jobs yet — add one from a project above."}
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border/60 text-[11px] tracking-wide text-muted-foreground uppercase">
+                <th className="px-4 py-2 text-left font-medium">Job</th>
+                <th className="px-3 py-2 text-left font-medium">Project</th>
+                <th className="px-3 py-2 text-right font-medium">Products</th>
+                <th className="px-3 py-2 text-right font-medium">Cost</th>
+                <th className="px-3 py-2 text-right font-medium">Sales price</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {filtered.map(({ job, projectName, products, cost, total }) => (
+                <tr key={job._id} className="transition-colors hover:bg-accent/40">
+                  <td className="px-4 py-2.5">
+                    <span className="flex items-center gap-2">
+                      <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
+                      <span className="font-medium">{job.name}</span>
+                      {job.code && (
+                        <span className="font-mono text-[10px] text-muted-foreground/70">
+                          {job.code}
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-xs">
+                    {onOpenProject ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenProject(projectName)}
+                        className="truncate text-muted-foreground hover:text-foreground hover:underline"
+                      >
+                        {projectName}
+                      </button>
+                    ) : (
+                      <span className="truncate text-muted-foreground">{projectName}</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-xs tabular-nums">
+                    {products.length}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-xs tabular-nums text-muted-foreground">
+                    {money(cost)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-medium tabular-nums">
+                    {money(total)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Products tab: every product across every project and job, with its cost,
+ * sales price and production state, so the whole catalogue can be sorted
+ * through in one place.
+ */
+export function ProductsList({
+  finishedGoods,
+  costByFg,
+  search,
+  onSearch,
+  onOpenProduct,
+}: {
+  finishedGoods: FgDoc[];
+  costByFg: Map<Id<"finishedGoods">, number>;
+  search: string;
+  onSearch: (next: string) => void;
+  onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
+}) {
+  const rows = useMemo(
+    () =>
+      finishedGoods.map((fg) => {
+        const cost = costByFg.get(fg._id) ?? 0;
+        return {
+          fg,
+          cost,
+          total: cost * (1 + (fg.markupPct ?? 0) / 100),
+        };
+      }),
+    [finishedGoods, costByFg],
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (row) =>
+        row.fg.name.toLowerCase().includes(q) ||
+        (row.fg.code ?? "").toLowerCase().includes(q) ||
+        (row.fg.projectName ?? "").toLowerCase().includes(q) ||
+        (row.fg.category ?? "").toLowerCase().includes(q),
+    );
+  }, [rows, search]);
+
+  return (
+    <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <ListHeader
+        title="Product list"
+        count={filtered.length}
+        countLabel={filtered.length === 1 ? "product" : "products"}
+        search={search}
+        onSearch={onSearch}
+        right={
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {money(filtered.reduce((s, r) => s + r.total, 0))} total
+          </span>
+        }
+      />
+      {filtered.length === 0 ? (
+        <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+          {search
+            ? `Nothing matches “${search}”.`
+            : "No products yet — add one from a project above."}
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border/60 text-[11px] tracking-wide text-muted-foreground uppercase">
+                <th className="px-4 py-2 text-left font-medium">Product</th>
+                <th className="px-3 py-2 text-left font-medium">Project</th>
+                <th className="px-3 py-2 text-right font-medium">Cost</th>
+                <th className="px-3 py-2 text-right font-medium">Sales price</th>
+                <th className="w-8 px-2 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {filtered.map(({ fg, cost, total }) => (
+                <tr key={fg._id} className="transition-colors hover:bg-accent/40">
+                  <td className="px-4 py-2.5">
+                    <span className="flex items-center gap-2">
+                      <Package className="size-3.5 shrink-0 text-sky-500/80" />
+                      {onOpenProduct ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenProduct(fg._id)}
+                          className="min-w-0 cursor-pointer truncate text-left font-medium hover:underline"
+                        >
+                          {fg.name}
+                        </button>
+                      ) : (
+                        <span className="min-w-0 truncate font-medium">{fg.name}</span>
+                      )}
+                      {fg.code && (
+                        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                          {fg.code}
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-xs">
+                    <span className="truncate text-muted-foreground">
+                      {fg.projectName || "Standalone"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-xs tabular-nums text-muted-foreground">
+                    {money(cost)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-medium tabular-nums">
+                    {money(total)}
+                  </td>
+                  <td className="px-2 py-2 text-right align-middle">
+                    <span className="flex justify-end">
+                      <ProductionButton fg={fg} />
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-border/60 text-sm font-semibold">
+                <td className="px-4 py-2" colSpan={2}>
+                  <span className="flex items-center gap-1.5">
+                    <Sigma className="size-3.5 text-muted-foreground/50" />
+                    Total
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                  {money(filtered.reduce((s, r) => s + r.cost, 0))}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {money(filtered.reduce((s, r) => s + r.total, 0))}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}

@@ -29,6 +29,7 @@ import {
   Sigma,
   Trash2,
   User,
+  Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -36,6 +37,7 @@ import { toast } from "sonner";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
 import CustomersPanel from "@/components/CustomersPanel";
+import { JobsList, ProductsList } from "@/components/ProjectsTabs";
 import { cn } from "@/lib/utils";
 
 type FgDoc = Doc<"finishedGoods">;
@@ -506,6 +508,9 @@ export default function ProjectsSheet({
   onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<"projects" | "jobs" | "products" | "customers">(
+    "projects",
+  );
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagFilter, setFlagFilter] = useState<"all" | "flagged">("all");
   const [flagBusy, setFlagBusy] = useState<string | null>(null);
@@ -521,6 +526,7 @@ export default function ProjectsSheet({
   const projects = useQuery(api.costing.listProjects);
   const allItems = useQuery(api.costing.listAllItems);
   const allJobs = useQuery(api.jobs.listJobs);
+  const allCustomers = useQuery(api.contacts.listCustomers);
   const pauseJob = useMutation(api.jobs.pauseJob);
   const resumeJob = useMutation(api.jobs.resumeJob);
   const completeJob = useMutation(api.jobs.completeJob);
@@ -723,11 +729,72 @@ export default function ProjectsSheet({
 
   return (
     <div>
-      {/* customer master list: who the projects are for */}
-      <CustomersPanel />
+      {/* ── Tabs: one list per level of the hierarchy ───────────────── */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
+          {(
+            [
+              ["projects", "Projects", Folder, rows.length],
+              ["jobs", "Jobs", Briefcase, allJobs?.length ?? 0],
+              ["products", "Products", Package, finishedGoods.length],
+              ["customers", "Customers", Users, allCustomers?.length],
+            ] as const
+          ).map(([id, label, Icon, count]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={tab === id}
+              onClick={() => setTab(id)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+                tab === id
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              <Icon className="size-3.5" />
+              {label}
+              {count !== undefined && (
+                <span className="tabular-nums opacity-70">({count})</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {tab === "projects" &&
+            "A project groups jobs, and jobs group finished goods — its cost and total are the sum of all its products."}
+          {tab === "jobs" && "Every job with the cost and sales value of the products under it."}
+          {tab === "products" && "Every product across all projects, with its production state."}
+          {tab === "customers" && "Everyone your projects are for, and the projects behind each one."}
+        </p>
+      </div>
+
+      {tab === "jobs" && (
+        <JobsList
+          jobs={allJobs ?? []}
+          projects={projects}
+          finishedGoods={finishedGoods}
+          costByFg={costByFg}
+          search={search}
+          onSearch={setSearch}
+          onOpenProject={onOpenProject}
+        />
+      )}
+
+      {tab === "products" && (
+        <ProductsList
+          finishedGoods={finishedGoods}
+          costByFg={costByFg}
+          search={search}
+          onSearch={setSearch}
+          onOpenProduct={onOpenProduct}
+        />
+      )}
+
+      {tab === "customers" && <CustomersPanel />}
 
       {/* new project bar */}
-      {onNewProject && (
+      {onNewProject && tab === "projects" && (
         <button
           type="button"
           onClick={onNewProject}
@@ -739,7 +806,12 @@ export default function ProjectsSheet({
       )}
 
       {/* listing sheet */}
-      <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <section
+        className={cn(
+          "mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm",
+          tab !== "projects" && "hidden",
+        )}
+      >
         <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
           <p className="text-sm font-semibold">
             Projects
