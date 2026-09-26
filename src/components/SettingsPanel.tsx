@@ -55,6 +55,7 @@ import {
   Download,
   DatabaseBackup,
   Settings as SettingsIcon,
+  Shapes,
   ShieldCheck,
   SlidersHorizontal,
   Tag,
@@ -134,9 +135,23 @@ type MyTeam = {
   }>;
 } | null;
 
+/**
+ * The settings tabs, in the same order as the <section> elements below and in
+ * index.css. CSS shows only the active one, so a new section must be added to
+ * all three in step.
+ */
+const SETTINGS_TABS = [
+  ["organisation", "Organisation", Building2],
+  ["people", "Users & roles", Users],
+  ["team", "Team hierarchy", GitBranch],
+  ["credentials", "Credentials", KeyRound],
+  ["roles", "Custom roles", Tags],
+  ["catalog", "Units & categories", Shapes],
+  ["data", "Backup & restore", DatabaseBackup],
+] as const;
+
 /** Readable, easy-to-dictate password for a freshly created login. */
-function makePassword(): string {
-  const words = [
+function makePassword(): string {  const words = [
     "slate",
     "ember",
     "cedar",
@@ -476,6 +491,19 @@ export default function SettingsPanel() {
   const [credRevealed, setCredRevealed] = useState<Record<string, boolean>>({});
   const [credBusy, setCredBusy] = useState<string | null>(null);
   const [credSaved, setCredSaved] = useState<string | null>(null);
+
+  // Each settings area is its own tab, so only one section is on screen.
+  // The order here must match SETTINGS_SECTIONS in index.css, which hides the
+  // other sections by their position among the sibling <section> elements.
+  const [settingsTab, setSettingsTab] = useState<
+    | "organisation"
+    | "people"
+    | "team"
+    | "credentials"
+    | "roles"
+    | "catalog"
+    | "data"
+  >("people");
 
   const saveCredential = async (login: ProvisionedLogin) => {
     const password = (credDrafts[login._id] ?? "").trim();
@@ -923,7 +951,7 @@ export default function SettingsPanel() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-settings-tab={settingsTab}>
       {/* header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -984,6 +1012,31 @@ export default function SettingsPanel() {
           </p>
         </div>
       </div>
+
+      {/* ── Tabs: one page per settings area ─────────────────────────── */}
+      <nav
+        className="flex flex-wrap items-center gap-1 rounded-xl border bg-card p-1 shadow-sm"
+        aria-label="Settings sections"
+      >
+        {SETTINGS_TABS.map(([id, label, Icon]) => (
+          <button
+            key={id}
+            type="button"
+            aria-current={settingsTab === id ? "page" : undefined}
+            aria-pressed={settingsTab === id}
+            onClick={() => setSettingsTab(id)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+              settingsTab === id
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </button>
+        ))}
+      </nav>
 
       {/* organisation */}
       <section

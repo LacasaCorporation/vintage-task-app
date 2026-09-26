@@ -312,6 +312,23 @@
   }
 }
 
+/* Settings: each area is its own tab, so only the chosen section is shown.
+   The nth-of-type numbers must stay in step with SETTINGS_TABS and with the
+   order of the <section> elements in SettingsPanel. */
+[data-settings-tab] > section {
+  display: none;
+}
+
+[data-settings-tab="organisation"] > section:nth-of-type(1),
+[data-settings-tab="people"] > section:nth-of-type(2),
+[data-settings-tab="team"] > section:nth-of-type(3),
+[data-settings-tab="credentials"] > section:nth-of-type(4),
+[data-settings-tab="roles"] > section:nth-of-type(5),
+[data-settings-tab="catalog"] > section:nth-of-type(6),
+[data-settings-tab="data"] > section:nth-of-type(7) {
+  display: block;
+}
+
 /* Printing: the app is hidden and only the print sheet is shown. */
 @media print {
   body > *:not(.print-sheet) {
