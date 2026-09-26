@@ -483,8 +483,12 @@ export default function SettingsPanel() {
   const [pwLogin, setPwLogin] = useState<ProvisionedLogin | null>(null);
   const [pwDraft, setPwDraft] = useState("");
   const [pwResult, setPwResult] = useState<string | null>(null);
-  // passwords are hidden until someone asks to see them
+  // Pending reveal toggles for the reset-password dialog: opening it clears
+  // both, and the dialog shows the password in plain text so nothing reads
+  // them yet. Drop all four lines once the toggles are wired to an eye button.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [pwRevealDraft, setPwRevealDraft] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [pwRevealResult, setPwRevealResult] = useState(false);
 
   // credentials list: per-login username + a hidden password box

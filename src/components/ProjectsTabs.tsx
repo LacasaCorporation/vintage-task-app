@@ -177,7 +177,7 @@ export function JobsList({
   }, [jobs, projects, finishedGoods, costByFg]);
 
   const filtered = useMemo(() => {
-    let list = rows.filter((row) => keepsJob(row.job, filter));
+    const list = rows.filter((row) => keepsJob(row.job, filter));
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter(
@@ -308,7 +308,7 @@ export function ProductsList({
   );
 
   const filtered = useMemo(() => {
-    let list = rows.filter((row) => keepsProduct(row.fg, filter));
+    const list = rows.filter((row) => keepsProduct(row.fg, filter));
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter(

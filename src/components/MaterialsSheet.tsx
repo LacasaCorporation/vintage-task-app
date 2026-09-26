@@ -33,9 +33,6 @@ import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
 
-const cellCls =
-  "w-full bg-transparent px-2 py-1.5 text-sm outline-none focus:bg-primary/5 focus:ring-2 focus:ring-primary/30 rounded-md";
-
 /** In-page raw-material listing sheet (Excel-style rows, master price list). */
 export default function MaterialsSheet({
   materials,

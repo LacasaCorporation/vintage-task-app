@@ -6,7 +6,6 @@ import { api } from "@/convex/_generated/api";
 import {
   projectStatusesOrDefaults,
   PROJECT_STATUS_FINISH,
-  PROJECT_STATUS_START,
 } from "@/lib/project-statuses";
 import { formatDueLabel } from "@/lib/task-utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";

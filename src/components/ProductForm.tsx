@@ -93,7 +93,6 @@ export default function ProductForm({
   const removeFg = useMutation(api.costing.removeFinishedGood);
   const { confirm } = useAppDialogs();
   const addFg = useMutation(api.costing.addFinishedGood);
-  const updateFg = useMutation(api.costing.updateFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
   const { format: money, code: currencyCode, symbol } = useWorkspaceCurrency();
 

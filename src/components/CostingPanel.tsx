@@ -31,7 +31,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
-type FgId = Id<"finishedGoods">;
 type FgDoc = Doc<"finishedGoods">;
 type MaterialDoc = Doc<"rawMaterials">;
 
