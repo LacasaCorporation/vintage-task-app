@@ -29,6 +29,7 @@ import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { cn } from "@/lib/utils";
+import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
 
@@ -56,6 +57,7 @@ export default function MaterialsSheet({
   canImport?: boolean;
 }) {
   const addMaterial = useMutation(api.costing.addMaterial);
+  const { format: money, code: currencyCode } = useWorkspaceCurrency();
   const updateMaterial = useMutation(api.costing.updateMaterial);
   const removeMaterial = useMutation(api.costing.removeMaterial);
 
@@ -216,7 +218,14 @@ export default function MaterialsSheet({
 
   const exportCsv = () => {
     const lines = [
-      ["Code", "Name", "Category", "Sub-category", "Unit", "Price per unit"].join(","),
+      [
+        "Code",
+        "Name",
+        "Category",
+        "Sub-category",
+        "Unit",
+        `Price per unit (${currencyCode})`,
+      ].join(","),
       ...rows.map((m) =>
         [
           `"${(m.code ?? "").replace(/"/g, '""')}"`,
@@ -477,7 +486,7 @@ export default function MaterialsSheet({
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.category ?? "—"}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.subCategory ?? "—"}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.unit}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{m.pricePerUnit.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{money(m.pricePerUnit)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       <span
                         className={cn(

@@ -9,6 +9,7 @@ import {
 import { useMemo } from "react";
 import { ProductionButton } from "@/components/FlaggedLists";
 import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
+import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 /** What the product list is narrowed down to. */
 export type ProductFilter =
@@ -71,9 +72,6 @@ export function keepsJob(job: JobDoc, filter: JobFilter): boolean {
 type FgDoc = Doc<"finishedGoods">;
 type JobDoc = Doc<"projectJobs">;
 type ProjectDoc = Doc<"projects">;
-
-const money = (n: number) =>
-  n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Shared filter bar so every tab filters the same way. */
 function ListHeader<T extends string>({
@@ -159,6 +157,7 @@ export function JobsList({
   onFilterChange: (next: JobFilter) => void;
   onOpenProject?: (projectName: string) => void;
 }) {
+  const { format: money } = useWorkspaceCurrency();
   const rows = useMemo(() => {
     const projectNameOf = (job: JobDoc) =>
       projects?.find((p) => p._id === job.projectId)?.name ?? "Unassigned";
@@ -294,6 +293,7 @@ export function ProductsList({
   onFilterChange: (next: ProductFilter) => void;
   onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
 }) {
+  const { format: money } = useWorkspaceCurrency();
   const rows = useMemo(
     () =>
       finishedGoods.map((fg) => {

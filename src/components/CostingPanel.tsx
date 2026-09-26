@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type FgId = Id<"finishedGoods">;
 type FgDoc = Doc<"finishedGoods">;
@@ -36,13 +37,6 @@ type MaterialDoc = Doc<"rawMaterials">;
 
 const cellCls =
   "w-full bg-transparent px-2 py-1.5 text-sm outline-none focus:bg-primary/5 focus:ring-2 focus:ring-primary/30 rounded-md";
-
-function money(value: number, currency: string) {
-  return `${currency}${value.toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
 
 /** Main costing area: raw-materials sheet, product form/list, or FG costing grid. */
 export default function CostingPanel({
@@ -202,7 +196,7 @@ export default function CostingPanel({
     view?.kind === "fg"
       ? (finishedGoods.find((f) => f._id === view.fgId) ?? null)
       : null;
-  const currency = activeFg?.currency ?? "$";
+  const { format, format: money, code: currencyCode } = useWorkspaceCurrency();
   const markupPct = activeFg?.markupPct ?? 0;
 
   const items = useQuery(
@@ -394,7 +388,13 @@ export default function CostingPanel({
   const exportCsv = () => {
     if (!activeFg) return;
     const lines = [
-      ["Description", "Qty", "Unit", "Unit price", "Amount"].join(","),
+      [
+        "Description",
+        "Qty",
+        "Unit",
+        `Unit price (${currencyCode})`,
+        `Amount (${currencyCode})`,
+      ].join(","),
       ...rows.map((r) =>
         [
           `"${r.label.replace(/"/g, '""')}"`,
@@ -421,11 +421,7 @@ export default function CostingPanel({
    *  no prices, amounts, margin or sales price. */
   const printSheet = (withAmounts: boolean) => {
     if (!activeFg) return;
-    const cur = currency;
-    const money = (v: number) =>
-      withAmounts
-        ? `${cur}${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        : "";
+    const money = (v: number) => (withAmounts ? format(v) : "");
     const today = new Date().toLocaleDateString(undefined, {
       year: "numeric",
       month: "long",
@@ -445,7 +441,7 @@ export default function CostingPanel({
           <td>${escapeHtml(r.label)}</td>
           <td class="num">${r.qty.toLocaleString()}</td>
           <td class="muted">${escapeHtml(r.unit ?? "—")}</td>
-          ${withAmounts ? `<td class="num">${r.unitPrice.toLocaleString()}</td>
+          ${withAmounts ? `<td class="num">${format(r.unitPrice)}</td>
           <td class="num strong">${money(r.qty * r.unitPrice)}</td>` : ""}
         </tr>`,
       )
@@ -749,7 +745,7 @@ export default function CostingPanel({
                     <option key={m._id} value={m._id}>
                       {m.code ? `${m.code} · ` : ""}
                       {m.name}
-                      {m.category ? ` [${m.category}]` : ""} ({m.pricePerUnit}/{m.unit})
+                      {m.category ? ` [${m.category}]` : ""} ({money(m.pricePerUnit)}/{m.unit})
                     </option>
                   ))}
                 </select>
@@ -879,14 +875,13 @@ export default function CostingPanel({
                         <td className="px-3 py-2 text-xs text-muted-foreground">{row.unit ?? "—"}</td>
                         <td className="px-1 py-1">
                           <span className="block px-2 py-1.5 text-right tabular-nums">
-                            {row.unitPrice.toLocaleString()}
+                            {money(row.unitPrice)}
                           </span>
                         </td>
                         <td className="px-3 py-1.5 text-right font-medium tabular-nums">
                           {money(
                             (drafts.find((d) => d.id === row._id)?.qty ?? row.qty) *
                               (drafts.find((d) => d.id === row._id)?.unitPrice ?? row.unitPrice),
-                            currency,
                           )}
                         </td>
                         <td className="px-2 py-1 text-center">
@@ -930,7 +925,7 @@ export default function CostingPanel({
                         Subtotal
                       </td>
                       <td colSpan={3} className="px-3 py-2 text-right font-medium tabular-nums">
-                        {money(totals.subtotal, currency)}
+                        {money(totals.subtotal)}
                       </td>
                     </tr>
                     <tr className="bg-muted/30">
@@ -957,7 +952,7 @@ export default function CostingPanel({
                         </span>
                       </td>
                       <td colSpan={3} className="px-3 py-2 text-right font-medium tabular-nums">
-                        +{money(totals.markup, currency)}
+                        +{money(totals.markup)}
                       </td>
                     </tr>
                     <tr className="border-t border-border/70 bg-primary/5">
@@ -971,7 +966,7 @@ export default function CostingPanel({
                         colSpan={3}
                         className="px-3 py-2.5 text-right font-display text-base font-bold tabular-nums text-primary"
                       >
-                        {money(totals.grand, currency)}
+                        {money(totals.grand)}
                       </td>
                     </tr>
                   </tfoot>

@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import ContactDialog from "@/components/ContactDialog";
 import VendorField from "@/components/VendorField";
+import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
 type PurchaseDoc = Doc<"purchases">;
@@ -37,9 +38,6 @@ const emptyLine = (): DraftLine => ({ materialId: "", qty: "1", rate: "" });
 const todayInput = () => toLocalInput(new Date());
 
 const num = (value: string) => (Number.isFinite(Number(value)) ? Number(value) : 0);
-const money = (n: number) =>
-  n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
 /**
  * Purchase module. The list of purchase bills is the default screen, with an
  * "Add bill" button that opens the bill entry form; saving a bill adds every
@@ -57,6 +55,7 @@ export default function PurchasePanel({
   canDelete: boolean;
 }) {
   const bills = useQuery(api.purchases.list);
+  const { format: money } = useWorkspaceCurrency();
   const createBill = useMutation(api.purchases.create);
   const updateBill = useMutation(api.purchases.update);
   const setPaid = useMutation(api.purchases.setPaid);

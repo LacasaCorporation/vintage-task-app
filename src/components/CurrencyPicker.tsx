@@ -18,9 +18,9 @@ import {
 } from "@/lib/currency";
 
 /**
- * Workspace currency picker. Saved on the settings row, so every new project,
- * product and bill picks it up as the default. Amounts already entered keep
- * their own per-record symbol, so nothing is silently re-priced.
+ * Workspace currency picker. Saved on the settings row and read by
+ * `useWorkspaceCurrency()`, so every amount in the app — old records included —
+ * is displayed in this currency.
  */
 export default function CurrencyPicker({ canEdit }: { canEdit: boolean }) {
   const currency = useQuery(api.settings.getCurrency);
@@ -144,9 +144,9 @@ export default function CurrencyPicker({ canEdit }: { canEdit: boolean }) {
         </PopoverContent>
       </Popover>
       <p className="text-[11px] text-muted-foreground">
-        New projects, products and bills start in {currentEntry.code}. Anything
-        already saved keeps the symbol it was created with, so no amount is
-        re-priced.
+        Every amount in the app is shown in {currentEntry.code} — new projects,
+        products and bills included. Changing it re-displays existing amounts
+        too; the numbers themselves are never re-priced.
       </p>
     </div>
   );

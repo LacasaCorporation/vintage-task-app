@@ -9,6 +9,7 @@ import {
   PROJECT_STATUS_START,
 } from "@/lib/project-statuses";
 import { formatDueLabel } from "@/lib/task-utils";
+import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type FgDoc = Doc<"finishedGoods">;
 type JobDoc = Doc<"projectJobs">;
@@ -29,9 +30,6 @@ export type PrintRow = {
   total: number;
   status: string;
 };
-
-const money = (n: number) =>
-  n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Status labels for records that only carry the legacy `status` union. */
 const LEGACY_STATUS_LABEL: Record<string, string> = {
@@ -177,6 +175,7 @@ export default function ProjectsPrintSheet({
   onPrinted: () => void;
 }) {
   const configuredStatuses = useQuery(api.settings.listProjectStatuses);
+  const { format: money, code: currencyCode } = useWorkspaceCurrency();
   const projectStatuses = projectStatusesOrDefaults(configuredStatuses);
 
   // the browser dialog needs the sheet mounted for a tick before it opens
@@ -241,6 +240,8 @@ export default function ProjectsPrintSheet({
           Printed {formatDueLabel(Date.now())}
           <br />
           Grouped by status
+          <br />
+          All amounts in {currencyCode}
         </p>
       </header>
 

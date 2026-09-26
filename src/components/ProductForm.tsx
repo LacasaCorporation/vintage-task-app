@@ -23,6 +23,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -94,6 +95,7 @@ export default function ProductForm({
   const addFg = useMutation(api.costing.addFinishedGood);
   const updateFg = useMutation(api.costing.updateFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
+  const { format: money, code: currencyCode, symbol } = useWorkspaceCurrency();
 
   // managed master data for dropdowns
   const masterUnits = useQuery(api.costing.listUnits);
@@ -116,7 +118,6 @@ export default function ProductForm({
   const [category, setCategory] = useState("");
   const [subCategory, setSubCategory] = useState("");
   const [note, setNote] = useState("");
-  const [currency, setCurrency] = useState("$");
   const [markup, setMarkup] = useState("0");
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
@@ -225,7 +226,7 @@ export default function ProductForm({
         category: category.trim() || undefined,
         subCategory: subCategory.trim() || undefined,
         note: note.trim() || undefined,
-        currency: currency.trim() || "$",
+        currency: symbol,
         markupPct: markupNum,
       });
       toast.success(`“${cleanName}” created — open it to add materials.`);
@@ -265,7 +266,16 @@ export default function ProductForm({
 
   const exportCsv = () => {
     const lines = [
-      ["Project Code", "Project", "Product Code", "Product", "Unit", "Margin %", "Cost", "Sales Price"].join(","),
+      [
+        "Project Code",
+        "Project",
+        "Product Code",
+        "Product",
+        "Unit",
+        "Margin %",
+        `Cost (${currencyCode})`,
+        `Sales Price (${currencyCode})`,
+      ].join(","),
       ...rows.map((f) => {
         const cost = costByFg.get(f._id) ?? 0;
         const total = cost * (1 + (f.markupPct ?? 0) / 100);
@@ -474,15 +484,11 @@ export default function ProductForm({
 
                 <Group title="Pricing">
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Currency">
-                      <Input
-                        value={currency}
-                        onChange={(e) => setCurrency(e.target.value)}
-                        placeholder="$"
-                        maxLength={4}
-                        aria-label="Currency"
-                        className={inputCls}
-                      />
+                    <Field label="Currency" hint="From Settings → Organisation">
+                      <p className="flex h-9 items-center gap-2 rounded-md border border-dashed bg-muted/30 px-2.5 text-sm">
+                        <span className="font-medium">{currencyCode}</span>
+                        <span className="text-muted-foreground">{symbol}</span>
+                      </p>
                     </Field>
                     <Field
                       label="Margin %"
@@ -716,12 +722,10 @@ export default function ProductForm({
                         {(f.markupPct ?? 0) > 0 ? `+${f.markupPct}%` : "—"}
                       </td>
                       <td className="px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground">
-                        {f.currency ?? "$"}
-                        {cost.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        {money(cost)}
                       </td>
                       <td className="px-3 py-1.5 text-right font-medium tabular-nums text-primary">
-                        {f.currency ?? "$"}
-                        {total.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        {money(total)}
                       </td>
                       <td className="px-2 py-1 text-center">
                         <span className="hidden gap-1 group-hover/row:inline-flex">

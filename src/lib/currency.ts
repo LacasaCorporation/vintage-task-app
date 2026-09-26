@@ -77,12 +77,17 @@ export function formatCurrency(
   const entry =
     WORKSPACE_CURRENCIES.find((c) => c.code === resolved) ??
     WORKSPACE_CURRENCIES[0];
-  return new Intl.NumberFormat(entry.locale, {
+  return new Intl.NumberFormat(`${entry.locale}-u-nu-latn`, {
     style: "currency",
     currency: resolved,
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
-  }).format(amount);
+  })
+    .format(amount)
+    // Arabic locales wrap the amount in bidi marks; drop them so the amount
+    // sits cleanly in the app's left-to-right layout.
+    .replace(/[\u200e\u200f\u061c]/g, "")
+    .trim();
 }
 
 /** Validate a code coming from the client before it is stored. */

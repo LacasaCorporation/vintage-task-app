@@ -488,7 +488,7 @@ export const addSheet = mutation({
     return await ctx.db.insert("costingSheets", {
       ownerId: userId,
       name: clean,
-      currency: "$",
+      currency: currencySymbol((await getSettings(ctx, userId))?.currency),
       markupPct: 0,
     });
   },
@@ -523,7 +523,10 @@ export const updateSheet = mutation({
     if (sheet === null) throw new Error("That sheet no longer exists.");
     if (sheet.ownerId !== userId) throw new Error("Not your sheet.");
     const patch: { currency?: string; markupPct?: number } = {};
-    if (currency !== undefined) patch.currency = currency.trim().slice(0, 4) || "$";
+    if (currency !== undefined)
+      patch.currency =
+        currency.trim().slice(0, 4) ||
+        currencySymbol((await getSettings(ctx, userId))?.currency);
     if (markupPct !== undefined) {
       if (markupPct < 0) throw new Error("Markup can't be negative.");
       patch.markupPct = markupPct;
@@ -864,7 +867,10 @@ export const updateFinishedGood = mutation({
     if (patch.note !== undefined) patch.note = patch.note.trim() || undefined;
     if (patch.markupPct !== undefined && patch.markupPct < 0)
       throw new Error("Markup can't be negative.");
-    if (patch.currency !== undefined) patch.currency = patch.currency.trim().slice(0, 4) || "$";
+    if (patch.currency !== undefined)
+      patch.currency =
+        patch.currency.trim().slice(0, 4) ||
+        currencySymbol((await getSettings(ctx, userId))?.currency);
     await ctx.db.patch(id, patch);
   },
 });
@@ -1085,7 +1091,8 @@ export const cloneFinishedGood = mutation({
       note: fg.note,
       imageUrl: fg.imageUrl,
       imageAlt: fg.imageAlt,
-      currency: fg.currency ?? "$",
+      currency:
+        fg.currency ?? currencySymbol((await getSettings(ctx, userId))?.currency),
       markupPct: fg.markupPct ?? 0,
     });
     // copy every costing line

@@ -238,7 +238,11 @@ export const getCurrency = query({
   },
 });
 
-/** Change the workspace currency. Existing prices keep their own values. */
+/**
+ * Change the workspace currency. Every amount in the app is displayed in it,
+ * so existing figures are re-shown in the new currency; the stored numbers
+ * themselves are untouched.
+ */
 export const setCurrency = mutation({
   args: { currency: v.string() },
   handler: async (ctx, { currency }) => {
