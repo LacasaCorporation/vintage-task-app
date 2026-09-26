@@ -1,13 +1,19 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
+import { getSettings } from "./settings";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { PROJECT_STATUS_FINISH, PROJECT_STATUS_START } from "../lib/project-statuses";
+import {
+  PROJECT_STATUS_FINISH,
+  PROJECT_STATUS_START,
+  middleProjectStatus,
+  projectStatusesOrDefaults,
+} from "../lib/project-statuses";
 
 /**
  * Start production on a product: it is flagged so it opens in the Projects
  * workspace, and the raw materials its costing sheet needs are taken out of
- * stock.
+ * stock. A product leaves "Listed" for a middle status once work begins.
  */
 export const start = mutation({
   args: { fgId: v.id("finishedGoods") },
@@ -19,6 +25,9 @@ export const start = mutation({
       throw new Error("That product no longer exists.");
     if (fg.productionStartedAt !== undefined)
       throw new Error("Production is already running for this product.");
+    const statuses = projectStatusesOrDefaults(
+      (await getSettings(ctx, userId))?.projectStatuses,
+    );
 
     const lines = await ctx.db
       .query("costingItems")
@@ -58,9 +67,8 @@ export const start = mutation({
     await ctx.db.patch(fgId, {
       isFlagged: true,
       flaggedAt: fg.flaggedAt ?? Date.now(),
-      // starting production puts the product in the first status
-      projectStatus:
-        fg.projectStatus === PROJECT_STATUS_FINISH ? PROJECT_STATUS_START : fg.projectStatus,
+      // starting production leaves "Listed" for a middle status
+      projectStatus: middleProjectStatus(statuses),
       isCompleted: undefined,
       completedAt: undefined,
       productionStartedAt: Date.now(),
@@ -138,6 +146,9 @@ export const stop = mutation({
       throw new Error("That product no longer exists.");
     if (fg.productionStartedAt === undefined)
       throw new Error("Production isn't running for this product.");
+    const statuses = projectStatusesOrDefaults(
+      (await getSettings(ctx, userId))?.projectStatuses,
+    );
 
     for (const used of fg.productionConsumed ?? []) {
       const material = await ctx.db.get(used.materialId);
@@ -152,8 +163,8 @@ export const stop = mutation({
       productionConsumed: undefined,
       isCompleted: undefined,
       completedAt: undefined,
-      projectStatus:
-        fg.projectStatus === PROJECT_STATUS_FINISH ? PROJECT_STATUS_START : fg.projectStatus,
+      // the work is no longer under way, so it goes back to "Listed"
+      projectStatus: PROJECT_STATUS_START,
     });
   },
 });

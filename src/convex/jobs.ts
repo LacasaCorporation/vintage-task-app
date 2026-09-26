@@ -290,6 +290,10 @@ export const setJobFlag = mutation({
           // details start in sync (they can be edited per product afterwards)
           dueAt: flagged ? (job.fgDueAt ?? job.dueAt) : undefined,
           priority: flagged ? (job.fgPriority ?? job.priority) : undefined,
+          // a newly flagged product starts its life as "Listed"
+          ...(flagged && fg.projectStatus === undefined
+            ? { projectStatus: PROJECT_STATUS_START }
+            : {}),
         });
       }
     }

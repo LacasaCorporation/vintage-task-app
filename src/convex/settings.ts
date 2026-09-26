@@ -93,7 +93,7 @@ function juniorsOf(
  * Read the caller's settings row (queries only read; if none exists yet the
  * caller simply isn't a member of an initialized workspace).
  */
-async function getSettings(
+export async function getSettings(
   ctx: { db: any },
   userId: Id<"users">,
 ): Promise<Doc<"settings"> | null> {

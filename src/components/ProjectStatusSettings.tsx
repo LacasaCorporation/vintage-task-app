@@ -1,10 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, X } from "lucide-react";
+import { PROJECT_STATUS_FINISH, PROJECT_STATUS_START } from "@/lib/project-statuses";
 
 /**
- * Editor for the custom Projects statuses. The first (Start) and last
- * (Finish) entries stay fixed so every other surface can rely on them.
+ * Editor for the custom Projects statuses. The first (Listed) and last
+ * (Finish) entries stay fixed so every other surface can rely on them, and
+ * starting production always lands on the first status between them.
  */
 export default function ProjectStatusSettings({
   value,
@@ -22,7 +24,10 @@ export default function ProjectStatusSettings({
       <div className="mb-2 flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold">Custom Projects statuses</p>
-          <p className="text-[11px] text-muted-foreground">Start and Finish stay fixed.</p>
+          <p className="text-[11px] text-muted-foreground">
+            {PROJECT_STATUS_START} and {PROJECT_STATUS_FINISH} stay fixed. Starting
+            production moves a product to the first status between them.
+          </p>
         </div>
         <button
           type="button"

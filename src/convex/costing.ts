@@ -942,6 +942,10 @@ export const setFgFlag = mutation({
         await ctx.db.patch(id, { dueAt: parent.dueAt });
       if (fg.priority === undefined && parent?.priority !== undefined)
         await ctx.db.patch(id, { priority: parent.priority });
+      // a newly flagged product starts its life as "Listed"
+      if (fg.projectStatus === undefined) {
+        await ctx.db.patch(id, { projectStatus: PROJECT_STATUS_START });
+      }
       // cascade up: the job of a flagged product is flagged as well
       for (const jid of jobIds) {
         const job = await ctx.db.get(jid);
