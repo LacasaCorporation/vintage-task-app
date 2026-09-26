@@ -9,7 +9,7 @@ import {
   Settings2,
 } from "lucide-react";
 import ProductPrintSheet from "@/components/ProductPrintSheet";
-import ProductTaskFeatures from "@/components/ProductTaskFeatures";
+import ProductDetailPanel from "@/components/ProductDetailPanel";
 import ProjectStatusSettings from "@/components/ProjectStatusSettings";
 import {
   JobFlatList,
@@ -322,23 +322,40 @@ export default function ProjectsWorkspace({
       </section>
       {selection && jobs !== undefined && fgs !== undefined && (
         <div className="mt-3">
-          <FlaggedDetail
-            selection={selection}
-            jobs={jobs}
-            fgs={fgs}
-            projects={projects ?? []}
-            onClose={() => onSelect(null)}
-            onSelect={onSelect}
-          />
-          {/* the task features a product needs: who is on it, what they may
-              do, tags, a reminder and steps */}
-          {selection.kind === "fg" &&
+          {/* a product gets one card with every field on its own line, the
+              same shape as the task detail panel */}
+          {selection.kind === "fg" ? (
             (() => {
               const selected = fgs.find((f) => f._id === selection.id);
               return selected !== undefined ? (
-                <ProductTaskFeatures fg={selected} canEdit={canEdit} />
-              ) : null;
-            })()}
+                <ProductDetailPanel
+                  fg={selected}
+                  jobs={jobs}
+                  projects={projects ?? []}
+                  onClose={() => onSelect(null)}
+                  canEdit={canEdit}
+                />
+              ) : (
+                <FlaggedDetail
+                  selection={selection}
+                  jobs={jobs}
+                  fgs={fgs}
+                  projects={projects ?? []}
+                  onClose={() => onSelect(null)}
+                  onSelect={onSelect}
+                />
+              );
+            })()
+          ) : (
+            <FlaggedDetail
+              selection={selection}
+              jobs={jobs}
+              fgs={fgs}
+              projects={projects ?? []}
+              onClose={() => onSelect(null)}
+              onSelect={onSelect}
+            />
+          )}
         </div>
       )}
     </div>
