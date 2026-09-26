@@ -34,6 +34,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { useAppDialogs } from "@/components/AppDialogs";
+import { ProductionButton } from "@/components/FlaggedLists";
 import { cn } from "@/lib/utils";
 
 type FgDoc = Doc<"finishedGoods">;
@@ -1320,6 +1321,7 @@ export default function ProjectsSheet({
                                     </span>
                                     <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
                                   </button>
+                                  <ProductionButton fg={fg} />
                                   <button
                                     type="button"
                                     title={
@@ -1371,7 +1373,7 @@ export default function ProjectsSheet({
                           );
                         })
                       )}
-                      {/* products of this project that belong to no job */}
+                      {/* loose products (no job) */}
                       {looseProducts.map((fg) => (
                         <div
                           key={fg._id}

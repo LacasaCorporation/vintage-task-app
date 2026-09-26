@@ -770,7 +770,7 @@ export function FlaggedProductsList({
  * Stopping or editing a running production always asks for confirmation
  * first, because it puts consumed stock back or changes what was used.
  */
-function ProductionButton({ fg }: { fg: FgDoc }) {
+export function ProductionButton({ fg }: { fg: FgDoc }) {
   const startProduction = useMutation(api.production.start);
   const stopProduction = useMutation(api.production.stop);
   const [busy, setBusy] = useState(false);
