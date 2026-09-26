@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Eye,
   FileText,
+  Link2,
   List,
   Loader2,
   Pencil,
@@ -24,6 +25,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import ContactDialog from "@/components/ContactDialog";
+import VendorField from "@/components/VendorField";
 
 type MaterialDoc = Doc<"rawMaterials">;
 type PurchaseDoc = Doc<"purchases">;
@@ -287,6 +289,11 @@ export default function PurchasePanel({
                 Supplier
               </p>
               <p className="text-sm">{viewed.supplier || "—"}</p>
+              {viewed.supplierId !== undefined && (
+                <p className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                  <Link2 className="size-2.5" /> Linked to saved vendor
+                </p>
+              )}
               {viewed.supplierAddress && (
                 <p className="text-xs text-muted-foreground">{viewed.supplierAddress}</p>
               )}
@@ -720,44 +727,17 @@ export default function PurchasePanel({
 
           {/* supplier + dates */}
           <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
-                  Supplier
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setVendorPickerOpen(true)}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-                >
-                  <Plus className="size-3" /> New vendor
-                </button>
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  value={supplier}
-                  onChange={(e) => {
-                    setSupplier(e.target.value);
-                    setSupplierId(undefined);
-                  }}
-                  placeholder="Supplier / vendor name"
-                  list="slate-vendors"
-                  className="h-9 rounded-lg text-sm"
-                />
-                <datalist id="slate-vendors">
-                  {(vendors ?? []).map((vendor) => (
-                    <option key={vendor._id} value={vendor.name} />
-                  ))}
-                </datalist>
-              </div>
-              <Textarea
-                value={supplierAddress}
-                onChange={(e) => setSupplierAddress(e.target.value)}
-                placeholder="Address, contact, phone…"
-                rows={2}
-                className="rounded-lg text-sm"
-              />
-            </div>
+            <VendorField
+              supplier={supplier}
+              supplierId={supplierId}
+              address={supplierAddress}
+              onChange={(patch) => {
+                if (patch.supplier !== undefined) setSupplier(patch.supplier);
+                if (patch.supplierId !== undefined) setSupplierId(patch.supplierId);
+                if (patch.supplierAddress !== undefined)
+                  setSupplierAddress(patch.supplierAddress);
+              }}
+            />
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
                 <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
