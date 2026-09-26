@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -63,6 +63,7 @@ export default function ContactDialog({
   onUpdate,
   onRemove,
   onPick,
+  editTarget,
 }: {
   kind: Kind;
   open: boolean;
@@ -73,6 +74,8 @@ export default function ContactDialog({
   onRemove: (id: string) => Promise<void>;
   /** Called with the name (and id) the user settled on. */
   onPick?: (contact: { id?: string; name: string; address?: string }) => void;
+  /** Row to load straight into the form, set by an edit button outside. */
+  editTarget?: Contact | null;
 }) {
   const label = kind === "vendor" ? "vendor" : "customer";
   const [draft, setDraft] = useState(noContact);
@@ -90,6 +93,12 @@ export default function ContactDialog({
       note: contact?.note ?? "",
     });
   };
+
+  // an edit button elsewhere (a list row) can open the popup already filled in
+  useEffect(() => {
+    if (open && editTarget) openForm(editTarget);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editTarget?._id]);
 
   const close = (next: boolean) => {
     if (!next) {

@@ -64,10 +64,11 @@ export default function PurchasePanel({
   const editVendor = useMutation(api.contacts.updateVendor);
   const dropVendor = useMutation(api.contacts.removeVendor);
 
-  const [tab, setTab] = useState<"list" | "bill">("list");
+  const [tab, setTab] = useState<"list" | "bill" | "vendors">("list");
   const [editingId, setEditingId] = useState<Id<"purchases"> | null>(null);
   const [viewingId, setViewingId] = useState<Id<"purchases"> | null>(null);
   const [vendorPickerOpen, setVendorPickerOpen] = useState(false);
+  const [vendorEditing, setVendorEditing] = useState<Doc<"vendors"> | null>(null);
   const [supplierId, setSupplierId] = useState<Id<"vendors"> | undefined>(undefined);
   const [supplier, setSupplier] = useState("");
   const [supplierAddress, setSupplierAddress] = useState("");
@@ -173,7 +174,7 @@ export default function PurchasePanel({
     }
   };
 
-  const tabBtn = (id: "list" | "bill", label: string, Icon: typeof List) => (
+  const tabBtn = (id: "list" | "bill" | "vendors", label: string, Icon: typeof List) => (
     <button
       key={id}
       type="button"
@@ -201,29 +202,33 @@ export default function PurchasePanel({
         <div className="flex items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
           {tabBtn("list", `Purchase list (${bills?.length ?? 0})`, List)}
           {tabBtn("bill", "Bill entry", FileText)}
+          {tabBtn("vendors", `Vendors (${vendors?.length ?? 0})`, Store)}
         </div>
         {canCreate && (
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setVendorPickerOpen(true)}
-              className="h-9 rounded-xl px-3 text-sm"
-            >
-              <Store className="size-4" /> Vendors ({vendors?.length ?? 0})
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => {
-                resetForm();
-                setTab("bill");
-              }}
-              className="h-9 rounded-xl px-3 text-sm"
-            >
-              <Plus className="size-4" /> Add bill
-            </Button>
+            {tab === "vendors" && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => setVendorPickerOpen(true)}
+                className="h-9 rounded-xl px-3 text-sm"
+              >
+                <Plus className="size-4" /> New vendor
+              </Button>
+            )}
+            {tab !== "vendors" && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  resetForm();
+                  setTab("bill");
+                }}
+                className="h-9 rounded-xl px-3 text-sm"
+              >
+                <Plus className="size-4" /> Add bill
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -525,6 +530,159 @@ export default function PurchasePanel({
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── Vendors tab ─────────────────────────────────────────────── */}
+      {tab === "vendors" && (
+        <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
+            <h2 className="text-sm font-semibold">
+              Vendors
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {vendors?.length ?? 0} supplier{(vendors?.length ?? 0) === 1 ? "" : "s"} ·{" "}
+                {money(
+                  (bills ?? [])
+                    .filter((b) => b.supplierId !== undefined)
+                    .reduce((sum, b) => sum + b.total, 0),
+                )}{" "}
+                billed to saved vendors
+              </span>
+            </h2>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setVendorPickerOpen(true)}
+              className="h-8 rounded-lg px-2.5 text-xs"
+            >
+              <Plus className="size-3.5" /> New vendor
+            </Button>
+          </div>
+
+          {vendors === undefined ? (
+            <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Loading vendors…
+            </div>
+          ) : vendors.length === 0 ? (
+            <div className="px-4 py-12 text-center">
+              <Store className="mx-auto size-7 text-muted-foreground/40" />
+              <p className="mt-2 text-sm font-medium">No vendors yet</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Add a supplier once and every bill can pick it from the list.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border/60 text-[11px] tracking-wide text-muted-foreground uppercase">
+                    <th className="px-4 py-2 text-left font-medium">Vendor</th>
+                    <th className="px-3 py-2 text-left font-medium">Contact</th>
+                    <th className="px-3 py-2 text-left font-medium">Phone</th>
+                    <th className="px-3 py-2 text-left font-medium">Email</th>
+                    <th className="px-3 py-2 text-left font-medium">Address</th>
+                    <th className="px-3 py-2 text-right font-medium">Bills</th>
+                    <th className="px-3 py-2 text-right font-medium">Billed</th>
+                    <th className="w-20 px-2 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {vendors.map((vendor) => {
+                    const theirBills = (bills ?? []).filter(
+                      (b) => b.supplierId === vendor._id,
+                    );
+                    return (
+                      <tr
+                        key={vendor._id}
+                        className="transition-colors hover:bg-accent/40"
+                      >
+                        <td className="px-4 py-2.5">
+                          <p className="font-medium">{vendor.name}</p>
+                          {vendor.note && (
+                            <p className="truncate text-[11px] text-muted-foreground">
+                              {vendor.note}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                          {vendor.contactName || "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs whitespace-nowrap text-muted-foreground">
+                          {vendor.phone || "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                          <span className="block max-w-48 truncate">
+                            {vendor.email || "—"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                          <span className="block max-w-56 truncate">
+                            {vendor.address || "—"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs tabular-nums">
+                          {theirBills.length}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-medium tabular-nums">
+                          {theirBills.length > 0
+                            ? money(theirBills.reduce((sum, b) => sum + b.total, 0))
+                            : "—"}
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <button
+                              type="button"
+                              aria-label={`Use ${vendor.name}`}
+                              title="Start a bill with this vendor"
+                              onClick={() => {
+                                setSupplierId(vendor._id);
+                                setSupplier(vendor.name);
+                                if (vendor.address) setSupplierAddress(vendor.address);
+                                setViewingId(null);
+                                setTab("bill");
+                              }}
+                              className="grid size-6 place-items-center rounded text-muted-foreground hover:text-foreground"
+                            >
+                              <Receipt className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Edit ${vendor.name}`}
+                              title="Edit vendor"
+                              onClick={() => {
+                                setVendorEditing(vendor);
+                                setVendorPickerOpen(true);
+                              }}
+                              className="grid size-6 place-items-center rounded text-muted-foreground hover:text-foreground"
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${vendor.name}`}
+                              title="Remove vendor"
+                              onClick={() =>
+                                void dropVendor({ id: vendor._id }).catch((error) =>
+                                  toast.error(
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Couldn't remove the vendor.",
+                                  ),
+                                )
+                              }
+                              className="grid size-6 place-items-center rounded text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -856,8 +1014,12 @@ export default function PurchasePanel({
       <ContactDialog
         kind="vendor"
         open={vendorPickerOpen}
-        onOpenChange={setVendorPickerOpen}
+        onOpenChange={(next) => {
+          setVendorPickerOpen(next);
+          if (!next) setVendorEditing(null);
+        }}
         contacts={vendors}
+        editTarget={vendorEditing}
         onCreate={async (args) => addVendor(args)}
         onUpdate={async (id, args) => {
           await editVendor({ id: id as Id<"vendors">, ...args });
