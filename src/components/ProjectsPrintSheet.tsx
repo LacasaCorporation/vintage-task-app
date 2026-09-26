@@ -166,13 +166,14 @@ export default function ProjectsPrintSheet({
   tab,
   rows,
   search,
-  flagFilter,
+  filterLabel,
   onPrinted,
 }: {
   tab: PrintTab;
   rows: PrintRow[];
   search: string;
-  flagFilter: "all" | "flagged";
+  /** The active filter, or null when everything is shown. */
+  filterLabel: string | null;
   onPrinted: () => void;
 }) {
   const configuredStatuses = useQuery(api.settings.listProjectStatuses);
@@ -232,7 +233,7 @@ export default function ProjectsPrintSheet({
           </h1>
           <p className="text-[11px] text-slate-600">
             {rows.length} row{rows.length === 1 ? "" : "s"}
-            {flagFilter === "flagged" ? " · flagged only" : ""}
+            {filterLabel ? ` · ${filterLabel}` : ""}
             {search.trim() ? ` · matching “${search.trim()}”` : ""}
           </p>
         </div>

@@ -38,8 +38,23 @@ import { toast } from "sonner";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
 import CustomersPanel from "@/components/CustomersPanel";
-import { JobsList, ProductsList } from "@/components/ProjectsTabs";
+import {
+  JobsList,
+  ProductsList,
+  keepsJob,
+  keepsProduct,
+  JOB_FILTERS,
+  PRODUCT_FILTERS,
+  type JobFilter,
+  type ProductFilter,
+} from "@/components/ProjectsTabs";
 import { projectStatusesOrDefaults } from "@/lib/project-statuses";
+import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
+
+const PROJECT_FILTERS: readonly FilterOption<"all" | "flagged">[] = [
+  { value: "all", label: "All items", hint: "Every project" },
+  { value: "flagged", label: "Flagged", hint: "On the Projects board" },
+];
 import ProjectsPrintSheet, {
   buildPrintRows,
   type PrintRow,
@@ -519,6 +534,8 @@ export default function ProjectsSheet({
   );
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagFilter, setFlagFilter] = useState<"all" | "flagged">("all");
+  const [jobFilter, setJobFilter] = useState<JobFilter>("all");
+  const [productFilter, setProductFilter] = useState<ProductFilter>("all");
   const [printing, setPrinting] = useState(false);
   const [flagBusy, setFlagBusy] = useState<string | null>(null);
   const [jobDialog, setJobDialog] = useState<{
@@ -768,7 +785,7 @@ export default function ProjectsSheet({
       const jobIdsInSearch = new Set(
         (allJobs ?? [])
           .filter((job) => {
-            if (flagFilter === "flagged" && job.isFlagged !== true) return false;
+            if (!keepsJob(job, jobFilter)) return false;
             const q = search.trim().toLowerCase();
             if (!q) return true;
             return (
@@ -793,7 +810,7 @@ export default function ProjectsSheet({
     return allProducts.filter((row) => {
       const fg = finishedGoods.find((f) => f._id === row.id);
       if (fg === undefined) return false;
-      if (flagFilter === "flagged" && fg.isFlagged !== true) return false;
+      if (!keepsProduct(fg, productFilter)) return false;
       if (!q) return true;
       return (
         fg.name.toLowerCase().includes(q) ||
@@ -802,7 +819,21 @@ export default function ProjectsSheet({
         (fg.category ?? "").toLowerCase().includes(q)
       );
     });
-  }, [tab, projects, allJobs, finishedGoods, costByFg, filtered, search, flagFilter, projectStatusesList]);
+  }, [tab, projects, allJobs, finishedGoods, costByFg, filtered, search, jobFilter, productFilter, projectStatusesList]);
+
+  /** What the print header should say about the active filter. */
+  const printFilterLabel =
+    tab === "jobs"
+      ? jobFilter === "all"
+        ? null
+        : JOB_FILTERS.find((o) => o.value === jobFilter)?.label ?? null
+      : tab === "products"
+        ? productFilter === "all"
+          ? null
+          : PRODUCT_FILTERS.find((o) => o.value === productFilter)?.label ?? null
+        : flagFilter === "all"
+          ? null
+          : "flagged only";
 
   return (
     <div>
@@ -811,7 +842,7 @@ export default function ProjectsSheet({
           tab={tab}
           rows={printRows}
           search={search}
-          flagFilter={flagFilter}
+          filterLabel={printFilterLabel}
           onPrinted={() => setPrinting(false)}
         />
       )}
@@ -879,8 +910,8 @@ export default function ProjectsSheet({
           costByFg={costByFg}
           search={search}
           onSearch={setSearch}
-          flagFilter={flagFilter}
-          onFlagFilter={setFlagFilter}
+          filter={jobFilter}
+          onFilterChange={setJobFilter}
           onOpenProject={onOpenProject}
         />
       )}
@@ -891,8 +922,8 @@ export default function ProjectsSheet({
           costByFg={costByFg}
           search={search}
           onSearch={setSearch}
-          flagFilter={flagFilter}
-          onFlagFilter={setFlagFilter}
+          filter={productFilter}
+          onFilterChange={setProductFilter}
           onOpenProduct={onOpenProduct}
         />
       )}
@@ -936,17 +967,13 @@ export default function ProjectsSheet({
                 className="w-40 rounded-lg border bg-background py-1 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
               />
             </div>
-            <select
+            <FilterMenu
               value={flagFilter}
-              onChange={(e) =>
-                setFlagFilter(e.target.value as "all" | "flagged")
-              }
-              aria-label="Show flagged items"
-              className="rounded-lg border bg-background py-1 px-1.5 text-xs outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              <option value="all">All items</option>
-              <option value="flagged">⚑ Flagged</option>
-            </select>
+              options={PROJECT_FILTERS}
+              onChange={setFlagFilter}
+              label="Show projects"
+              icon={Folder}
+            />
             {filtered.length > 0 && (
               <Button
                 type="button"

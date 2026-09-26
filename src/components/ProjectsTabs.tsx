@@ -1,7 +1,72 @@
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import { Briefcase, Package, Search as SearchIcon, Sigma } from "lucide-react";
+import {
+  Briefcase,
+  Flag,
+  Package,
+  Search as SearchIcon,
+  Sigma,
+} from "lucide-react";
 import { useMemo } from "react";
 import { ProductionButton } from "@/components/FlaggedLists";
+import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
+
+/** What the product list is narrowed down to. */
+export type ProductFilter =
+  | "all"
+  | "flagged"
+  | "in-production"
+  | "finished"
+  | "unflagged";
+
+/** Filter choices offered on the product list. */
+export const PRODUCT_FILTERS: readonly FilterOption<ProductFilter>[] = [
+  { value: "all", label: "All items", hint: "Every product" },
+  { value: "flagged", label: "Flagged", hint: "On the Projects board" },
+  { value: "in-production", label: "In production", hint: "Materials out of stock" },
+  { value: "finished", label: "Finished", hint: "Completed products" },
+  { value: "unflagged", label: "Not flagged", hint: "Everything still to plan" },
+];
+
+/** What the job list is narrowed down to. */
+export type JobFilter = "all" | "flagged" | "active" | "completed";
+
+/** Filter choices offered on the job list. */
+export const JOB_FILTERS: readonly FilterOption<JobFilter>[] = [
+  { value: "all", label: "All items", hint: "Every job" },
+  { value: "flagged", label: "Flagged", hint: "On the Projects board" },
+  { value: "active", label: "Active", hint: "Not finished yet" },
+  { value: "completed", label: "Completed", hint: "Already done" },
+];
+
+/** Does this filter keep the given product? */
+export function keepsProduct(fg: FgDoc, filter: ProductFilter): boolean {
+  switch (filter) {
+    case "flagged":
+      return fg.isFlagged === true;
+    case "unflagged":
+      return fg.isFlagged !== true;
+    case "in-production":
+      return fg.productionStartedAt !== undefined;
+    case "finished":
+      return fg.isCompleted === true;
+    default:
+      return true;
+  }
+}
+
+/** Does this filter keep the given job? */
+export function keepsJob(job: JobDoc, filter: JobFilter): boolean {
+  switch (filter) {
+    case "flagged":
+      return job.isFlagged === true;
+    case "active":
+      return job.status !== "completed" && job.status !== "cancelled";
+    case "completed":
+      return job.status === "completed";
+    default:
+      return true;
+  }
+}
 
 type FgDoc = Doc<"finishedGoods">;
 type JobDoc = Doc<"projectJobs">;
@@ -11,15 +76,18 @@ const money = (n: number) =>
   n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Shared filter bar so every tab filters the same way. */
-function ListHeader({
+function ListHeader<T extends string>({
   title,
   count,
   countLabel,
   right,
   search,
   onSearch,
-  flagFilter,
-  onFlagFilter,
+  filter,
+  filterOptions,
+  onFilterChange,
+  filterLabel,
+  filterIcon,
 }: {
   title: string;
   count: number;
@@ -27,8 +95,11 @@ function ListHeader({
   right?: React.ReactNode;
   search: string;
   onSearch: (next: string) => void;
-  flagFilter: "all" | "flagged";
-  onFlagFilter: (next: "all" | "flagged") => void;
+  filter: T;
+  filterOptions: readonly FilterOption<T>[];
+  onFilterChange: (next: T) => void;
+  filterLabel: string;
+  filterIcon: typeof Flag;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
@@ -49,15 +120,13 @@ function ListHeader({
             className="w-40 rounded-lg border bg-background py-1 pr-2 pl-7 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
           />
         </div>
-        <select
-          value={flagFilter}
-          onChange={(e) => onFlagFilter(e.target.value as "all" | "flagged")}
-          aria-label="Show flagged items"
-          className="rounded-lg border bg-background py-1 px-1.5 text-xs outline-none focus:ring-2 focus:ring-primary/30"
-        >
-          <option value="all">All items</option>
-          <option value="flagged">⚑ Flagged</option>
-        </select>
+        <FilterMenu
+          value={filter}
+          options={filterOptions}
+          onChange={onFilterChange}
+          label={filterLabel}
+          icon={filterIcon}
+        />
         {right}
       </div>
     </div>
@@ -76,8 +145,8 @@ export function JobsList({
   costByFg,
   search,
   onSearch,
-  flagFilter,
-  onFlagFilter,
+  filter,
+  onFilterChange,
   onOpenProject,
 }: {
   jobs: JobDoc[];
@@ -86,8 +155,8 @@ export function JobsList({
   costByFg: Map<Id<"finishedGoods">, number>;
   search: string;
   onSearch: (next: string) => void;
-  flagFilter: "all" | "flagged";
-  onFlagFilter: (next: "all" | "flagged") => void;
+  filter: JobFilter;
+  onFilterChange: (next: JobFilter) => void;
   onOpenProject?: (projectName: string) => void;
 }) {
   const rows = useMemo(() => {
@@ -109,10 +178,7 @@ export function JobsList({
   }, [jobs, projects, finishedGoods, costByFg]);
 
   const filtered = useMemo(() => {
-    let list = rows;
-    if (flagFilter === "flagged") {
-      list = list.filter((row) => row.job.isFlagged === true);
-    }
+    let list = rows.filter((row) => keepsJob(row.job, filter));
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter(
@@ -121,7 +187,7 @@ export function JobsList({
         row.projectName.toLowerCase().includes(q) ||
         (row.job.code ?? "").toLowerCase().includes(q),
     );
-  }, [rows, search, flagFilter]);
+  }, [rows, search, filter]);
 
   return (
     <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
@@ -131,8 +197,11 @@ export function JobsList({
         countLabel={filtered.length === 1 ? "job" : "jobs"}
         search={search}
         onSearch={onSearch}
-        flagFilter={flagFilter}
-        onFlagFilter={onFlagFilter}
+        filter={filter}
+        filterOptions={JOB_FILTERS}
+        onFilterChange={onFilterChange}
+        filterLabel="Show jobs"
+        filterIcon={Briefcase}
         right={
           <span className="text-xs tabular-nums text-muted-foreground">
             {money(filtered.reduce((s, r) => s + r.total, 0))} total
@@ -213,16 +282,16 @@ export function ProductsList({
   costByFg,
   search,
   onSearch,
-  flagFilter,
-  onFlagFilter,
+  filter,
+  onFilterChange,
   onOpenProduct,
 }: {
   finishedGoods: FgDoc[];
   costByFg: Map<Id<"finishedGoods">, number>;
   search: string;
   onSearch: (next: string) => void;
-  flagFilter: "all" | "flagged";
-  onFlagFilter: (next: "all" | "flagged") => void;
+  filter: ProductFilter;
+  onFilterChange: (next: ProductFilter) => void;
   onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
 }) {
   const rows = useMemo(
@@ -239,10 +308,7 @@ export function ProductsList({
   );
 
   const filtered = useMemo(() => {
-    let list = rows;
-    if (flagFilter === "flagged") {
-      list = list.filter((row) => row.fg.isFlagged === true);
-    }
+    let list = rows.filter((row) => keepsProduct(row.fg, filter));
     const q = search.trim().toLowerCase();
     if (!q) return list;
     return list.filter(
@@ -252,7 +318,7 @@ export function ProductsList({
         (row.fg.projectName ?? "").toLowerCase().includes(q) ||
         (row.fg.category ?? "").toLowerCase().includes(q),
     );
-  }, [rows, search, flagFilter]);
+  }, [rows, search, filter]);
 
   return (
     <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
@@ -262,8 +328,11 @@ export function ProductsList({
         countLabel={filtered.length === 1 ? "product" : "products"}
         search={search}
         onSearch={onSearch}
-        flagFilter={flagFilter}
-        onFlagFilter={onFlagFilter}
+        filter={filter}
+        filterOptions={PRODUCT_FILTERS}
+        onFilterChange={onFilterChange}
+        filterLabel="Show products"
+        filterIcon={Package}
         right={
           <span className="text-xs tabular-nums text-muted-foreground">
             {money(filtered.reduce((s, r) => s + r.total, 0))} total
