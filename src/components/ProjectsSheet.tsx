@@ -25,6 +25,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Printer,
   Search as SearchIcon,
   Sigma,
   Trash2,
@@ -38,6 +39,11 @@ import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
 import CustomersPanel from "@/components/CustomersPanel";
 import { JobsList, ProductsList } from "@/components/ProjectsTabs";
+import { projectStatusesOrDefaults } from "@/lib/project-statuses";
+import ProjectsPrintSheet, {
+  buildPrintRows,
+  type PrintRow,
+} from "@/components/ProjectsPrintSheet";
 import { cn } from "@/lib/utils";
 
 type FgDoc = Doc<"finishedGoods">;
@@ -513,6 +519,7 @@ export default function ProjectsSheet({
   );
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagFilter, setFlagFilter] = useState<"all" | "flagged">("all");
+  const [printing, setPrinting] = useState(false);
   const [flagBusy, setFlagBusy] = useState<string | null>(null);
   const [jobDialog, setJobDialog] = useState<{
     projectId: Id<"projects">;
@@ -527,6 +534,12 @@ export default function ProjectsSheet({
   const allItems = useQuery(api.costing.listAllItems);
   const allJobs = useQuery(api.jobs.listJobs);
   const allCustomers = useQuery(api.contacts.listCustomers);
+  const projectStatusesList = projectStatusesOrDefaults(
+    useQuery(api.settings.listProjectStatuses),
+  );
+  /** The project a job sits under, for search and print labels. */
+  const projectNameForJob = (job: JobDoc) =>
+    (projects ?? []).find((p) => p._id === job.projectId)?.name ?? "Unassigned";
   const pauseJob = useMutation(api.jobs.pauseJob);
   const resumeJob = useMutation(api.jobs.resumeJob);
   const completeJob = useMutation(api.jobs.completeJob);
@@ -727,8 +740,81 @@ export default function ProjectsSheet({
     URL.revokeObjectURL(url);
   };
 
+  /** The rows the print sheet renders: the current tab, current filters. */
+  const printRows: PrintRow[] = useMemo(() => {
+    if (tab === "customers") return [];
+    if (tab === "projects") {
+      const projectDocs = (projects ?? []).filter((p) =>
+        filtered.some((row) => row.project?._id === p._id),
+      );
+      return buildPrintRows(
+        "projects",
+        projectDocs,
+        allJobs ?? [],
+        finishedGoods,
+        costByFg,
+        projectStatusesList,
+      );
+    }
+    if (tab === "jobs") {
+      const all = buildPrintRows(
+        "jobs",
+        projects ?? [],
+        allJobs ?? [],
+        finishedGoods,
+        costByFg,
+        projectStatusesList,
+      );
+      const jobIdsInSearch = new Set(
+        (allJobs ?? [])
+          .filter((job) => {
+            if (flagFilter === "flagged" && job.isFlagged !== true) return false;
+            const q = search.trim().toLowerCase();
+            if (!q) return true;
+            return (
+              job.name.toLowerCase().includes(q) ||
+              (job.code ?? "").toLowerCase().includes(q) ||
+              projectNameForJob(job).toLowerCase().includes(q)
+            );
+          })
+          .map((job) => job._id),
+      );
+      return all.filter((row) => jobIdsInSearch.has(row.id as Id<"projectJobs">));
+    }
+    const allProducts = buildPrintRows(
+      "products",
+      projects ?? [],
+      allJobs ?? [],
+      finishedGoods,
+      costByFg,
+      projectStatusesList,
+    );
+    const q = search.trim().toLowerCase();
+    return allProducts.filter((row) => {
+      const fg = finishedGoods.find((f) => f._id === row.id);
+      if (fg === undefined) return false;
+      if (flagFilter === "flagged" && fg.isFlagged !== true) return false;
+      if (!q) return true;
+      return (
+        fg.name.toLowerCase().includes(q) ||
+        (fg.code ?? "").toLowerCase().includes(q) ||
+        (fg.projectName ?? "").toLowerCase().includes(q) ||
+        (fg.category ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [tab, projects, allJobs, finishedGoods, costByFg, filtered, search, flagFilter, projectStatusesList]);
+
   return (
     <div>
+      {printing && tab !== "customers" && (
+        <ProjectsPrintSheet
+          tab={tab}
+          rows={printRows}
+          search={search}
+          flagFilter={flagFilter}
+          onPrinted={() => setPrinting(false)}
+        />
+      )}
       {/* ── Tabs: one list per level of the hierarchy ───────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
@@ -760,13 +846,29 @@ export default function ProjectsSheet({
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-muted-foreground">
-          {tab === "projects" &&
-            "A project groups jobs, and jobs group finished goods — its cost and total are the sum of all its products."}
-          {tab === "jobs" && "Every job with the cost and sales value of the products under it."}
-          {tab === "products" && "Every product across all projects, with its production state."}
-          {tab === "customers" && "Everyone your projects are for, and the projects behind each one."}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] text-muted-foreground">
+            {tab === "projects" &&
+              "A project groups jobs, and jobs group finished goods — its cost and total are the sum of all its products."}
+            {tab === "jobs" &&
+              "Every job with the cost and sales value of the products under it."}
+            {tab === "products" &&
+              "Every product across all projects, with its production state."}
+            {tab === "customers" &&
+              "Everyone your projects are for, and the projects behind each one."}
+          </p>
+          {tab !== "customers" && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPrinting(true)}
+              className="h-7 shrink-0 rounded-lg text-xs"
+            >
+              <Printer className="size-3" /> Print
+            </Button>
+          )}
+        </div>
       </div>
 
       {tab === "jobs" && (
@@ -777,6 +879,8 @@ export default function ProjectsSheet({
           costByFg={costByFg}
           search={search}
           onSearch={setSearch}
+          flagFilter={flagFilter}
+          onFlagFilter={setFlagFilter}
           onOpenProject={onOpenProject}
         />
       )}
@@ -787,6 +891,8 @@ export default function ProjectsSheet({
           costByFg={costByFg}
           search={search}
           onSearch={setSearch}
+          flagFilter={flagFilter}
+          onFlagFilter={setFlagFilter}
           onOpenProduct={onOpenProduct}
         />
       )}

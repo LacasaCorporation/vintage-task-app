@@ -18,6 +18,8 @@ function ListHeader({
   right,
   search,
   onSearch,
+  flagFilter,
+  onFlagFilter,
 }: {
   title: string;
   count: number;
@@ -25,6 +27,8 @@ function ListHeader({
   right?: React.ReactNode;
   search: string;
   onSearch: (next: string) => void;
+  flagFilter: "all" | "flagged";
+  onFlagFilter: (next: "all" | "flagged") => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
@@ -45,6 +49,15 @@ function ListHeader({
             className="w-40 rounded-lg border bg-background py-1 pr-2 pl-7 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
           />
         </div>
+        <select
+          value={flagFilter}
+          onChange={(e) => onFlagFilter(e.target.value as "all" | "flagged")}
+          aria-label="Show flagged items"
+          className="rounded-lg border bg-background py-1 px-1.5 text-xs outline-none focus:ring-2 focus:ring-primary/30"
+        >
+          <option value="all">All items</option>
+          <option value="flagged">⚑ Flagged</option>
+        </select>
         {right}
       </div>
     </div>
@@ -63,6 +76,8 @@ export function JobsList({
   costByFg,
   search,
   onSearch,
+  flagFilter,
+  onFlagFilter,
   onOpenProject,
 }: {
   jobs: JobDoc[];
@@ -71,6 +86,8 @@ export function JobsList({
   costByFg: Map<Id<"finishedGoods">, number>;
   search: string;
   onSearch: (next: string) => void;
+  flagFilter: "all" | "flagged";
+  onFlagFilter: (next: "all" | "flagged") => void;
   onOpenProject?: (projectName: string) => void;
 }) {
   const rows = useMemo(() => {
@@ -92,15 +109,19 @@ export function JobsList({
   }, [jobs, projects, finishedGoods, costByFg]);
 
   const filtered = useMemo(() => {
+    let list = rows;
+    if (flagFilter === "flagged") {
+      list = list.filter((row) => row.job.isFlagged === true);
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
+    if (!q) return list;
+    return list.filter(
       (row) =>
         row.job.name.toLowerCase().includes(q) ||
         row.projectName.toLowerCase().includes(q) ||
         (row.job.code ?? "").toLowerCase().includes(q),
     );
-  }, [rows, search]);
+  }, [rows, search, flagFilter]);
 
   return (
     <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
@@ -110,6 +131,8 @@ export function JobsList({
         countLabel={filtered.length === 1 ? "job" : "jobs"}
         search={search}
         onSearch={onSearch}
+        flagFilter={flagFilter}
+        onFlagFilter={onFlagFilter}
         right={
           <span className="text-xs tabular-nums text-muted-foreground">
             {money(filtered.reduce((s, r) => s + r.total, 0))} total
@@ -190,12 +213,16 @@ export function ProductsList({
   costByFg,
   search,
   onSearch,
+  flagFilter,
+  onFlagFilter,
   onOpenProduct,
 }: {
   finishedGoods: FgDoc[];
   costByFg: Map<Id<"finishedGoods">, number>;
   search: string;
   onSearch: (next: string) => void;
+  flagFilter: "all" | "flagged";
+  onFlagFilter: (next: "all" | "flagged") => void;
   onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
 }) {
   const rows = useMemo(
@@ -212,16 +239,20 @@ export function ProductsList({
   );
 
   const filtered = useMemo(() => {
+    let list = rows;
+    if (flagFilter === "flagged") {
+      list = list.filter((row) => row.fg.isFlagged === true);
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
+    if (!q) return list;
+    return list.filter(
       (row) =>
         row.fg.name.toLowerCase().includes(q) ||
         (row.fg.code ?? "").toLowerCase().includes(q) ||
         (row.fg.projectName ?? "").toLowerCase().includes(q) ||
         (row.fg.category ?? "").toLowerCase().includes(q),
     );
-  }, [rows, search]);
+  }, [rows, search, flagFilter]);
 
   return (
     <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
@@ -231,6 +262,8 @@ export function ProductsList({
         countLabel={filtered.length === 1 ? "product" : "products"}
         search={search}
         onSearch={onSearch}
+        flagFilter={flagFilter}
+        onFlagFilter={onFlagFilter}
         right={
           <span className="text-xs tabular-nums text-muted-foreground">
             {money(filtered.reduce((s, r) => s + r.total, 0))} total
