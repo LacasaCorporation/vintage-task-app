@@ -1019,6 +1019,15 @@ export default function ProjectsSheet({
                         {p.code}
                       </span>
                     )}
+                    {detail?.client && (
+                      <span
+                        className="inline-flex min-w-0 max-w-48 shrink items-center gap-1 truncate text-[11px] text-muted-foreground"
+                        title={`Client: ${detail.client}`}
+                      >
+                        <User className="size-2.5 shrink-0" />
+                        <span className="truncate">{detail.client}</span>
+                      </span>
+                    )}
                     {status && (
                       <span
                         className={cn(
@@ -1164,14 +1173,9 @@ export default function ProjectsSheet({
                     </span>
                   </div>
 
-                  {/* second line: description / client / assignee */}
-                  {(detail?.description ||
-                    detail?.client ||
-                    detail?.assignee) && (
+                  {/* second line: description / assignee */}
+                  {(detail?.description || detail?.assignee) && (
                     <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-6 text-[11px] text-muted-foreground">
-                      {detail?.client && (
-                        <span className="truncate">Client: {detail.client}</span>
-                      )}
                       {detail?.assignee && (
                         <span className="inline-flex items-center gap-1 truncate">
                           <User className="size-3" />
