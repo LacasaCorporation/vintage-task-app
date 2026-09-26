@@ -728,10 +728,13 @@ export default function Dashboard() {
 
   // ── Shell chrome ────────────────────────────────────────────────────
   const firstName = user?.name?.trim().split(" ")[0] ?? "";
-  // The provisioned sign-in name, for people who have one (email-code
-  // sign-ins and the very first login have none).
+  // Who am I: the provisioned username when there is one, otherwise the
+  // sign-in email — an email-code sign-in has no username, and the code flow
+  // sets no name either, so without the fallback this line stays blank.
   const organisation = useQuery(api.accounts.getOrganisation);
-  const myUsername = organisation?.myUsername ?? "";
+  const identity = organisation?.myUsername
+    ? `@${organisation.myUsername}`
+    : (user?.email ?? "");
 
   const handleSignOut = async () => {
     await signOut();
@@ -850,14 +853,14 @@ export default function Dashboard() {
 
         {/* user + sign out */}
         <div className="mt-auto border-t border-border/60 p-4">
-          {(firstName || myUsername) && (
+          {(firstName || identity) && (
             <div className="mb-3 min-w-0 px-1">
               {firstName && (
                 <p className="truncate text-sm font-medium">{firstName}</p>
               )}
-              {myUsername && (
+              {identity && (
                 <p className="truncate font-mono text-xs text-muted-foreground">
-                  @{myUsername}
+                  {identity}
                 </p>
               )}
             </div>
@@ -929,16 +932,16 @@ export default function Dashboard() {
               })}
             </div>
             <div className="flex items-center gap-3">
-              {(firstName || myUsername) && (
+              {(firstName || identity) && (
                 <span className="hidden min-w-0 text-right sm:block">
                   {firstName && (
                     <span className="block truncate text-sm text-muted-foreground">
                       {firstName}
                     </span>
                   )}
-                  {myUsername && (
+                  {identity && (
                     <span className="block truncate font-mono text-xs text-muted-foreground/80">
-                      @{myUsername}
+                      {identity}
                     </span>
                   )}
                 </span>
