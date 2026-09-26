@@ -920,6 +920,16 @@ export default function TasksPanel({
                           </span>
                           {(hasExtras || task.starred) && (
                             <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                              {/* once a task is done the tags lead the row */}
+                              {task.isCompleted &&
+                                (task.tags ?? []).map((tag) => (
+                                  <span
+                                    key={`done-${tag}`}
+                                    className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                                  >
+                                    #{tag}
+                                  </span>
+                                ))}
                               {task.priority && (
                                 <span
                                   className={cn(
@@ -972,14 +982,15 @@ export default function TasksPanel({
                                   {RECURRENCE_LABEL[task.recurrence]}
                                 </span>
                               )}
-                              {(task.tags ?? []).map((tag) => (
-                                <span
-                                  key={tag}
-                                  className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
-                                >
-                                  #{tag}
-                                </span>
-                              ))}
+                              {!task.isCompleted &&
+                                (task.tags ?? []).map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                                  >
+                                    #{tag}
+                                  </span>
+                                ))}
                               {task.description !== undefined && (
                                 <FileText className="size-3 text-muted-foreground/70" />
                               )}
