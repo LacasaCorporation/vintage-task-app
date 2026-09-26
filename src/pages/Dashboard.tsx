@@ -930,8 +930,8 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* wide content area */}
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-16 pt-8 sm:px-8">
+        {/* wide content area — uses the full window width */}
+        <main className="w-full flex-1 px-4 pb-16 pt-8 sm:px-8">
           {section === "tasks" && (
             <div className="mb-6">
               <h1 className="font-display text-3xl font-bold tracking-tight">
