@@ -28,6 +28,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlarmClock,
+  BarChart3,
   CalendarDays,
   ChevronDown,
   Clock,
@@ -64,6 +65,7 @@ import {
   FlaggedItemsList,
   FlaggedProductsList,
   FlaggedProjectsList,
+  ProductionReport,
   type FlagFilter,
   type FlagStatusFilter,
   type FlaggedData,
@@ -134,12 +136,16 @@ export default function TasksPanel({
   const [flagSelection, setFlagSelection] = useState<FlaggedSel>(null);
   const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
   const [flagBoardMode, setFlagBoardMode] = useState(false);
+  const [flagReportMode, setFlagReportMode] = useState(false);
   const [statusSettingsOpen, setStatusSettingsOpen] = useState(false);
   const [statusDraft, setStatusDraft] = useState<string[] | null>(null);
 
   // Projects should always open as a list when selected from the sidebar.
   useEffect(() => {
-    if (activeView === "flagged") setFlagBoardMode(false);
+    if (activeView === "flagged") {
+      setFlagBoardMode(false);
+      setFlagReportMode(false);
+    }
   }, [activeView]);
 
   // ── reminder notifications (in-app while the app is open) ──────────
@@ -511,7 +517,10 @@ export default function TasksPanel({
                   aria-pressed={flagFilter === mode}
                   onClick={() => {
                     setFlagFilter(mode);
-                    if (mode !== "products") setFlagBoardMode(false);
+                    if (mode !== "products") {
+                      setFlagBoardMode(false);
+                      setFlagReportMode(false);
+                    }
                   }}
                   className={cn(
                     "rounded-full border px-2.5 py-1 whitespace-nowrap transition-colors",
@@ -612,7 +621,10 @@ export default function TasksPanel({
                 <>
               <button
                 type="button"
-                onClick={() => setFlagBoardMode(false)}
+                onClick={() => {
+                  setFlagBoardMode(false);
+                  setFlagReportMode(false);
+                }}
                 aria-pressed={!flagBoardMode}
                 className={cn(
                   "grid size-7 place-items-center rounded-md border transition-colors",
@@ -626,7 +638,10 @@ export default function TasksPanel({
               </button>
               <button
                 type="button"
-                onClick={() => setFlagBoardMode(true)}
+                onClick={() => {
+                  setFlagBoardMode(true);
+                  setFlagReportMode(false);
+                }}
                 aria-pressed={flagBoardMode}
                 className={cn(
                   "grid size-7 place-items-center rounded-md border transition-colors",
@@ -637,6 +652,20 @@ export default function TasksPanel({
                 title="Board view"
               >
                 <Columns3 className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setFlagReportMode((on) => !on)}
+                aria-pressed={flagReportMode}
+                className={cn(
+                  "grid size-7 place-items-center rounded-md border transition-colors",
+                  flagReportMode
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+                title="Production report"
+              >
+                <BarChart3 className="size-3.5" />
               </button>
                 </>
               ) : null}
@@ -667,7 +696,13 @@ export default function TasksPanel({
               </p>
             </div>
           ) : flagFilter === "products" ? (
-            flagBoardMode ? (
+            flagReportMode ? (
+              <ProductionReport
+                data={flaggedItems}
+                allJobs={flaggedJobs ?? []}
+                projectStatuses={projectStatuses}
+              />
+            ) : flagBoardMode ? (
               <div className="p-3">
                 <FlaggedBoard
                   data={flaggedItems}

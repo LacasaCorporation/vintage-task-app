@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -1028,6 +1028,346 @@ export function FlaggedBoard({
           </section>
         );
       })}
+    </div>
+  );
+}
+
+type ReportRow = {
+  fg: FgDoc;
+  jobName: string;
+  projectName: string;
+  status: string;
+  dueAt?: number;
+  finished: boolean;
+  completedAt?: number;
+  priority?: Priority;
+};
+
+/** The job a product belongs to, resolved from either jobId shape. */
+function productJob(fg: FgDoc, allJobs: JobDoc[]): JobDoc | undefined {
+  const ids = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
+  return allJobs.find((j) => ids.includes(j._id));
+}
+
+/**
+ * Production report: every flagged product counted as in production or
+ * finished, rolled up per project, with the days left on each open item and
+ * the days each finished item actually took.
+ */
+export function ProductionReport({
+  data,
+  allJobs,
+  projectStatuses: configuredProjectStatuses,
+}: {
+  data: FlaggedData;
+  allJobs: JobDoc[];
+  projectStatuses?: string[];
+}) {
+  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(
+    configuredProjectStatuses ?? configuredStatusesQuery,
+  );
+
+  const rows: ReportRow[] = useMemo(
+    () =>
+      data.fgs.map((fg) => {
+        const job = productJob(fg, allJobs);
+        const dueAt = fg.dueAt ?? job?.dueAt;
+        const finished = fg.isCompleted === true;
+        return {
+          fg,
+          jobName: job?.name ?? "Unassigned job",
+          projectName: job ? data.projectNameOf(job) : (fg.projectName ?? "Standalone"),
+          status: fgProjectStatus(fg, projectStatuses),
+          dueAt,
+          finished,
+          completedAt: fg.completedAt,
+          priority: fg.priority,
+        };
+      }),
+    [data, allJobs, projectStatuses],
+  );
+
+  const inProduction = rows.filter((r) => !r.finished);
+  const finished = rows.filter((r) => r.finished);
+  const open = inProduction.filter((r) => r.dueAt !== undefined);
+  const overdue = open.filter(
+    (r) => daysLeftLabel(r.dueAt as number).overdue,
+  );
+  const dueSoon = open.filter((r) => {
+    const days = daysLeftLabel(r.dueAt as number);
+    return !days.overdue && (days.text === "Due today" || days.text === "Due tomorrow" || days.text.startsWith("Due in"));
+  });
+  const noDueDate = inProduction.filter((r) => r.dueAt === undefined);
+  const pct = rows.length === 0 ? 0 : Math.round((finished.length / rows.length) * 100);
+
+  /** Days a finished item took, from when it was flagged to completion. */
+  const tookDays = (row: ReportRow) => {
+    const start = row.fg.flaggedAt ?? row.fg._creationTime;
+    if (row.completedAt === undefined) return null;
+    return Math.max(0, Math.round((row.completedAt - start) / 86_400_000));
+  };
+
+  const byProject = useMemo(() => {
+    const groups = new Map<string, ReportRow[]>();
+    for (const row of rows) {
+      const list = groups.get(row.projectName) ?? [];
+      list.push(row);
+      groups.set(row.projectName, list);
+    }
+    return [...groups.entries()]
+      .map(([name, list]) => {
+        const done = list.filter((r) => r.finished).length;
+        const next = list
+          .filter((r) => !r.finished && r.dueAt !== undefined)
+          .sort((a, b) => (a.dueAt as number) - (b.dueAt as number))[0];
+        return {
+          name,
+          total: list.length,
+          open: list.length - done,
+          done,
+          late: list.filter((r) => !r.finished && r.dueAt !== undefined && daysLeftLabel(r.dueAt as number).overdue).length,
+          nextDue: next?.dueAt,
+          pct: list.length === 0 ? 0 : Math.round((done / list.length) * 100),
+        };
+      })
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  }, [rows]);
+
+  const byStatus = useMemo(() => {
+    const counts = new Map<string, { total: number; done: number }>();
+    for (const row of rows) {
+      const entry = counts.get(row.status) ?? { total: 0, done: 0 };
+      entry.total += 1;
+      if (row.finished) entry.done += 1;
+      counts.set(row.status, entry);
+    }
+    return projectStatuses
+      .filter((status) => counts.has(status))
+      .map((status) => ({ status, ...counts.get(status)! }));
+  }, [rows, projectStatuses]);
+
+  const stat = (label: string, value: number, hint: string, tone: string) => (
+    <div className="rounded-xl border bg-card p-3 shadow-sm">
+      <p className="font-display text-2xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-0.5 text-xs font-medium">{label}</p>
+      <p className={cn("text-[11px]", tone)}>{hint}</p>
+    </div>
+  );
+
+  const tableHead =
+    "grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 px-4 py-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto]";
+
+  return (
+    <div className="space-y-4 p-4">
+      {/* headline numbers */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {stat("In production", inProduction.length, `${pct}% finished overall`, "text-muted-foreground")}
+        {stat("Finished", finished.length, rows.length === 0 ? "Nothing yet" : `of ${rows.length} products`, "text-emerald-600 dark:text-emerald-400")}
+        {stat(
+          "Overdue",
+          overdue.length,
+          dueSoon.length > 0 ? `${dueSoon.length} due within a week` : "Nothing due this week",
+          overdue.length > 0 ? "text-destructive" : "text-muted-foreground",
+        )}
+        {stat("No due date", noDueDate.length, "Set one to track it", "text-muted-foreground")}
+      </div>
+
+      {/* completion bar */}
+      <section className="rounded-xl border bg-card p-3 shadow-sm">
+        <div className="flex items-baseline justify-between text-xs">
+          <span className="font-medium">Production completion</span>
+          <span className="tabular-nums text-muted-foreground">
+            {finished.length} finished · {inProduction.length} in production · {pct}%
+          </span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-emerald-500/80 transition-[width]"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        {byStatus.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {byStatus.map((entry) => (
+              <span
+                key={entry.status}
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-medium tabular-nums",
+                  entry.status === PROJECT_STATUS_FINISH
+                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : "bg-sky-500/10 text-sky-700 dark:text-sky-400",
+                )}
+              >
+                {entry.status} {entry.done}/{entry.total}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* per project rollup */}
+      <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+        <p className="border-b border-border/60 px-4 py-2.5 text-sm font-semibold">By project</p>
+        {byProject.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+            Flag a product to start tracking production.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border/70">
+            {byProject.map((project) => (
+              <li key={project.name} className="px-4 py-2.5 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Folder className="size-3.5 shrink-0 text-sky-500/80" />
+                  <span className="min-w-0 flex-1 truncate font-medium">{project.name}</span>
+                  {project.late > 0 && (
+                    <span className="shrink-0 rounded-full bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
+                      {project.late} overdue
+                    </span>
+                  )}
+                  <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+                    {project.done}/{project.total} finished
+                  </span>
+                  <span className="shrink-0 text-[10px] font-medium tabular-nums text-muted-foreground">
+                    {project.pct}%
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-emerald-500/80"
+                    style={{ width: `${project.pct}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {project.open} in production
+                  {project.nextDue !== undefined &&
+                    ` · next due ${formatDueLabel(project.nextDue)} (${daysLeftLabel(project.nextDue).text})`}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* in production */}
+      <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+        <p className="border-b border-border/60 px-4 py-2.5 text-sm font-semibold">
+          In production ({inProduction.length})
+        </p>
+        {inProduction.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+            Everything flagged is finished.
+          </p>
+        ) : (
+          <>
+            <div className={tableHead}>
+              <span>Product</span>
+              <span className="hidden sm:block">Job</span>
+              <span className="hidden sm:block">Project</span>
+              <span className="text-right">Due</span>
+              <span className="text-right">Days left</span>
+            </div>
+            <ul className="divide-y divide-border/70">
+              {[...inProduction]
+                .sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity))
+                .map((row) => (
+                  <li
+                    key={row.fg._id}
+                    className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 px-4 py-2.5 text-sm sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto] sm:items-center"
+                  >
+                    <span className="min-w-0 truncate font-medium">
+                      {row.fg.code && (
+                        <span className="mr-1.5 font-mono text-[10px] text-muted-foreground/70">
+                          {row.fg.code}
+                        </span>
+                      )}
+                      {row.fg.name}
+                    </span>
+                    <span className="hidden truncate text-xs text-muted-foreground sm:block">
+                      {row.jobName}
+                    </span>
+                    <span className="hidden truncate text-xs text-muted-foreground sm:block">
+                      {row.projectName}
+                    </span>
+                    <span className="text-right text-xs tabular-nums text-muted-foreground">
+                      {row.dueAt !== undefined ? formatDueLabel(row.dueAt) : "—"}
+                    </span>
+                    <span className="text-right">
+                      {row.dueAt === undefined ? (
+                        <span className="text-[10px] text-muted-foreground/60">No due date</span>
+                      ) : (
+                        <span
+                          className={cn(
+                            "rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                            daysLeftLabel(row.dueAt).overdue
+                              ? "bg-destructive/10 text-destructive"
+                              : "bg-primary/10 text-primary",
+                          )}
+                        >
+                          {daysLeftLabel(row.dueAt).text}
+                        </span>
+                      )}
+                    </span>
+                    <span className="col-span-2 flex flex-wrap items-center gap-1.5 sm:col-span-1 sm:hidden">
+                      <span className={tagChip}>{row.status}</span>
+                    </span>
+                  </li>
+                ))}
+            </ul>
+          </>
+        )}
+      </section>
+
+      {/* finished */}
+      <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+        <p className="border-b border-border/60 px-4 py-2.5 text-sm font-semibold">
+          Finished ({finished.length})
+        </p>
+        {finished.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+            No products have reached the Finish status yet.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border/70">
+            {[...finished]
+              .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0))
+              .map((row) => {
+                const took = tookDays(row);
+                return (
+                  <li
+                    key={row.fg._id}
+                    className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm"
+                  >
+                    <CheckCircle2 className="size-3.5 shrink-0 text-emerald-500/80" />
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {row.fg.code && (
+                        <span className="mr-1.5 font-mono text-[10px] text-muted-foreground/70">
+                          {row.fg.code}
+                        </span>
+                      )}
+                      {row.fg.name}
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{row.jobName}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{row.projectName}</span>
+                    {row.completedAt !== undefined && (
+                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                        {formatDueLabel(row.completedAt)}
+                      </span>
+                    )}
+                    {took !== null && (
+                      <span
+                        className="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-emerald-700 dark:text-emerald-400"
+                        title="Days from being flagged to finished"
+                      >
+                        {took}d
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
