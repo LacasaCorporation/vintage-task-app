@@ -1,7 +1,22 @@
 import { Loader2 } from "lucide-react";
-import { BarChart3, Columns3, Flag, List, Printer, Settings2 } from "lucide-react";
+import {
+  BarChart3,
+  Columns3,
+  Flag,
+  List,
+  ListTree,
+  Printer,
+  Settings2,
+} from "lucide-react";
 import ProductPrintSheet from "@/components/ProductPrintSheet";
 import ProjectStatusSettings from "@/components/ProjectStatusSettings";
+import {
+  JobFlatList,
+  ProjectHierarchy,
+  VIEWS_BY_FILTER,
+  resolveView,
+  type WorkspaceView,
+} from "@/components/FlaggedViews";
 import {
   FlaggedBoard,
   FlaggedDetail,
@@ -40,10 +55,8 @@ export default function ProjectsWorkspace({
   statusSettingsOpen,
   onToggleStatusSettings,
   onSaveStatuses,
-  boardMode,
-  onBoardModeChange,
-  reportMode,
-  onReportModeChange,
+  view,
+  onViewChange,
   onPrint,
   printing,
   sortMode,
@@ -67,10 +80,8 @@ export default function ProjectsWorkspace({
   statusSettingsOpen: boolean;
   onToggleStatusSettings: () => void;
   onSaveStatuses: () => void;
-  boardMode: boolean;
-  onBoardModeChange: (next: boolean) => void;
-  reportMode: boolean;
-  onReportModeChange: (next: boolean) => void;
+  view: WorkspaceView;
+  onViewChange: (next: WorkspaceView) => void;
   onPrint: () => void;
   printing: boolean;
   sortMode: SortMode;
@@ -80,6 +91,9 @@ export default function ProjectsWorkspace({
   onToggleFg: (fg: FgDoc) => void;
   onToggleJob: (job: JobDoc) => void;
 }) {
+  // The chosen view is only meaningful for the level it belongs to, so a view
+  // carried over from another filter falls back to that filter's default.
+  const activeView = resolveView(filter, view);
   return (
     <div className="grid items-start lg:grid-cols-[1fr_auto]">
       <section className="mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm">
@@ -155,59 +169,42 @@ export default function ProjectsWorkspace({
             />
           )}
           <div className="flex items-center gap-1">
+            {VIEWS_BY_FILTER[filter]?.map((entry) => {
+              const Icon =
+                entry.icon === "tree"
+                  ? ListTree
+                  : entry.icon === "board"
+                    ? Columns3
+                    : entry.icon === "report"
+                      ? BarChart3
+                      : List;
+              return (
+                <button
+                  key={entry.view}
+                  type="button"
+                  aria-pressed={activeView === entry.view}
+                  onClick={() => onViewChange(entry.view)}
+                  className={cn(
+                    "grid size-7 place-items-center rounded-md border transition-colors",
+                    activeView === entry.view
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  title={entry.label}
+                >
+                  <Icon className="size-3.5" />
+                </button>
+              );
+            })}
             {filter === "products" && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onBoardModeChange(false)}
-                  aria-pressed={!boardMode && !reportMode}
-                  className={cn(
-                    "grid size-7 place-items-center rounded-md border transition-colors",
-                    !boardMode && !reportMode
-                      ? "border-primary/40 bg-primary/10 text-primary"
-                      : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                  title="List view"
-                >
-                  <List className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onBoardModeChange(true)}
-                  aria-pressed={boardMode}
-                  className={cn(
-                    "grid size-7 place-items-center rounded-md border transition-colors",
-                    boardMode
-                      ? "border-primary/40 bg-primary/10 text-primary"
-                      : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                  title="Board view"
-                >
-                  <Columns3 className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onReportModeChange(!reportMode)}
-                  aria-pressed={reportMode}
-                  className={cn(
-                    "grid size-7 place-items-center rounded-md border transition-colors",
-                    reportMode
-                      ? "border-primary/40 bg-primary/10 text-primary"
-                      : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                  )}
-                  title="Production report"
-                >
-                  <BarChart3 className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={onPrint}
-                  className="grid size-7 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  title="Print products"
-                >
-                  <Printer className="size-3.5" />
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={onPrint}
+                className="grid size-7 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Print products"
+              >
+                <Printer className="size-3.5" />
+              </button>
             )}
           </div>
         </div>
@@ -217,16 +214,32 @@ export default function ProjectsWorkspace({
             Loading projects…
           </div>
         ) : filter === "projects" ? (
-          <FlaggedProjectsList
-            projects={projects}
-            jobs={jobs ?? []}
-            fgs={fgs ?? []}
-            statusFilter={status}
-            projectStatuses={projectStatuses}
-            sortMode={sortMode}
-            selection={selection}
-            onSelect={onSelect}
-          />
+          activeView === "hierarchy" ? (
+            <ProjectHierarchy
+              projects={projects}
+              jobs={jobs ?? []}
+              fgs={fgs ?? []}
+              projectStatuses={projectStatuses}
+              statusFilter={status}
+              sortMode={sortMode}
+              selection={selection}
+              onSelect={onSelect}
+              busyKey={busyKey}
+              onToggleJob={onToggleJob}
+              onToggleFg={onToggleFg}
+            />
+          ) : (
+            <FlaggedProjectsList
+              projects={projects}
+              jobs={jobs ?? []}
+              fgs={fgs ?? []}
+              statusFilter={status}
+              projectStatuses={projectStatuses}
+              sortMode={sortMode}
+              selection={selection}
+              onSelect={onSelect}
+            />
+          )
         ) : items === null ? (
           <div className="px-6 py-14 text-center">
             <Flag className="mx-auto size-8 text-amber-500/40" />
@@ -236,13 +249,13 @@ export default function ProjectsWorkspace({
             </p>
           </div>
         ) : filter === "products" ? (
-          reportMode ? (
+          activeView === "report" ? (
             <ProductionReport
               data={items}
               allJobs={jobs ?? []}
               projectStatuses={projectStatuses}
             />
-          ) : boardMode ? (
+          ) : activeView === "board" ? (
             <div className="p-3">
               <FlaggedBoard
                 data={items}
@@ -266,7 +279,7 @@ export default function ProjectsWorkspace({
               onSelect={onSelect}
             />
           )
-        ) : (
+        ) : activeView === "hierarchy" ? (
           <FlaggedItemsList
             data={items}
             allJobs={jobs ?? []}
@@ -279,6 +292,20 @@ export default function ProjectsWorkspace({
             sortMode={sortMode}
             selection={selection}
             onSelect={onSelect}
+          />
+        ) : (
+          <JobFlatList
+            data={items}
+            allJobs={jobs ?? []}
+            allFgs={fgs ?? []}
+            projectStatuses={projectStatuses}
+            statusFilter={status}
+            sortMode={sortMode}
+            selection={selection}
+            onSelect={onSelect}
+            busyKey={busyKey}
+            onToggleJob={onToggleJob}
+            onToggleFg={onToggleFg}
           />
         )}
         {printing && items !== null && (

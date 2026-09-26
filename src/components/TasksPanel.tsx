@@ -17,6 +17,10 @@ import StepDetail from "@/components/StepDetail";
 import ProjectStatusSettings from "@/components/ProjectStatusSettings";
 import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
 import ProjectsWorkspace from "@/components/ProjectsWorkspace";
+import {
+  DEFAULT_VIEW_BY_FILTER,
+  type WorkspaceView,
+} from "@/components/FlaggedViews";
 import ProductPrintSheet from "@/components/ProductPrintSheet";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
@@ -174,8 +178,9 @@ export default function TasksPanel({
   const [flagFilter, setFlagFilter] = useState<FlagFilter>("projects");
   const [flagSelection, setFlagSelection] = useState<FlaggedSel>(null);
   const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
-  const [flagBoardMode, setFlagBoardMode] = useState(false);
-  const [flagReportMode, setFlagReportMode] = useState(false);
+  // Which presentation the current level filter is showing (list / hierarchy /
+  // board / report). Each filter offers its own set of these.
+  const [flagView, setFlagView] = useState<WorkspaceView>("list");
   // the print sheet is mounted on demand, then the browser print dialog opens
   const [printProducts, setPrintProducts] = useState(false);
   const [statusSettingsOpen, setStatusSettingsOpen] = useState(false);
@@ -184,8 +189,7 @@ export default function TasksPanel({
   // Projects should always open as a list when selected from the sidebar.
   useEffect(() => {
     if (activeView === "flagged") {
-      setFlagBoardMode(false);
-      setFlagReportMode(false);
+      setFlagView("list");
     }
   }, [activeView]);
 
@@ -586,10 +590,7 @@ export default function TasksPanel({
           filter={flagFilter}
           onFilterChange={(next) => {
             setFlagFilter(next);
-            if (next !== "products") {
-              setFlagBoardMode(false);
-              setFlagReportMode(false);
-            }
+            setFlagView(DEFAULT_VIEW_BY_FILTER[next] ?? "list");
           }}
           status={flagStatus}
           onStatusChange={setFlagStatus}
@@ -602,13 +603,8 @@ export default function TasksPanel({
             setStatusSettingsOpen((open) => !open);
           }}
           onSaveStatuses={() => void saveProjectStatuses()}
-          boardMode={flagBoardMode}
-          onBoardModeChange={(next) => {
-            setFlagBoardMode(next);
-            setFlagReportMode(false);
-          }}
-          reportMode={flagReportMode}
-          onReportModeChange={setFlagReportMode}
+          view={flagView}
+          onViewChange={setFlagView}
           onPrint={handlePrintProducts}
           printing={printProducts}
           sortMode={sortMode}
