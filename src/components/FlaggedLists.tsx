@@ -390,7 +390,6 @@ export function FlaggedItemsList({
                       }
                       className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
                     />
-                    <Package className="size-3 shrink-0 text-sky-500/70" />
                     <button
                       type="button"
                       onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
@@ -401,6 +400,7 @@ export function FlaggedItemsList({
                     >
                       {fg.name}
                     </button>
+                    <Package className="size-3 shrink-0 text-sky-500/70" />
                     {fg.code && (
                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                         {fg.code}
@@ -477,7 +477,6 @@ export function FlaggedItemsList({
                   }
                   className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
                 />
-                <Package className="size-3 shrink-0 text-sky-500/70" />
                 <button
                   type="button"
                   onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
@@ -488,6 +487,7 @@ export function FlaggedItemsList({
                 >
                   {fg.name}
                 </button>
+                <Package className="size-3 shrink-0 text-sky-500/70" />
                 {fg.code && (
                   <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                     {fg.code}
@@ -730,15 +730,6 @@ export function FlaggedProductsList({
             }
             className="size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3"
           />
-          <Flag
-            className={cn(
-              "size-3.5 shrink-0",
-              fg.isCompleted
-                ? "fill-emerald-400 text-emerald-500"
-                : "fill-amber-400 text-amber-500",
-            )}
-          />
-          <Package className="size-3.5 shrink-0 text-sky-500/80" />
           <button
             type="button"
             onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
@@ -749,6 +740,15 @@ export function FlaggedProductsList({
           >
             {fg.name}
           </button>
+          <Flag
+            className={cn(
+              "size-3.5 shrink-0",
+              fg.isCompleted
+                ? "fill-emerald-400 text-emerald-500"
+                : "fill-amber-400 text-amber-500",
+            )}
+          />
+          <Package className="size-3.5 shrink-0 text-sky-500/80" />
           {fg.code && (
             <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
               {fg.code}

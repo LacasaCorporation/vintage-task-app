@@ -400,7 +400,6 @@ function JobRow({
                 }
                 className={CHECK_CLS_SM}
               />
-              <Package className="size-3 shrink-0 text-sky-500/70" />
               <button
                 type="button"
                 onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
@@ -411,6 +410,7 @@ function JobRow({
               >
                 {fg.name}
               </button>
+              <Package className="size-3 shrink-0 text-sky-500/70" />
               {fg.code && (
                 <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                   {fg.code}
