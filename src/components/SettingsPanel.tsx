@@ -954,40 +954,15 @@ export default function SettingsPanel() {
   return (
     <div className="space-y-6" data-settings-tab={settingsTab}>
       {/* header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display flex items-center gap-2 text-3xl font-bold tracking-tight">
-            <SettingsIcon className="size-6 text-primary" />
-            Settings
-          </h1>
-          <p className="mt-1 text-muted-foreground">
-            Create users, assign roles, and control exactly what each person can
-            view, create, edit, and delete.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setOrgName(organisation?.name ?? "");
-              setOrgOpen(true);
-            }}
-          >
-            <Building2 className="size-4" />
-            {organisation?.createdAt ? "Organisation" : "Create organisation"}
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => {
-              resetCreateDialog();
-              setCreateOpen(true);
-            }}
-          >
-            <UserPlus className="size-4" />
-            Create user
-          </Button>
-        </div>
+      <div>
+        <h1 className="font-display flex items-center gap-2 text-3xl font-bold tracking-tight">
+          <SettingsIcon className="size-6 text-primary" />
+          Settings
+        </h1>
+        <p className="mt-1 text-muted-foreground">
+          Create users, assign roles, and control exactly what each person can
+          view, create, edit, and delete.
+        </p>
       </div>
 
       {/* my role summary */}
@@ -1048,10 +1023,22 @@ export default function SettingsPanel() {
           <Building2 className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">Organisation</h2>
           {organisation?.code && (
-            <Badge variant="secondary" className="ml-auto rounded-full font-mono">
+            <Badge variant="secondary" className="rounded-full font-mono">
               {organisation.code}
             </Badge>
           )}
+          <Button
+            className="ml-auto"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setOrgName(organisation?.name ?? "");
+              setOrgOpen(true);
+            }}
+          >
+            <Building2 className="size-4" />
+            {organisation?.createdAt ? "Organisation" : "Create organisation"}
+          </Button>
         </header>
         <div className="grid gap-4 px-5 py-4 sm:grid-cols-2">
           <div className="min-w-0">
@@ -1083,8 +1070,8 @@ export default function SettingsPanel() {
             ) : (
               <p className="mt-1 text-xs text-muted-foreground">
                 You signed in with an email code, so you don't have a username
-                yet. Create one for yourself with "Create user" if you'd rather
-                sign in with a password.
+                yet. Create one for yourself from the "Users &amp; roles" tab if
+                you'd rather sign in with a password.
               </p>
             )}
           </div>
@@ -1114,14 +1101,25 @@ export default function SettingsPanel() {
         id="settings-people"
         className="scroll-mt-6 overflow-hidden rounded-2xl border bg-card shadow-sm"
       >
-        <header className="flex items-center gap-2 border-b px-5 py-3.5">
+        <header className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
           <Users className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">Users &amp; roles</h2>
           {members && (
-            <Badge variant="secondary" className="ml-auto rounded-full">
+            <Badge variant="secondary" className="rounded-full">
               {members.length}
             </Badge>
           )}
+          <Button
+            className="ml-auto"
+            size="sm"
+            onClick={() => {
+              resetCreateDialog();
+              setCreateOpen(true);
+            }}
+          >
+            <UserPlus className="size-4" />
+            Create user
+          </Button>
         </header>
 
         {members === undefined ? (
