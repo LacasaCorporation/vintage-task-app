@@ -2,7 +2,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Priority } from "@/lib/task-utils";
-import { formatDueLabel, toLocalInput } from "@/lib/task-utils";
+import { daysLeftLabel, formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import {
   Briefcase,
   CalendarDays,
@@ -100,22 +100,7 @@ export function projectDocStatus(
   return PROJECT_STATUS_START;
 }
 
-/** Days left until a due date: "Due in 3d" / "Due today" / "2d overdue". */
-export function daysLeftLabel(ts: number): { text: string; overdue: boolean } {
-  const now = new Date();
-  const startOfToday = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-  ).getTime();
-  const d = new Date(ts);
-  const startOfDue = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((startOfDue - startOfToday) / 86_400_000);
-  if (days === 0) return { text: "Due today", overdue: false };
-  if (days === 1) return { text: "Due tomorrow", overdue: false };
-  if (days > 1) return { text: `Due in ${days}d`, overdue: false };
-  return { text: `${Math.abs(days)}d overdue`, overdue: true };
-}
+export { daysLeftLabel };
 
 /**
  * Due date + how many days are left to finish, shown as two chips on every

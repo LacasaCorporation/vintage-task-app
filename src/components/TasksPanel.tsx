@@ -68,6 +68,7 @@ import {
   FlaggedProductsList,
   FlaggedProjectsList,
   ProductionReport,
+  daysLeftLabel,
   type FlagFilter,
   type FlagStatusFilter,
   type FlaggedData,
@@ -914,6 +915,20 @@ export default function TasksPanel({
                                 >
                                   <CalendarDays className="size-2.5" />
                                   {formatDueLabel(task.dueAt)}
+                                </span>
+                              )}
+                              {task.dueAt !== undefined && !task.isCompleted && (
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                                    daysLeftLabel(task.dueAt).overdue
+                                      ? "bg-destructive/10 text-destructive"
+                                      : "bg-primary/10 text-primary",
+                                  )}
+                                  title="Time left to complete this task"
+                                >
+                                  <History className="size-2.5" />
+                                  {daysLeftLabel(task.dueAt).text}
                                 </span>
                               )}
                               {task.remindAt !== undefined && (

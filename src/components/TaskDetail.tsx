@@ -8,6 +8,7 @@ import {
   PRIORITIES,
   RECURRENCE_LABEL,
   REMINDER_OFFSETS,
+  daysLeftLabel,
   defaultDueLocal,
   formatDueLabel,
   isOverdue,
@@ -343,6 +344,14 @@ export default function TaskDetail({
                 >
                   {isOverdue(task) ? "Overdue · " : ""}
                   {formatDueLabel(task.dueAt)}
+                  {!task.isCompleted && (
+                    <>
+                      {" · "}
+                      <span className="font-medium">
+                        {daysLeftLabel(task.dueAt).text}
+                      </span>
+                    </>
+                  )}
                 </p>
               )}
             </Row>
