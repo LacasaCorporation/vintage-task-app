@@ -19,6 +19,7 @@ import {
   Loader2,
   Package,
   Play,
+  Square,
   Star,
   Tag,
   X,
@@ -415,7 +416,11 @@ export function FlaggedItemsList({
                         <span className={tagChip}>{job.name}</span>
                       </>
                     )}
-                    <span className={tagChip}>{fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}</span>
+                    {fg.productionStartedAt === undefined && (
+                      <span className={tagChip}>
+                        {fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+                      </span>
+                    )}
                     <ProductionButton fg={fg} />
                   </li>
                 ))}
@@ -709,7 +714,7 @@ export function FlaggedProductsList({
         <li
           key={fg._id}
           className={cn(
-            "flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm transition-colors",
+            "group/row flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm transition-colors",
             fg.isCompleted && "opacity-60",
             selection?.kind === "fg" && selection.id === fg._id && "bg-primary/[0.04]",
           )}
@@ -756,7 +761,14 @@ export function FlaggedProductsList({
             empty
           />
           {showTags && parentJob && <span className={tagChip}>{data.projectNameOf(parentJob)}</span>}
-          <span className={tagChip}>{fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}</span>
+          {/* one status per row: while production is running, ProductionButton
+              already says "In production", so the plain status chip would
+              repeat it */}
+          {fg.productionStartedAt === undefined && (
+            <span className={tagChip}>
+              {fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+            </span>
+          )}
           <ProductionButton fg={fg} />
         </li>
       ))}
@@ -818,14 +830,17 @@ export function ProductionButton({ fg }: { fg: FgDoc }) {
         >
           In production
         </span>
+        {/* an action, not a status — it stays out of the way of the status chip
+            and only becomes obvious on hover or keyboard focus */}
         <button
           type="button"
           disabled={busy}
           onClick={() => setConfirming(true)}
           title="Stop production"
-          className="rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          aria-label="Stop production"
+          className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover/row:opacity-100 disabled:opacity-50"
         >
-          Stop
+          <Square className="size-2.5" />
         </button>
       </span>
     );

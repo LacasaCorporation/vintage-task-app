@@ -420,7 +420,13 @@ function JobRow({
                 dueAt={fg.dueAt ?? job.dueAt}
                 inherited={fg.dueAt === undefined && job.dueAt !== undefined}
               />
-              <span className={tagChip}>{fgProjectStatus(fg, projectStatuses)}</span>
+              {/* one status per row: while production is running the button
+                  already shows "In production" */}
+              {fg.productionStartedAt === undefined && (
+                <span className={tagChip}>
+                  {fgProjectStatus(fg, projectStatuses)}
+                </span>
+              )}
               <ProductionButton fg={fg} />
             </li>
           ))}
