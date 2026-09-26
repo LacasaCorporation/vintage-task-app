@@ -90,6 +90,33 @@ const settings = defineTable({
   members: v.array(teamMemberValidator), // every user + role + restrictions
 }).index("by_owner", ["ownerId"]);
 
+// What one person may do with one product — the product equivalent of
+// taskGrants, so a flagged product follows the same owner-first rule.
+const fgGrants = defineTable({
+  ownerId: v.id("users"), // firm scope — settings.ownerId
+  fgId: v.id("finishedGoods"),
+  userId: v.id("users"),
+  canEdit: v.boolean(),
+  canDelete: v.boolean(),
+  canComplete: v.boolean(),
+  canChangeOptions: v.boolean(),
+  grantedBy: v.id("users"),
+  grantedAt: v.number(),
+})
+  .index("by_owner", ["ownerId"])
+  .index("by_fg", ["fgId"]);
+
+// Steps (subtasks) of a product, mirroring taskSteps.
+const fgSteps = defineTable({
+  ownerId: v.id("users"),
+  fgId: v.id("finishedGoods"),
+  text: v.string(),
+  isCompleted: v.optional(v.boolean()),
+  order: v.optional(v.number()),
+})
+  .index("by_owner", ["ownerId"])
+  .index("by_fg", ["fgId"]);
+
 // Reusable groups of people inside a firm, e.g. "Site crew" or "Accounts".
 // A task can be handed to a whole group in one action, and a group can pull in
 // people from any branch of the hierarchy.
@@ -419,6 +446,17 @@ const schema = defineSchema(
       dueAt: v.optional(v.number()),
       priority: v.optional(taskPriorityValidator),
       completedAt: v.optional(v.number()),
+      /** Who created it, i.e. the product's owner — allowed to reassign it. */
+      assigneeId: v.optional(v.id("users")),
+      /** When assigneeId was recorded; unset means the author is unknown. */
+      assignedAt: v.optional(v.number()),
+      /** Everyone the product is assigned to, plus whole user groups. */
+      assigneeIds: v.optional(v.array(v.id("users"))),
+      groupIds: v.optional(v.array(v.id("userGroups"))),
+      /** Same extras a normal task has: tags, a reminder, a star, steps. */
+      tags: v.optional(v.array(v.string())),
+      remindAt: v.optional(v.number()),
+      starred: v.optional(v.boolean()),
       // production run: set when the product is started, cleared when stopped.
       // The consumed list is what lets a stop put the stock back.
       productionStartedAt: v.optional(v.number()),
@@ -553,6 +591,8 @@ const schema = defineSchema(
     settings,
     userGroups,
     taskGrants,
+    fgGrants,
+    fgSteps,
     credentials,
     customRoles,
     pendingInvites,

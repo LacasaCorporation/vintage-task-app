@@ -19,7 +19,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { TaskDoc } from "@/lib/task-utils";
 import { assigneesOfTask, downLineOf } from "@/lib/task-people";
 import { messageFrom } from "@/lib/errors";
 import { toast } from "@/lib/toast";
@@ -52,37 +51,76 @@ const NO_GRANT: Grant = {
 };
 
 /**
- * The "Assign to…" popup for one task.
+ * What the popup acts on. A task and a flagged product behave the same way, so
+ * they share this one popup — only the functions behind it differ.
+ */
+export type AssignTarget = {
+  kind: "task" | "product";
+  id: Id<"tasks"> | Id<"finishedGoods">;
+  /** Who created it — the owner who may reassign and hand out permissions. */
+  assigneeId?: Id<"users">;
+  assignedAt?: number;
+  assigneeIds?: Id<"users">[];
+  groupIds?: Id<"userGroups">[];
+};
+
+/** Build a target from either kind of document. The kind is given by the
+ *  caller, because a Convex id does not say which table it came from. */
+export function targetOf(
+  doc: {
+    _id: Id<"tasks"> | Id<"finishedGoods">;
+    assigneeId?: Id<"users">;
+    assignedAt?: number;
+    assigneeIds?: Id<"users">[];
+    groupIds?: Id<"userGroups">[];
+  },
+  kind: AssignTarget["kind"],
+): AssignTarget {
+  return {
+    kind,
+    id: doc._id,
+    assigneeId: doc.assigneeId,
+    assignedAt: doc.assignedAt,
+    assigneeIds: doc.assigneeIds,
+    groupIds: doc.groupIds,
+  };
+}
+
+/**
+ * The "Assign to…" popup for one task or product.
  *
  * Two ways to share the work — tick people from your own down line, or tick a
- * whole group made in Settings — and, for everyone the task is with, the four
- * permissions the task's owner may hand out. The owner keeps all four until
- * they give some away, so assigning a task never quietly passes on the power
- * to delete or re-date it.
+ * whole group made in Settings — and, for everyone it is with, the four
+ * permissions its owner may hand out. The owner keeps all four until they give
+ * some away, so assigning work never quietly passes on the power to delete or
+ * re-date it.
  */
 export default function AssignDialog({
-  task,
+  target,
   open,
   onOpenChange,
   canEdit = true,
+  title = "Assign this task",
 }: {
-  task: TaskDoc;
+  target: AssignTarget;
   open: boolean;
   onOpenChange: (next: boolean) => void;
   canEdit?: boolean;
+  title?: string;
 }) {
   // The body keeps the ticked people, groups and permissions while the popup
   // is open, and forgets them the moment it closes. It lives inside
-  // DialogContent (which Radix unmounts on close) and is keyed by the task, so
+  // DialogContent (which Radix unmounts on close) and is keyed by the item, so
   // a half-finished pick on one task can never show up already ticked on the
   // next one.
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <AssignBody
-          key={task._id}
-          task={task}
+          key={`${target.kind}:${target.id}`}
+          target={target}
           canEdit={canEdit}
+          title={title}
           onClose={() => onOpenChange(false)}
         />
       </DialogContent>
@@ -91,19 +129,35 @@ export default function AssignDialog({
 }
 
 function AssignBody({
-  task,
+  target,
   canEdit,
+  title,
   onClose,
 }: {
-  task: TaskDoc;
+  target: AssignTarget;
   canEdit: boolean;
+  title: string;
   onClose: () => void;
 }) {
+  const isProduct = target.kind === "product";
+  const taskId = isProduct ? null : (target.id as Id<"tasks">);
+  const productId = isProduct ? (target.id as Id<"finishedGoods">) : null;
   const peopleData = useQuery(api.tasks.people);
   const groupsData = useQuery(api.userGroups.list);
-  const grantsData = useQuery(api.tasks.grants, { taskId: task._id });
+  // both kinds are queried, but the one that does not apply is skipped
+  const taskGrants = useQuery(
+    api.tasks.grants,
+    taskId === null ? "skip" : { taskId },
+  );
+  const productGrants = useQuery(
+    api.productTasks.grants,
+    productId === null ? "skip" : { id: productId },
+  );
+  const grantsData = isProduct ? productGrants : taskGrants;
   const assignTask = useMutation(api.tasks.assign);
-  const setGrant = useMutation(api.tasks.setGrant);
+  const assignProduct = useMutation(api.productTasks.assign);
+  const setTaskGrant = useMutation(api.tasks.setGrant);
+  const setProductGrant = useMutation(api.productTasks.setGrant);
   const [tab, setTab] = useState<"people" | "groups" | "rights">("people");
   const [busy, setBusy] = useState(false);
 
@@ -119,20 +173,20 @@ function AssignBody({
   );
 
   const assignees = useMemo(
-    () => assigneesOfTask(task, peopleById),
-    [task, peopleById],
+    () => assigneesOfTask(target, peopleById),
+    [target, peopleById],
   );
   const holderIds = useMemo(
     () => [
       ...new Set(
         assignees.concat(
-          (task.groupIds ?? []).flatMap(
+          (target.groupIds ?? []).flatMap(
             (id) => groupsById.get(id)?.memberIds ?? [],
           ),
         ),
       ),
     ],
-    [assignees, task.groupIds, groupsById],
+    [assignees, target.groupIds, groupsById],
   );
 
   const myTeam = useMemo(
@@ -150,7 +204,7 @@ function AssignBody({
     null,
   );
   const selection = picked ?? assignees;
-  const groupSelection = pickedGroups ?? task.groupIds ?? [];
+  const groupSelection = pickedGroups ?? target.groupIds ?? [];
   const selectionSet = useMemo(() => new Set(selection), [selection]);
   const groupSet = useMemo(() => new Set(groupSelection), [groupSelection]);
 
@@ -194,7 +248,19 @@ function AssignBody({
   const save = async (nextUsers: Id<"users">[], nextGroups: Id<"userGroups">[]) => {
     setBusy(true);
     try {
-      await assignTask({ id: task._id, userIds: nextUsers, groupIds: nextGroups });
+      if (isProduct) {
+        await assignProduct({
+          id: productId as Id<"finishedGoods">,
+          userIds: nextUsers,
+          groupIds: nextGroups,
+        });
+      } else {
+        await assignTask({
+          id: taskId as Id<"tasks">,
+          userIds: nextUsers,
+          groupIds: nextGroups,
+        });
+      }
       setPicked(null);
       setPickedGroups(null);
       const who = [
@@ -203,12 +269,19 @@ function AssignBody({
       ];
       toast.success(
         who.length === 0
-          ? "Task is no longer assigned to anyone."
+          ? isProduct
+            ? "This product is no longer assigned to anyone."
+            : "Task is no longer assigned to anyone."
           : `Assigned to ${who.join(", ")}.`,
       );
       onClose();
     } catch (error) {
-      toast.error(messageFrom(error, "Couldn't assign that task."));
+      toast.error(
+        messageFrom(
+          error,
+          isProduct ? "Couldn't assign that product." : "Couldn't assign that task.",
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -217,7 +290,15 @@ function AssignBody({
   const saveGrant = async (userId: Id<"users">, next: Grant) => {
     setBusy(true);
     try {
-      await setGrant({ taskId: task._id, userId, ...next });
+      if (isProduct) {
+        await setProductGrant({
+          id: productId as Id<"finishedGoods">,
+          userId,
+          ...next,
+        });
+      } else {
+        await setTaskGrant({ taskId: taskId as Id<"tasks">, userId, ...next });
+      }
     } catch (error) {
       toast.error(messageFrom(error, "Couldn't change their permission."));
     } finally {
@@ -236,11 +317,11 @@ function AssignBody({
   return (
     <>
       <DialogHeader>
-          <DialogTitle>Assign this task</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
             {isOwner
-              ? "You created this task, so you can edit, complete, change and delete it. Tick who else may — and what they may do."
-              : "Hand this task to people or to a group. Only the person who created it can change what they may do."}
+              ? `You created this ${isProduct ? "product" : "task"}, so you can edit, complete, change and delete it. Tick who else may — and what they may do.`
+              : `Hand this ${isProduct ? "product" : "task"} to people or to a group. Only the person who created it can change what they may do.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -392,11 +473,12 @@ function AssignBody({
           <div className="space-y-2">
             {!isOwner ? (
               <p className="py-6 text-sm text-muted-foreground">
-                Only the person who created this task can hand out permissions.
+                Only the person who created this{" "}
+                {isProduct ? "product" : "task"} can hand out permissions.
               </p>
             ) : holderIds.length === 0 ? (
               <p className="py-6 text-sm text-muted-foreground">
-                Assign the task to someone first, then choose what they may do.
+                Assign it to someone first, then choose what they may do.
               </p>
             ) : (
               <ul className="space-y-2">

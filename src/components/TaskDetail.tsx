@@ -36,7 +36,7 @@ import {
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
-import AssignDialog from "@/components/AssignDialog";
+import AssignDialog, { targetOf } from "@/components/AssignDialog";
 import { assigneeLabel, assigneesOfTask } from "@/lib/task-people";
 
 type Priority = "high" | "medium" | "low";
@@ -414,7 +414,8 @@ export default function TaskDetail({
           </div>
 
           <AssignDialog
-            task={task}
+            target={targetOf(task, "task")}
+            title="Assign this task"
             open={assignOpen}
             onOpenChange={setAssignOpen}
             canEdit={canEdit}

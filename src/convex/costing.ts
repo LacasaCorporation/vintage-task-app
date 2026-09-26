@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { scopeUserId } from "./org";
 import { syncProductionConsumption } from "./production";
 import { getSettings } from "./settings";
@@ -739,6 +740,9 @@ export const addFinishedGood = mutation({
   handler: async (ctx, opts) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    // the acting person, which is who the product belongs to (the id above is
+    // the firm the row is scoped by, not the person)
+    const creator = await getAuthUserId(ctx);
     const cleanProject = opts.projectName?.trim() ?? "";
     const cleanName = opts.name.trim();
     if (cleanName.length === 0) throw new Error("Give the product a name.");
@@ -776,6 +780,10 @@ export const addFinishedGood = mutation({
     }
     return await ctx.db.insert("finishedGoods", {
       ownerId: userId,
+      // the person who added the product owns it, and may hand out permissions
+      ...(creator !== null
+        ? { assigneeId: creator, assignedAt: Date.now(), assigneeIds: [creator] }
+        : {}),
       projectName,
       projectCode,
       jobId: jobList[0],
@@ -814,6 +822,10 @@ export const updateFinishedGood = mutation({
     priority: v.optional(
       v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
     ),
+    // the same extras a normal task carries
+    tags: v.optional(v.array(v.string())),
+    remindAt: v.optional(v.number()),
+    starred: v.optional(v.boolean()),
   },
   handler: async (ctx, { id, ...patch }) => {
     const userId = await scopeUserId(ctx);

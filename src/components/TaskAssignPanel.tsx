@@ -3,7 +3,7 @@ import { useQuery } from "convex/react";
 import { ChevronDown, Loader2, UserRound, Users } from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import AssignDialog from "@/components/AssignDialog";
+import AssignDialog, { targetOf } from "@/components/AssignDialog";
 import type { TaskDoc } from "@/lib/task-utils";
 import { assigneesOfTask } from "@/lib/task-people";
 import { cn } from "@/lib/utils";
@@ -102,7 +102,8 @@ export default function TaskAssignPanel({
 
       {target !== null && (
         <AssignDialog
-          task={target}
+          target={targetOf(target, "task")}
+          title="Assign this task"
           open={dialogOpen}
           onOpenChange={setDialogOpen}
           canEdit={canEdit}
