@@ -728,6 +728,10 @@ export default function Dashboard() {
 
   // ── Shell chrome ────────────────────────────────────────────────────
   const firstName = user?.name?.trim().split(" ")[0] ?? "";
+  // The provisioned sign-in name, for people who have one (email-code
+  // sign-ins and the very first login have none).
+  const organisation = useQuery(api.accounts.getOrganisation);
+  const myUsername = organisation?.myUsername ?? "";
 
   const handleSignOut = async () => {
     await signOut();
@@ -846,8 +850,17 @@ export default function Dashboard() {
 
         {/* user + sign out */}
         <div className="mt-auto border-t border-border/60 p-4">
-          {firstName && (
-            <p className="mb-3 truncate px-1 text-sm font-medium">{firstName}</p>
+          {(firstName || myUsername) && (
+            <div className="mb-3 min-w-0 px-1">
+              {firstName && (
+                <p className="truncate text-sm font-medium">{firstName}</p>
+              )}
+              {myUsername && (
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  @{myUsername}
+                </p>
+              )}
+            </div>
           )}
           <Button
             variant="outline"
@@ -916,9 +929,18 @@ export default function Dashboard() {
               })}
             </div>
             <div className="flex items-center gap-3">
-              {firstName && (
-                <span className="hidden text-sm text-muted-foreground sm:block">
-                  {firstName}
+              {(firstName || myUsername) && (
+                <span className="hidden min-w-0 text-right sm:block">
+                  {firstName && (
+                    <span className="block truncate text-sm text-muted-foreground">
+                      {firstName}
+                    </span>
+                  )}
+                  {myUsername && (
+                    <span className="block truncate font-mono text-xs text-muted-foreground/80">
+                      @{myUsername}
+                    </span>
+                  )}
                 </span>
               )}
               <Button
