@@ -28,12 +28,16 @@ export default function StatusSelect({
   size?: "sm" | "md";
 }) {
   return (
-    <span className="relative inline-flex shrink-0 items-center">
+    <span
+      className="relative inline-flex shrink-0 items-center"
+      // a disabled <select> swallows its own events, so the reason it is
+      // locked has to be on the wrapper to be hoverable
+      title={title ?? "Change the status"}
+    >
       <select
         value={value}
         disabled={disabled || statuses.length === 0}
         onChange={(e) => onChange(e.target.value)}
-        title={title ?? "Change the status"}
         aria-label={allLabel ?? "Status"}
         className={cn(
           "cursor-pointer appearance-none truncate rounded-full border bg-card pr-6 pl-2.5 outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",

@@ -423,24 +423,28 @@ function JobRow({
                 dueAt={fg.dueAt ?? job.dueAt}
                 inherited={fg.dueAt === undefined && job.dueAt !== undefined}
               />
-              {/* one status per row: while production is running the button
-                  already shows "In production" */}
-              {fg.productionStartedAt === undefined && (
-                <StatusSelect
-                  value={fgProjectStatus(fg, projectStatuses)}
-                  statuses={projectStatuses}
-                  onChange={(status) =>
-                    void setFgStatusM({ id: fg._id, status }).catch((error) =>
-                      toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : "Couldn't update the product status.",
-                      ),
-                    )
-                  }
-                />
-              )}
-              <ProductionButton fg={fg} />
+              {/* the status is readable here, but only editable once the
+                  product is actually in production */}
+              <StatusSelect
+                value={fgProjectStatus(fg, projectStatuses)}
+                statuses={projectStatuses}
+                disabled={fg.productionStartedAt === undefined}
+                title={
+                  fg.productionStartedAt === undefined
+                    ? "Start production to change the status"
+                    : "Change the status"
+                }
+                onChange={(status) =>
+                  void setFgStatusM({ id: fg._id, status }).catch((error) =>
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : "Couldn't update the product status.",
+                    ),
+                  )
+                }
+              />
+              <ProductionButton fg={fg} hideStatusPill />
             </li>
           ))}
         </ul>

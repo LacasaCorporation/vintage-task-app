@@ -420,22 +420,26 @@ export function FlaggedItemsList({
                         <span className={tagChip}>{job.name}</span>
                       </>
                     )}
-                    {fg.productionStartedAt === undefined && (
-                      <StatusSelect
-                        value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
-                        statuses={projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]}
-                        onChange={(status) =>
-                          void setFgProjectStatusM({ id: fg._id, status }).catch((error) =>
-                            toast.error(
-                              error instanceof Error
-                                ? error.message
-                                : "Couldn't update the product status.",
-                            ),
-                          )
-                        }
-                      />
-                    )}
-                    <ProductionButton fg={fg} />
+                    <StatusSelect
+                      value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+                      statuses={projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]}
+                      disabled={fg.productionStartedAt === undefined}
+                      title={
+                        fg.productionStartedAt === undefined
+                          ? "Start production to change the status"
+                          : "Change the status"
+                      }
+                      onChange={(status) =>
+                        void setFgProjectStatusM({ id: fg._id, status }).catch((error) =>
+                          toast.error(
+                            error instanceof Error
+                              ? error.message
+                              : "Couldn't update the product status.",
+                          ),
+                        )
+                      }
+                    />
+                    <ProductionButton fg={fg} hideStatusPill />
                   </li>
                 ))}
               </ul>
@@ -789,22 +793,26 @@ export function FlaggedProductsList({
           {/* one status per row: while production is running, ProductionButton
               already says "In production", so the plain status chip would
               repeat it */}
-          {fg.productionStartedAt === undefined && (
-            <StatusSelect
-              value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
-              statuses={projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]}
-              onChange={(status) =>
-                void setFgProjectStatusM({ id: fg._id, status }).catch((error) =>
-                  toast.error(
-                    error instanceof Error
-                      ? error.message
-                      : "Couldn't update the product status.",
-                  ),
-                )
-              }
-            />
-          )}
-          <ProductionButton fg={fg} />
+          <StatusSelect
+            value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+            statuses={projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]}
+            disabled={fg.productionStartedAt === undefined}
+            title={
+              fg.productionStartedAt === undefined
+                ? "Start production to change the status"
+                : "Change the status"
+            }
+            onChange={(status) =>
+              void setFgProjectStatusM({ id: fg._id, status }).catch((error) =>
+                toast.error(
+                  error instanceof Error
+                    ? error.message
+                    : "Couldn't update the product status.",
+                ),
+              )
+            }
+          />
+          <ProductionButton fg={fg} hideStatusPill />
         </li>
       ))}
     </ul>
@@ -817,7 +825,14 @@ export function FlaggedProductsList({
  * Stopping or editing a running production always asks for confirmation
  * first, because it puts consumed stock back or changes what was used.
  */
-export function ProductionButton({ fg }: { fg: FgDoc }) {
+export function ProductionButton({
+  fg,
+  hideStatusPill = false,
+}: {
+  fg: FgDoc;
+  /** The row shows the status as a dropdown instead, so skip the green pill. */
+  hideStatusPill?: boolean;
+}) {
   const startProduction = useMutation(api.production.start);
   const stopProduction = useMutation(api.production.stop);
   // the running chip names the product's real status ("In production" by
@@ -866,12 +881,19 @@ export function ProductionButton({ fg }: { fg: FgDoc }) {
   if (!confirming) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1">
-        <span
-          className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
-          title={`${runningLabel} — running since ${new Date(fg.productionStartedAt as number).toLocaleString()}`}
-        >
-          {runningLabel}
-        </span>
+        {hideStatusPill ? (
+          <span
+            className="size-2 rounded-full bg-emerald-500"
+            title={`Production running since ${new Date(fg.productionStartedAt as number).toLocaleString()}`}
+          />
+        ) : (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+            title={`${runningLabel} — running since ${new Date(fg.productionStartedAt as number).toLocaleString()}`}
+          >
+            {runningLabel}
+          </span>
+        )}
         {/* an action, not a status — it stays out of the way of the status chip
             and only becomes obvious on hover or keyboard focus */}
         <button
