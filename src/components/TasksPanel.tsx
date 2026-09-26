@@ -944,7 +944,7 @@ export default function TasksPanel({
                                         (step.tags ?? []).length > 0 ||
                                         (step.description ?? "").trim() !== "" ||
                                         parseAttachments(step.attachments).length > 0) && (
-                                        <span className="flex shrink-0 flex-wrap items-center gap-1">
+                                        <span className="order-2 ml-1.5 flex shrink-0 flex-wrap items-center gap-1">
                                           {step.remindAt !== undefined && (
                                             <span
                                               title={`Reminds ${formatDueLabel(step.remindAt)}`}
@@ -1033,7 +1033,7 @@ export default function TasksPanel({
                                         }
                                         title="Open subtask details"
                                         className={cn(
-                                          "min-w-0 flex-1 cursor-pointer truncate text-left text-xs hover:underline",
+                                          "order-1 min-w-0 max-w-[55%] cursor-pointer truncate text-left text-xs hover:underline",
                                           step.isCompleted
                                             ? "text-muted-foreground line-through"
                                             : "text-foreground",
@@ -1045,7 +1045,7 @@ export default function TasksPanel({
                                       {step.dueAt !== undefined && (
                                         <span
                                           className={cn(
-                                            "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                                            "order-3 ml-auto inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
                                             !step.isCompleted &&
                                               daysLeftLabel(step.dueAt).overdue
                                               ? "bg-destructive/10 text-destructive"
@@ -1060,7 +1060,7 @@ export default function TasksPanel({
                                       {!step.isCompleted && step.dueAt !== undefined && (
                                         <span
                                           className={cn(
-                                            "hidden shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums sm:inline-flex",
+                                            "order-4 hidden shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums sm:inline-flex",
                                             daysLeftLabel(step.dueAt).overdue
                                               ? "bg-destructive/10 text-destructive"
                                               : "bg-muted text-muted-foreground",
