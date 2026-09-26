@@ -3,7 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { activeFirmSettings, ownedFirmSettings } from "./org";
+import { activeFirmSettings, firmTeam, ownedFirmSettings } from "./org";
 import { permissionsValidator } from "./schema";
 import type {
   ActionKey,
@@ -985,6 +985,9 @@ export const getMyTeam = query({
       manager: manager && manager.role !== "super" ? manager : null,
       isSuper: settingsDoc.ownerId === userId,
       directReports: await hydrate(direct),
+      // everyone under this person at any depth — the exact set the Mine / All
+      // filter treats as "mine", so an empty All is explainable
+      teamSize: (await firmTeam(ctx, userId)).length - 1,
     };
   },
 });

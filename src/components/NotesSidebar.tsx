@@ -1,5 +1,7 @@
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import type { NoteColor } from "@/convex/schema";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
 import {
   ChevronDown,
@@ -74,6 +76,10 @@ export default function NotesSidebar({
 }) {
   // Rows are open by default; this set tracks explicitly collapsed ones.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  // how many people report to the signed-in user — the All filter's reach, so
+  // an empty All is explainable instead of mysterious
+  const myTeam = useQuery(api.settings.getMyTeam);
+  const teamSize = myTeam?.teamSize ?? 0;
   const toggle = (key: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -133,6 +139,16 @@ export default function NotesSidebar({
           </button>
         ))}
       </div>
+
+      {taskScope === "all" && (
+        <p className="px-2 pb-1.5 text-[10px] leading-tight text-muted-foreground">
+          {teamSize > 0
+            ? `Also showing notes from ${teamSize} ${
+                teamSize === 1 ? "person" : "people"
+              } who report${teamSize === 1 ? "s" : ""} to you.`
+            : "Nobody reports to you yet — set a manager in Settings → Team hierarchy to see their notes here."}
+        </p>
+      )}
 
       {loading && (
         <div className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground">
