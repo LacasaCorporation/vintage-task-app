@@ -659,6 +659,28 @@ export const updateProject = mutation({
   },
 });
 
+/**
+ * Move a project between the custom Projects statuses (the board/board-style
+ * columns of the Projects workspace). The legacy `status` union is kept in
+ * sync so the older surfaces keep working.
+ */
+export const setProjectProjectStatus = mutation({
+  args: { id: v.id("projects"), status: v.string() },
+  handler: async (ctx, { id, status }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const project = await ctx.db.get(id);
+    if (project === null || project.ownerId !== userId)
+      throw new Error("That project no longer exists.");
+    const clean = status.trim().replace(/\s+/g, " ");
+    if (!clean) throw new Error("Choose a status.");
+    await ctx.db.patch(id, {
+      projectStatus: clean,
+      status: clean === PROJECT_STATUS_FINISH ? "completed" : clean === PROJECT_STATUS_START ? "planning" : "in_progress",
+    });
+  },
+});
+
 /** Delete a project (its FG products are detached, not deleted). */
 export const removeProject = mutation({
   args: { id: v.id("projects") },

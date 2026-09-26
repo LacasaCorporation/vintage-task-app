@@ -348,6 +348,8 @@ const schema = defineSchema(
       ),
       priority: v.optional(taskPriorityValidator),
       budget: v.optional(v.number()), // planned budget
+      /** Ordered custom Projects status; Start and Finish are fixed. */
+      projectStatus: v.optional(v.string()),
     }).index("by_owner", ["ownerId"]),
 
     // one line inside a costing sheet
