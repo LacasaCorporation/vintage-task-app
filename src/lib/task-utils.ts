@@ -113,14 +113,19 @@ export function formatCreatedLabel(ts: number): string {
 }
 
 /**
- * Days since creation, e.g. "0d", "3d", "12d" — whole days elapsed between
- * the creation moment and now (or completion, if the task is done).
+ * Days since creation, e.g. "0d", "3d", "12d" — counted in whole calendar
+ * days, so something created yesterday reads "1d" even when only a few hours
+ * have passed. Stops at the completion moment when the task is done.
  */
 export function ageDaysLabel(createdAt: number, completedAt?: number): string {
   const end = completedAt ?? Date.now();
   const days = Math.max(
     0,
-    Math.floor((end - createdAt) / 86_400_000),
+    Math.round(
+      (startOfDay(new Date(end)).getTime() -
+        startOfDay(new Date(createdAt)).getTime()) /
+        86_400_000,
+    ),
   );
   return `${days}d`;
 }
