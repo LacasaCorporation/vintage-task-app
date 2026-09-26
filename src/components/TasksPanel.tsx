@@ -16,6 +16,7 @@ import TaskDetail from "@/components/TaskDetail";
 import StepDetail from "@/components/StepDetail";
 import ProjectStatusSettings from "@/components/ProjectStatusSettings";
 import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
+import ProjectsWorkspace from "@/components/ProjectsWorkspace";
 import ProductPrintSheet from "@/components/ProductPrintSheet";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
@@ -577,243 +578,46 @@ export default function TasksPanel({
 
       {/* ── Flagged jobs & products (from Projects) ─────────────────── */}
       {activeView === "flagged" && (
-        <div className="grid items-start lg:grid-cols-[1fr_auto]">
-        <section className="mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm">
-          {/* filter bar: scope, status, and list/board presentation */}
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-            <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-              <span className="mr-1">Show</span>
-              {(
-                [
-                  ["projects", "Projects"],
-                  ["jobs", "Jobs"],
-                  ["products", "Products"],
-                ] as [FlagFilter, string][]
-              ).map(([mode, label]) => (
-                <button
-                  key={mode}
-                  type="button"
-                  aria-pressed={flagFilter === mode}
-                  onClick={() => {
-                    setFlagFilter(mode);
-                    if (mode !== "products") {
-                      setFlagBoardMode(false);
-                      setFlagReportMode(false);
-                    }
-                  }}
-                  className={cn(
-                    "rounded-full border px-2.5 py-1 whitespace-nowrap transition-colors",
-                    flagFilter === mode
-                      ? "border-primary/40 bg-primary/10 text-primary"
-                      : "border-border bg-card hover:bg-accent hover:text-foreground",
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-              <span className="mx-1 h-4 w-px bg-border" />
-              <button
-                type="button"
-                onClick={() => setFlagStatus("all")}
-                className={cn(
-                  "rounded-full border px-2.5 py-1 transition-colors",
-                  flagStatus === "all"
-                    ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400"
-                    : "border-border bg-card hover:bg-accent hover:text-foreground",
-                )}
-              >
-                Any status
-              </button>
-              {projectStatuses.map((status) => (
-                <button
-                  key={status}
-                  type="button"
-                  onClick={() => setFlagStatus(status)}
-                  className={cn(
-                    "rounded-full border px-2.5 py-1 transition-colors",
-                    flagStatus === status
-                      ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400"
-                      : "border-border bg-card hover:bg-accent hover:text-foreground",
-                  )}
-                >
-                  {status}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setStatusDraft(projectStatuses);
-                  setStatusSettingsOpen((open) => !open);
-                }}
-                className="ml-1 inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 px-2.5 py-1 text-primary transition-colors hover:bg-primary/10"
-                title="Customize Projects statuses"
-              >
-                <Settings2 className="size-3" /> Custom status
-              </button>
-            </div>
-            {statusSettingsOpen && statusDraft !== null && (
-              <ProjectStatusSettings
-                value={statusDraft}
-                onChange={(next) => setStatusDraft(next)}
-                onClose={() => setStatusSettingsOpen(false)}
-                onSave={() => void saveProjectStatuses()}
-              />
-            )}
-            <div className="flex items-center gap-1">
-              {flagFilter === "products" ? (
-                <>
-              <button
-                type="button"
-                onClick={() => {
-                  setFlagBoardMode(false);
-                  setFlagReportMode(false);
-                }}
-                aria-pressed={!flagBoardMode}
-                className={cn(
-                  "grid size-7 place-items-center rounded-md border transition-colors",
-                  !flagBoardMode
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-                title="List view"
-              >
-                <List className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFlagBoardMode(true);
-                  setFlagReportMode(false);
-                }}
-                aria-pressed={flagBoardMode}
-                className={cn(
-                  "grid size-7 place-items-center rounded-md border transition-colors",
-                  flagBoardMode
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-                title="Board view"
-              >
-                <Columns3 className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setFlagReportMode((on) => !on)}
-                aria-pressed={flagReportMode}
-                className={cn(
-                  "grid size-7 place-items-center rounded-md border transition-colors",
-                  flagReportMode
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-                title="Production report"
-              >
-                <BarChart3 className="size-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={handlePrintProducts}
-                className="grid size-7 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                title="Print products"
-              >
-                <Printer className="size-3.5" />
-              </button>
-                </>
-              ) : null}
-            </div>
-          </div>
-          {flaggedProjects === undefined ? (
-            <div className="flex items-center justify-center gap-2 px-5 py-14 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading projects…
-            </div>
-          ) : flagFilter === "projects" ? (
-            <FlaggedProjectsList
-              projects={flaggedProjects}
-              jobs={flaggedJobs ?? []}
-              fgs={flaggedFgs ?? []}
-              statusFilter={flagStatus}
-              projectStatuses={projectStatuses}
-              sortMode={sortMode}
-              selection={flagSelection}
-              onSelect={setFlagSelection}
-            />
-          ) : flaggedItems === null ? (
-            <div className="px-6 py-14 text-center">
-              <Flag className="mx-auto size-8 text-amber-500/40" />
-              <p className="mt-3 font-medium">Nothing flagged</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Flag a job or product in the Projects page and it will show up here.
-              </p>
-            </div>
-          ) : flagFilter === "products" ? (
-            flagReportMode ? (
-              <ProductionReport
-                data={flaggedItems}
-                allJobs={flaggedJobs ?? []}
-                projectStatuses={projectStatuses}
-              />
-            ) : flagBoardMode ? (
-              <div className="p-3">
-                <FlaggedBoard
-                  data={flaggedItems}
-                  allJobs={flaggedJobs ?? []}
-                  statusFilter={flagStatus}
-                  onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
-                  busyKey={flaggedBusy}
-                  projectNameOf={flaggedItems.projectNameOf}
-                  onOpenFg={(fg) => setFlagSelection({ kind: "fg", id: fg._id })}
-                />
-              </div>
-            ) : (
-              <FlaggedProductsList
-                data={flaggedItems}
-                allJobs={flaggedJobs ?? []}
-                statusFilter={flagStatus}
-                onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
-                busyKey={flaggedBusy}
-                sortMode={sortMode}
-                selection={flagSelection}
-                onSelect={setFlagSelection}
-              />
-            )
-          ) : (
-            <FlaggedItemsList
-              data={flaggedItems}
-              allJobs={flaggedJobs ?? []}
-              allFgs={flaggedFgs ?? []}
-              statusFilter={flagStatus}
-              jobsOnly
-              onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
-              onToggleJob={(job) => void handleToggleFlaggedJob(job)}
-              busyKey={flaggedBusy}
-              sortMode={sortMode}
-              selection={flagSelection}
-              onSelect={setFlagSelection}
-            />
-          )}
-          {printProducts && flaggedItems !== null && (
-            <ProductPrintSheet
-              data={flaggedItems}
-              allJobs={flaggedJobs ?? []}
-              projectStatuses={projectStatuses}
-              statusFilter={flagStatus}
-            />
-          )}
-        </section>
-        {flagSelection && flaggedJobs !== undefined && flaggedFgs !== undefined && (
-          <div className="mt-3">
-            <FlaggedDetail
-              selection={flagSelection}
-              jobs={flaggedJobs}
-              fgs={flaggedFgs}
-              projects={flaggedProjects ?? []}
-              onClose={() => setFlagSelection(null)}
-              onSelect={setFlagSelection}
-            />
-          </div>
-        )}
-        </div>
+        <ProjectsWorkspace
+          projects={flaggedProjects}
+          jobs={flaggedJobs}
+          fgs={flaggedFgs}
+          items={flaggedItems}
+          filter={flagFilter}
+          onFilterChange={(next) => {
+            setFlagFilter(next);
+            if (next !== "products") {
+              setFlagBoardMode(false);
+              setFlagReportMode(false);
+            }
+          }}
+          status={flagStatus}
+          onStatusChange={setFlagStatus}
+          projectStatuses={projectStatuses}
+          statusDraft={statusDraft}
+          onStatusDraft={setStatusDraft}
+          statusSettingsOpen={statusSettingsOpen}
+          onToggleStatusSettings={() => {
+            setStatusDraft(projectStatuses);
+            setStatusSettingsOpen((open) => !open);
+          }}
+          onSaveStatuses={() => void saveProjectStatuses()}
+          boardMode={flagBoardMode}
+          onBoardModeChange={(next) => {
+            setFlagBoardMode(next);
+            setFlagReportMode(false);
+          }}
+          reportMode={flagReportMode}
+          onReportModeChange={setFlagReportMode}
+          onPrint={handlePrintProducts}
+          printing={printProducts}
+          sortMode={sortMode}
+          selection={flagSelection}
+          onSelect={setFlagSelection}
+          busyKey={flaggedBusy}
+          onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
+          onToggleJob={(job) => void handleToggleFlaggedJob(job)}
+        />
       )}
 
       {/* ── Task list ───────────────────────────────────────────────── */}
@@ -1133,6 +937,93 @@ export default function TasksPanel({
                                         }
                                         className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
                                       />
+                                      {/* which task features this subtask uses, on the left */}
+                                      {(step.remindAt !== undefined ||
+                                        step.priority !== undefined ||
+                                        step.recurrence !== undefined ||
+                                        (step.tags ?? []).length > 0 ||
+                                        (step.description ?? "").trim() !== "" ||
+                                        parseAttachments(step.attachments).length > 0) && (
+                                        <span className="flex shrink-0 flex-wrap items-center gap-1">
+                                          {step.remindAt !== undefined && (
+                                            <span
+                                              title={`Reminds ${formatDueLabel(step.remindAt)}`}
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+                                            >
+                                              <AlarmClock className="size-3" />
+                                            </span>
+                                          )}
+                                          {step.priority !== undefined && (
+                                            <span
+                                              className={cn(
+                                                "inline-flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[10px] font-medium capitalize",
+                                                PRIORITY_META[step.priority].chip,
+                                              )}
+                                              title={`Priority: ${step.priority}`}
+                                            >
+                                              <span
+                                                className={cn(
+                                                  "size-1.5 rounded-full",
+                                                  PRIORITY_META[step.priority].dot,
+                                                )}
+                                              />
+                                              {step.priority[0]}
+                                            </span>
+                                          )}
+                                          {step.recurrence !== undefined && (
+                                            <span
+                                              title={`Repeats ${RECURRENCE_LABEL[step.recurrence]}`}
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-violet-500/10 px-1 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-400"
+                                            >
+                                              <Repeat className="size-3" />
+                                              {RECURRENCE_LABEL[step.recurrence].replace("Every ", "")}
+                                            </span>
+                                          )}
+                                          {/* full tag text, never just a count */}
+                                          {step.tags!.slice(0, 3).map((tag) => (
+                                            <span
+                                              key={tag}
+                                              title={`Tag: #${tag}`}
+                                              className="max-w-24 truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                                            >
+                                              #{tag}
+                                            </span>
+                                          ))}
+                                          {step.tags!.length > 3 && (
+                                            <span
+                                              className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-primary"
+                                              title={step.tags!.map((t) => `#${t}`).join(" ")}
+                                            >
+                                              +{step.tags!.length - 3}
+                                            </span>
+                                          )}
+                                          {(step.description ?? "").trim() !== "" && (
+                                            <span
+                                              title="Has notes"
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                            >
+                                              <FileText className="size-3" />
+                                            </span>
+                                          )}
+                                          {parseAttachments(step.attachments).length > 0 && (
+                                            <span
+                                              title={`${parseAttachments(step.attachments).length} attachment(s)`}
+                                              className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 px-1 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-400"
+                                            >
+                                              <Paperclip className="size-3" />
+                                              {parseAttachments(step.attachments).length}
+                                            </span>
+                                          )}
+                                          {step.starred === true && (
+                                            <span
+                                              title="Starred"
+                                              className="inline-flex items-center rounded-full bg-amber-400/15 px-1 py-0.5 text-amber-600 dark:text-amber-400"
+                                            >
+                                              <Star className="size-3 fill-amber-400" />
+                                            </span>
+                                          )}
+                                        </span>
+                                      )}
                                       <button
                                         type="button"
                                         onClick={() =>
@@ -1176,84 +1067,6 @@ export default function TasksPanel({
                                           )}
                                         >
                                           {daysLeftLabel(step.dueAt).text}
-                                        </span>
-                                      )}
-                                      {/* which task features this subtask actually uses */}
-                                      {(step.remindAt !== undefined ||
-                                        step.priority !== undefined ||
-                                        step.recurrence !== undefined ||
-                                        (step.tags ?? []).length > 0 ||
-                                        (step.description ?? "").trim() !== "" ||
-                                        parseAttachments(step.attachments).length > 0) && (
-                                        <span className="flex shrink-0 items-center gap-1">
-                                          {step.remindAt !== undefined && (
-                                            <span
-                                              title={`Reminds ${formatDueLabel(step.remindAt)}`}
-                                              className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
-                                            >
-                                              <AlarmClock className="size-3" />
-                                            </span>
-                                          )}
-                                          {step.priority !== undefined && (
-                                            <span
-                                              className={cn(
-                                                "inline-flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[10px] font-medium capitalize",
-                                                PRIORITY_META[step.priority].chip,
-                                              )}
-                                              title={`Priority: ${step.priority}`}
-                                            >
-                                              <span
-                                                className={cn(
-                                                  "size-1.5 rounded-full",
-                                                  PRIORITY_META[step.priority].dot,
-                                                )}
-                                              />
-                                              {step.priority[0]}
-                                            </span>
-                                          )}
-                                          {step.recurrence !== undefined && (
-                                            <span
-                                              title={`Repeats ${RECURRENCE_LABEL[step.recurrence]}`}
-                                              className="inline-flex items-center gap-0.5 rounded-full bg-violet-500/10 px-1 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-400"
-                                            >
-                                              <Repeat className="size-3" />
-                                              {RECURRENCE_LABEL[step.recurrence].replace("Every ", "")}
-                                            </span>
-                                          )}
-                                          {(step.tags ?? []).length > 0 && (
-                                            <span
-                                              title={`Tags: ${(step.tags ?? []).map((t) => `#${t}`).join(" ")}`}
-                                              className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 px-1 py-0.5 text-[10px] font-medium text-primary"
-                                            >
-                                              <Tag className="size-3" />
-                                              {step.tags!.length}
-                                            </span>
-                                          )}
-                                          {(step.description ?? "").trim() !== "" && (
-                                            <span
-                                              title="Has notes"
-                                              className="inline-flex items-center gap-0.5 rounded-full bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground"
-                                            >
-                                              <FileText className="size-3" />
-                                            </span>
-                                          )}
-                                          {parseAttachments(step.attachments).length > 0 && (
-                                            <span
-                                              title={`${parseAttachments(step.attachments).length} attachment(s)`}
-                                              className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 px-1 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-400"
-                                            >
-                                              <Paperclip className="size-3" />
-                                              {parseAttachments(step.attachments).length}
-                                            </span>
-                                          )}
-                                          {step.starred === true && (
-                                            <span
-                                              title="Starred"
-                                              className="inline-flex items-center rounded-full bg-amber-400/15 px-1 py-0.5 text-amber-600 dark:text-amber-400"
-                                            >
-                                              <Star className="size-3 fill-amber-400" />
-                                            </span>
-                                          )}
                                         </span>
                                       )}
                                       {canEdit && (
