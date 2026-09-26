@@ -51,6 +51,7 @@ import {
   Repeat,
   Settings2,
   Star,
+  Tag,
   Trash2,
   X,
 } from "lucide-react";
@@ -1174,6 +1175,61 @@ export default function TasksPanel({
                                           )}
                                         >
                                           {daysLeftLabel(step.dueAt).text}
+                                        </span>
+                                      )}
+                                      {/* which task features this subtask actually uses */}
+                                      {(step.remindAt !== undefined ||
+                                        step.priority !== undefined ||
+                                        step.recurrence !== undefined ||
+                                        (step.tags ?? []).length > 0 ||
+                                        (step.description ?? "").trim() !== "" ||
+                                        parseAttachments(step.attachments).length > 0) && (
+                                        <span className="flex shrink-0 items-center gap-1 text-muted-foreground/70">
+                                          {step.remindAt !== undefined && (
+                                            <span title={`Reminds ${formatDueLabel(step.remindAt)}`}>
+                                              <AlarmClock className="size-3" />
+                                            </span>
+                                          )}
+                                          {step.priority !== undefined && (
+                                            <span
+                                              className={cn(
+                                                "size-2 rounded-full",
+                                                PRIORITY_META[step.priority].dot,
+                                              )}
+                                              title={`Priority: ${step.priority}`}
+                                            />
+                                          )}
+                                          {step.recurrence !== undefined && (
+                                            <span
+                                              title={`Repeats ${RECURRENCE_LABEL[step.recurrence]}`}
+                                            >
+                                              <Repeat className="size-3" />
+                                            </span>
+                                          )}
+                                          {(step.tags ?? []).length > 0 && (
+                                            <span
+                                              title={`Tags: ${(step.tags ?? []).map((t) => `#${t}`).join(" ")}`}
+                                            >
+                                              <Tag className="size-3" />
+                                            </span>
+                                          )}
+                                          {(step.description ?? "").trim() !== "" && (
+                                            <span title="Has notes">
+                                              <FileText className="size-3" />
+                                            </span>
+                                          )}
+                                          {parseAttachments(step.attachments).length > 0 && (
+                                            <span
+                                              title={`${parseAttachments(step.attachments).length} attachment(s)`}
+                                            >
+                                              <Paperclip className="size-3" />
+                                            </span>
+                                          )}
+                                          {step.starred === true && (
+                                            <span title="Starred" className="text-amber-500">
+                                              <Star className="size-3 fill-amber-400" />
+                                            </span>
+                                          )}
                                         </span>
                                       )}
                                       {canEdit && (
