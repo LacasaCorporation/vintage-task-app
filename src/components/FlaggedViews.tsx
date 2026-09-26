@@ -1,5 +1,6 @@
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
+import StatusSelect from "@/components/StatusSelect";
 import {
   Briefcase,
   ChevronDown,
@@ -30,8 +31,9 @@ import {
   type JobDoc,
   type SortMode,
 } from "@/components/FlaggedLists";
-import { useQuery } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { toast } from "@/lib/toast";
 
 /** Which entity the workspace is currently zoomed in on. */
 export type WorkspaceView = "list" | "hierarchy" | "board" | "report";
@@ -293,6 +295,7 @@ function JobRow({
   onToggleFg: (fg: FgDoc) => void;
 }) {
   const [open, setOpen] = useState(true);
+  const setFgStatusM = useMutation(api.costing.setFgProjectStatus);
   const allProducts = productsOfJob(fgs, job._id);
   const products = sortFgs(
     allProducts.filter((f) =>
@@ -423,9 +426,19 @@ function JobRow({
               {/* one status per row: while production is running the button
                   already shows "In production" */}
               {fg.productionStartedAt === undefined && (
-                <span className={tagChip}>
-                  {fgProjectStatus(fg, projectStatuses)}
-                </span>
+                <StatusSelect
+                  value={fgProjectStatus(fg, projectStatuses)}
+                  statuses={projectStatuses}
+                  onChange={(status) =>
+                    void setFgStatusM({ id: fg._id, status }).catch((error) =>
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : "Couldn't update the product status.",
+                      ),
+                    )
+                  }
+                />
               )}
               <ProductionButton fg={fg} />
             </li>

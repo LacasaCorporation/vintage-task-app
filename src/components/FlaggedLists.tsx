@@ -1,6 +1,7 @@
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
+import StatusSelect from "@/components/StatusSelect";
 import type { Priority } from "@/lib/task-utils";
 import { daysLeftLabel, formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import {
@@ -231,6 +232,7 @@ export function FlaggedItemsList({
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
     () => new Set(),
   );
+  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
   const toggleProject = (key: string) =>
     setCollapsedProjects((current) => {
       const next = new Set(current);
@@ -417,9 +419,19 @@ export function FlaggedItemsList({
                       </>
                     )}
                     {fg.productionStartedAt === undefined && (
-                      <span className={tagChip}>
-                        {fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
-                      </span>
+                      <StatusSelect
+                        value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+                        statuses={projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]}
+                        onChange={(status) =>
+                          void setFgProjectStatusM({ id: fg._id, status }).catch((error) =>
+                            toast.error(
+                              error instanceof Error
+                                ? error.message
+                                : "Couldn't update the product status.",
+                            ),
+                          )
+                        }
+                      />
                     )}
                     <ProductionButton fg={fg} />
                   </li>
@@ -691,6 +703,7 @@ export function FlaggedProductsList({
     const parentJob = allJobs.find((j) => jobIds.includes(j._id));
     return { fg, parentJob };
   });
+  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
 
   if (rows.length === 0) {
     return (
@@ -765,9 +778,19 @@ export function FlaggedProductsList({
               already says "In production", so the plain status chip would
               repeat it */}
           {fg.productionStartedAt === undefined && (
-            <span className={tagChip}>
-              {fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
-            </span>
+            <StatusSelect
+              value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+              statuses={projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]}
+              onChange={(status) =>
+                void setFgProjectStatusM({ id: fg._id, status }).catch((error) =>
+                  toast.error(
+                    error instanceof Error
+                      ? error.message
+                      : "Couldn't update the product status.",
+                  ),
+                )
+              }
+            />
           )}
           <ProductionButton fg={fg} />
         </li>
