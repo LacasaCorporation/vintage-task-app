@@ -416,6 +416,7 @@ export function FlaggedItemsList({
                       </>
                     )}
                     <span className={tagChip}>{fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}</span>
+                    <ProductionButton fg={fg} />
                   </li>
                 ))}
               </ul>
@@ -492,6 +493,7 @@ export function FlaggedItemsList({
                   dueAt={fg.dueAt ?? parentJob?.dueAt}
                   inherited={fg.dueAt === undefined && parentJob?.dueAt !== undefined}
                 />
+                <ProductionButton fg={fg} />
               </div>
             </li>
           );
@@ -968,6 +970,7 @@ function BoardCardView({
             {card.status}
           </span>
         )}
+        <ProductionButton fg={card.fg} />
       </div>
     </motion.div>
   );
