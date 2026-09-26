@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import TaskDetail from "@/components/TaskDetail";
+import ProductPrintSheet from "@/components/ProductPrintSheet";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
 import {
@@ -41,6 +42,7 @@ import {
   Loader2,
   Paperclip,
   Plus,
+  Printer,
   Repeat,
   Settings2,
   Star,
@@ -137,6 +139,8 @@ export default function TasksPanel({
   const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
   const [flagBoardMode, setFlagBoardMode] = useState(false);
   const [flagReportMode, setFlagReportMode] = useState(false);
+  // the print sheet is mounted on demand, then the browser print dialog opens
+  const [printProducts, setPrintProducts] = useState(false);
   const [statusSettingsOpen, setStatusSettingsOpen] = useState(false);
   const [statusDraft, setStatusDraft] = useState<string[] | null>(null);
 
@@ -307,6 +311,18 @@ export default function TasksPanel({
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update statuses.");
     }
+  };
+
+  /**
+   * Mount the hidden print sheet, let it paint, then open the browser print
+   * dialog and unmount it again so it never lingers in the app.
+   */
+  const handlePrintProducts = () => {
+    setPrintProducts(true);
+    window.setTimeout(() => {
+      window.print();
+      setPrintProducts(false);
+    }, 120);
   };
 
   const handleToggleFlaggedFg = async (fg: FgDoc) => {
@@ -667,6 +683,14 @@ export default function TasksPanel({
               >
                 <BarChart3 className="size-3.5" />
               </button>
+              <button
+                type="button"
+                onClick={handlePrintProducts}
+                className="grid size-7 place-items-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                title="Print products"
+              >
+                <Printer className="size-3.5" />
+              </button>
                 </>
               ) : null}
             </div>
@@ -739,6 +763,14 @@ export default function TasksPanel({
               sortMode={sortMode}
               selection={flagSelection}
               onSelect={setFlagSelection}
+            />
+          )}
+          {printProducts && flaggedItems !== null && (
+            <ProductPrintSheet
+              data={flaggedItems}
+              allJobs={flaggedJobs ?? []}
+              projectStatuses={projectStatuses}
+              statusFilter={flagStatus}
             />
           )}
         </section>

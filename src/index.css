@@ -311,3 +311,23 @@
     background-color: color-mix(in oklab, var(--primary) 20%, transparent);
   }
 }
+
+/* Printing: the app is hidden and only the print sheet is shown. */
+@media print {
+  body > *:not(.print-sheet) {
+    display: none !important;
+  }
+
+  .print-sheet {
+    display: block !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  body {
+    background: #fff !important;
+  }
+}
