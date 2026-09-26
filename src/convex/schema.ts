@@ -328,6 +328,17 @@ const schema = defineSchema(
       dueAt: v.optional(v.number()),
       priority: v.optional(taskPriorityValidator),
       completedAt: v.optional(v.number()),
+      // production run: set when the product is started, cleared when stopped.
+      // The consumed list is what lets a stop put the stock back.
+      productionStartedAt: v.optional(v.number()),
+      productionConsumed: v.optional(
+        v.array(
+          v.object({
+            materialId: v.id("rawMaterials"),
+            qty: v.number(),
+          }),
+        ),
+      ),
     }).index("by_owner", ["ownerId"]),
 
     // jobs (also called tasks) that live under a project; FG products
