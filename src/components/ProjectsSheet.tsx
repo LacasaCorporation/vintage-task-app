@@ -27,6 +27,7 @@ import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
+import ProductQtyInline from "@/components/ProductQtyInline";
 import CustomersPanel from "@/components/CustomersPanel";
 import {
   JobsList,
@@ -1211,8 +1212,11 @@ export default function ProjectsSheet({
                                     onClick={() => onOpenProduct?.(fg._id)}
                                   >
                                     <Package className="size-3 shrink-0 text-sky-500/80" />
-                                    <span className="min-w-0 flex-1 truncate font-medium">
-                                      {fg.name}
+                                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                                      <span className="min-w-0 truncate font-medium">
+                                        {fg.name}
+                                      </span>
+                                      <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                                     </span>
                                     {fg.code && (
                                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
@@ -1311,8 +1315,11 @@ export default function ProjectsSheet({
                             onClick={() => onOpenProduct?.(fg._id)}
                           >
                             <Package className="size-3 shrink-0 text-sky-500/80" />
-                            <span className="min-w-0 flex-1 truncate font-medium">
-                              {fg.name}
+                            <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                              <span className="min-w-0 truncate font-medium">
+                                {fg.name}
+                              </span>
+                              <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                             </span>
                             {fg.code && (
                               <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
