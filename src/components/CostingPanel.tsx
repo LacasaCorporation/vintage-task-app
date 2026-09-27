@@ -100,6 +100,8 @@ export default function CostingPanel({
   canDelete = true,
   canViewMaterials = true,
   canViewPurchase = true,
+  canViewSales = true,
+  canViewAccounting = true,
   canCreatePurchase = true,
   canEditPurchase = true,
   canDeletePurchase = true,
@@ -129,6 +131,8 @@ export default function CostingPanel({
   canCreatePurchase?: boolean;
   canEditPurchase?: boolean;
   canDeletePurchase?: boolean;
+  canViewSales?: boolean;
+  canViewAccounting?: boolean;
   /** Raw material item permissions (separate from products). */
   canCreateMaterial?: boolean;
   canEditMaterial?: boolean;
@@ -685,14 +689,14 @@ export default function CostingPanel({
           canEdit={canEditPurchase}
           canDelete={canDeletePurchase}
         />
-      ) : view?.kind === "sales" ? (
+      ) : view?.kind === "sales" && canViewSales ? (
         <SalesPanel
           products={finishedGoods ?? []}
           canCreate={canCreatePurchase}
           canEdit={canEditPurchase}
           canDelete={canDeletePurchase}
         />
-      ) : view?.kind === "accounting" ? (
+      ) : view?.kind === "accounting" && canViewAccounting ? (
         <AccountingPanel
           tab={view.tab}
           onTabChange={(tab) => onSelectView({ kind: "accounting", tab })}

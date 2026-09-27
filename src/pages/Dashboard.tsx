@@ -733,8 +733,8 @@ export default function Dashboard() {
             onSelectView={handleSelectCostingView}
             canViewMaterials={canDoItem("materials", "view")}
             canViewPurchase={canDoItem("purchases", "view")}
-            canViewSales={canDoItem("purchases", "view")}
-            canViewAccounting={canDoItem("purchases", "view")}
+            canViewSales={canDoItem("sales", "view")}
+            canViewAccounting={canDoItem("accounting", "view")}
           />
 
           {section === "settings" && <SettingsSidebar />}
@@ -857,8 +857,8 @@ export default function Dashboard() {
                 onSelectView={handleSelectCostingView}
                 canViewMaterials={canDoItem("materials", "view")}
                 canViewPurchase={canDoItem("purchases", "view")}
-                canViewSales={canDoItem("purchases", "view")}
-                canViewAccounting={canDoItem("purchases", "view")}
+                canViewSales={canDoItem("sales", "view")}
+                canViewAccounting={canDoItem("accounting", "view")}
               />
 
               {/* the notebook tree lives in its own column on wide screens;
@@ -987,6 +987,8 @@ export default function Dashboard() {
               canDelete={canDoItem("products", "delete")}
               canViewMaterials={canDoItem("materials", "view")}
               canViewPurchase={canDoItem("purchases", "view")}
+              canViewSales={canDoItem("sales", "view")}
+              canViewAccounting={canDoItem("accounting", "view")}
               canCreatePurchase={canDoItem("purchases", "create")}
               canEditPurchase={canDoItem("purchases", "edit")}
               canDeletePurchase={canDoItem("purchases", "delete")}

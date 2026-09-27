@@ -24,6 +24,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { toLocalInput } from "@/lib/task-utils";
+import PageTabs from "@/components/PageTabs";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 
 type FgDoc = Doc<"finishedGoods">;
@@ -224,28 +225,6 @@ export default function SalesPanel({
     }
   };
 
-  const tabBtn = (id: Tab, label: string, Icon: typeof List) => (
-    <button
-      key={id}
-      type="button"
-      onClick={() => {
-        setTab(id);
-        if (id === "sales") setViewingSale(null);
-        if (id === "quotes") setViewingQuote(null);
-        if (id === "bill" || id === "quote") resetForm();
-      }}
-      aria-pressed={tab === id}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-        tab === id
-          ? "bg-primary/10 text-primary"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
-    >
-      <Icon className="size-3.5" /> {label}
-    </button>
-  );
-
   /** The document preview, shared by a quotation and a sales bill. */
   const documentView = (
     doc: { number: string; customerName?: string; total: number; lines: { name: string; qty: number; unitPrice: number; unit?: string }[]; note?: string; [k: string]: unknown },
@@ -283,13 +262,23 @@ export default function SalesPanel({
     <div className="mt-4 space-y-4">
       {/* ── Header: the two lists, then the two entry forms ─────────── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
-          {tabBtn("sales", `Sales bills (${sales?.length ?? 0})`, Receipt)}
-          {tabBtn("quotes", `Quotations (${quotations?.length ?? 0})`, FileText)}
-          {tabBtn("bill", "Sales bill entry", List)}
-          {tabBtn("quote", "Quotation entry", Send)}
-          {tabBtn("customers", `Customers (${customers?.length ?? 0})`, Users)}
-        </div>
+        <PageTabs
+          label="Sales sections"
+          value={tab}
+          onChange={(id) => {
+            setTab(id);
+            if (id === "sales") setViewingSale(null);
+            if (id === "quotes") setViewingQuote(null);
+            if (id === "bill" || id === "quote") resetForm();
+          }}
+          tabs={[
+            { id: "sales", label: "Sales bills", icon: Receipt, count: sales?.length ?? 0 },
+            { id: "quotes", label: "Quotations", icon: FileText, count: quotations?.length ?? 0 },
+            { id: "bill", label: "Sales bill entry", icon: List },
+            { id: "quote", label: "Quotation entry", icon: Send },
+            { id: "customers", label: "Customers", icon: Users, count: customers?.length ?? 0 },
+          ]}
+        />
         {canCreate && (tab === "bill" || tab === "quote") && (
           <Button
             type="button"

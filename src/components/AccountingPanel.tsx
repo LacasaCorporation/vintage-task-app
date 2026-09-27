@@ -20,6 +20,7 @@ import { useAppDialogs } from "@/components/AppDialogs";
 import type { DialogsApi } from "@/components/AppDialogs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
+import PageTabs from "@/components/PageTabs";
 import type { AccountType } from "@/convex/accounting";
 
 /** The sub-pages of the accounting module, in the order the sidebar lists them. */
@@ -349,31 +350,18 @@ export default function AccountingPanel({
     .reduce((s, a) => s + a.debit, 0);
 
   return (
-    <div className="space-y-3">
-      {/* ── Sub-navigation ─────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
-        {ACCOUNTING_TABS.map((t) => {
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              aria-pressed={tab === t.id}
-              title={t.hint}
-              onClick={() => onTabChange(t.id)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-                tab === t.id
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              <Icon className="size-3.5" />
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
+    <div className="mt-4 space-y-4">
+      <PageTabs
+        label="Accounts sections"
+        tabs={ACCOUNTING_TABS.map((t) => ({
+          id: t.id,
+          label: t.label,
+          icon: t.icon,
+          hint: t.hint,
+        }))}
+        value={tab}
+        onChange={onTabChange}
+      />
 
       {accounts === undefined || entries === undefined ? (
         <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">

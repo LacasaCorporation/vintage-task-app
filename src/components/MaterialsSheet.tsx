@@ -93,7 +93,7 @@ function OpeningBalances({
   };
 
   return (
-    <section className="mt-2.5 overflow-hidden rounded-2xl border bg-card shadow-sm">
+    <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
       <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
         <p className="text-sm font-semibold">
           Opening balance

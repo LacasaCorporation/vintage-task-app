@@ -30,6 +30,13 @@ export const ITEMS = [
   { key: "flagToTask", section: "notes", label: "Flag text → task", actions: ["create"] },
   { key: "materials", section: "costing", label: "Raw materials", actions: ["create", "edit", "delete"] },
   { key: "purchases", section: "costing", label: "Purchase bills", actions: ["create", "edit", "delete", "view"] },
+  { key: "sales", section: "costing", label: "Sales & quotations", actions: ["create", "edit", "delete", "view"] },
+  {
+    key: "accounting",
+    section: "costing",
+    label: "Accounts & journals",
+    actions: ["create", "edit", "delete", "view"],
+  },
   { key: "dataImport", section: "costing", label: "Excel import / export", actions: ["create", "view"] },
   { key: "products", section: "costing", label: "Products (FG)", actions: ["create", "edit", "delete"] },
   {

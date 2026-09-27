@@ -44,6 +44,8 @@ export const itemPermissionsValidator = v.object({
   projects: v.optional(sectionPermissionsValidator),
   printing: v.optional(sectionPermissionsValidator),
   purchases: v.optional(sectionPermissionsValidator),
+  sales: v.optional(sectionPermissionsValidator),
+  accounting: v.optional(sectionPermissionsValidator),
 });
 export const permissionsValidator = v.object({
   tasks: v.optional(sectionPermissionsValidator),

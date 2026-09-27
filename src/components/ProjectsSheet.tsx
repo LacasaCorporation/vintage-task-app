@@ -34,6 +34,7 @@ import MoneyBracket from "@/components/MoneyBracket";
 import PriorityChip from "@/components/PriorityChip";
 import CustomersPanel from "@/components/CustomersPanel";
 import ProductionsBoard from "@/components/ProductionsBoard";
+import PageTabs from "@/components/PageTabs";
 import {
   JobsList,
   ProductsList,
@@ -619,7 +620,7 @@ export default function ProjectsSheet({
           : "flagged only";
 
   return (
-    <div>
+    <div className="mt-4 space-y-4">
       {printing && usesSharedSearch && (
         <ProjectsPrintSheet
           tab={tab}
@@ -631,36 +632,18 @@ export default function ProjectsSheet({
       )}
       {/* ── Tabs: one list per level of the hierarchy ───────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
-          {(
-            [
-              ["projects", "Projects", Folder, rows.length],
-              ["jobs", "Jobs", Briefcase, allJobs?.length ?? 0],
-              ["products", "Products", Package, finishedGoods.length],
-              ["customers", "Customers", Users, allCustomers?.length],
-              ["productions", "Productions", Briefcase, productionsCount],
-            ] as const
-          ).map(([id, label, Icon, count]) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={tab === id}
-              onClick={() => setTab(id)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-                tab === id
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              <Icon className="size-3.5" />
-              {label}
-              {count !== undefined && (
-                <span className="tabular-nums opacity-70">({count})</span>
-              )}
-            </button>
-          ))}
-        </div>
+        <PageTabs
+          label="Projects sections"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { id: "projects", label: "Projects", icon: Folder, count: rows.length },
+            { id: "jobs", label: "Jobs", icon: Briefcase, count: allJobs?.length ?? 0 },
+            { id: "products", label: "Products", icon: Package, count: finishedGoods.length },
+            { id: "customers", label: "Customers", icon: Users, count: allCustomers?.length },
+            { id: "productions", label: "Productions", icon: Briefcase, count: productionsCount },
+          ]}
+        />
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           {/* one search box and one filter for every tab — they read the same
               field, so switching tabs keeps whatever was typed */}

@@ -34,6 +34,7 @@ import ExpensesPanel from "@/components/ExpensesPanel";
 import VendorField from "@/components/VendorField";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import VendorLedgerDialog from "@/components/VendorLedgerDialog";
+import PageTabs from "@/components/PageTabs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
@@ -290,41 +291,32 @@ export default function PurchasePanel({
     }
   };
 
-  const tabBtn = (
-    id: "list" | "bill" | "lpo" | "expenses" | "vendors",
-    label: string,
-    Icon: typeof List,
-  ) => (
-    <button
-      key={id}
-      type="button"
-      onClick={() => {
-        setTab(id);
-        if (id === "list") setViewingId(null);
-        if (id === "bill") resetForm();
-      }}
-      aria-pressed={tab === id}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-        tab === id
-          ? "bg-primary/10 text-primary"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
-    >
-      <Icon className="size-3.5" /> {label}
-    </button>
-  );
 
   return (
     <div className="mt-4 space-y-4">
       {/* ── Header: the tabs stay put; the bill form has no tab of its own ── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
-          {tabBtn("list", `Bills (${bills?.length ?? 0})`, List)}
-          {tabBtn("lpo", `LPO (${lpos?.filter((l) => l.status !== "cancelled").length ?? 0})`, ClipboardList)}
-          {tabBtn("expenses", `Expenses (${expenses?.length ?? 0})`, Wallet)}
-          {tabBtn("vendors", `Vendors (${vendors?.length ?? 0})`, Store)}
-        </div>
+        <PageTabs
+          label="Purchase sections"
+          value={tab}
+          onChange={(id) => {
+            setTab(id);
+            if (id === "list") setViewingId(null);
+            if (id === "bill") resetForm();
+          }}
+          tabs={[
+            { id: "list", label: "Bills", icon: List, count: bills?.length ?? 0 },
+            {
+              id: "lpo",
+              label: "LPO",
+              icon: ClipboardList,
+              hint: "Purchase orders with your suppliers",
+              count: lpos?.filter((l) => l.status !== "cancelled").length ?? 0,
+            },
+            { id: "expenses", label: "Expenses", icon: Wallet, count: expenses?.length ?? 0 },
+            { id: "vendors", label: "Vendors", icon: Store, count: vendors?.length ?? 0 },
+          ]}
+        />
         {canCreate && tab === "list" && (
           <Button
             type="button"
