@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import TaskDetail from "@/components/TaskDetail";
 import StepDetail from "@/components/StepDetail";
 import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
+import { useAppDialogs } from "@/components/AppDialogs";
 import ProjectsWorkspace from "@/components/ProjectsWorkspace";
 import {
   DEFAULT_VIEW_BY_FILTER,
@@ -157,7 +158,7 @@ export default function TasksPanel({
   const projectStatuses = projectStatusesOrDefaults(projectStatusesQuery);
   const [flaggedBusy, setFlaggedBusy] = useState<string | null>(null);
 
-  const [draft, setDraft] = useState("");
+  const { promptMulti: openTaskForm } = useAppDialogs();
   const [isAdding, setIsAdding] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<Id<"tasks"> | null>(null);
   const [showDone, setShowDone] = useState(false);
@@ -289,12 +290,40 @@ export default function TasksPanel({
     return { jobs, fgs, projects: flaggedProjects ?? [], projectNameOf };
   }, [onlyFlaggedJobs, onlyFlaggedFgs, flaggedProjects]);
 
-  const handleAdd = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const raw = draft.trim();
-    if (!raw || isAdding) return;
-    const { text, tags } = parseQuickAdd(raw);
+  const handleAdd = async () => {
+    if (isAdding) return;
+    askNotificationPermission();
+    const values = await openTaskForm({
+      title: "New task",
+      message: activeList
+        ? `Adding to “${activeList.name}”. A #tag in the task is saved as a label.`
+        : "A #tag in the task is saved as a label.",
+      confirmLabel: "Add task",
+      columns: 2,
+      fields: [
+        {
+          key: "text",
+          label: "Task",
+          placeholder: "What needs doing?",
+          required: true,
+          full: true,
+        },
+        { key: "due", label: "Due date", type: "date" },
+        {
+          key: "priority",
+          label: "Priority",
+          placeholder: "high / medium / low",
+          initial: "medium",
+        },
+        { key: "description", label: "Notes (optional)", full: true },
+      ],
+    });
+    if (!values) return;
+    const { text, tags } = parseQuickAdd((values.text ?? "").trim());
     if (!text) return;
+    const wanted = (values.priority ?? "").trim().toLowerCase();
+    const priority = (["high", "medium", "low"] as const).find((p) => p === wanted);
+    const description = (values.description ?? "").trim();
     setIsAdding(true);
     try {
       await addTask({
@@ -307,8 +336,10 @@ export default function TasksPanel({
           activeView !== "flagged"
             ? (activeView as ListId)
             : undefined,
+        dueAt: values.due ? new Date(`${values.due}T12:00:00`).getTime() : undefined,
+        priority,
+        description: description || undefined,
       });
-      setDraft("");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't add that task.");
     } finally {
@@ -462,39 +493,50 @@ export default function TasksPanel({
 
   return (
     <div>
-      {/* ── Stats ───────────────────────────────────────────────────── */}
-      <TaskStats
-        tiles={[
-          {
-            label: viewLabel,
-            value:
-              activeView === "flagged"
-                ? flagFilter === "projects"
-                  ? (flaggedProjects?.length ?? 0)
-                  : flagFilter === "jobs"
-                    ? (flaggedItems?.jobs.length ?? 0)
-                    : (flaggedItems?.fgs.length ?? 0)
-                : tasks.length,
-          },
-          { label: "Completed", value: doneCount },
-          { label: "Open", value: tasks.length },
-        ]}
-      />
-
-      {/* ── Add a task ─────────────────────────────────────────── */}
-      <TaskQuickAdd
-        canCreate={canCreate}
-        draft={draft}
-        isAdding={isAdding}
-        listName={activeList?.name}
-        onDraftChange={setDraft}
-        onSubmit={handleAdd}
-        onFocus={askNotificationPermission}
-      />
+      {/* ── Toolbar: add a task, the counts, and the completed toggle ── */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <TaskQuickAdd
+            canCreate={canCreate}
+            isAdding={isAdding}
+            listName={activeList?.name}
+            onClick={handleAdd}
+          />
+          <TaskStats
+            tiles={[
+              {
+                label: viewLabel,
+                value:
+                  activeView === "flagged"
+                    ? flagFilter === "projects"
+                      ? (flaggedProjects?.length ?? 0)
+                      : flagFilter === "jobs"
+                        ? (flaggedItems?.jobs.length ?? 0)
+                        : (flaggedItems?.fgs.length ?? 0)
+                    : tasks.length,
+              },
+              { label: "Completed", value: doneCount },
+              { label: "Open", value: tasks.length },
+            ]}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowDone((v) => !v)}
+          className={cn(
+            "h-7 shrink-0 rounded-lg border px-2 text-[11px] font-medium transition-colors",
+            showDone
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+          )}
+        >
+          {showDone ? "Hiding nothing" : "Show completed"}
+        </button>
+      </div>
 
       {/* ── Scope / sort / filter controls ───────────────────────────── */}
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+      <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1.5">
+        <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
           <span className="mr-1">Show</span>
           {(
             [
@@ -512,7 +554,7 @@ export default function TasksPanel({
               title={hint}
               onClick={() => onScopeChange(mode)}
               className={cn(
-                "rounded-full border px-2.5 py-1 transition-colors",
+                "h-7 rounded-lg border px-2 font-medium transition-colors",
                 taskScope === mode
                   ? "border-primary/40 bg-primary/10 text-primary"
                   : "border-border bg-card hover:bg-accent hover:text-foreground",
@@ -536,7 +578,7 @@ export default function TasksPanel({
               type="button"
               onClick={() => setSortMode(mode)}
               className={cn(
-                "rounded-full border px-2.5 py-1 transition-colors",
+                "h-7 rounded-lg border px-2 font-medium transition-colors",
                 sortMode === mode
                   ? "border-primary/40 bg-primary/10 text-primary"
                   : "border-border bg-card hover:bg-accent hover:text-foreground",
@@ -546,18 +588,6 @@ export default function TasksPanel({
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={() => setShowDone((v) => !v)}
-          className={cn(
-            "rounded-full border px-2.5 py-1 text-xs transition-colors",
-            showDone
-              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-              : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
-        >
-          {showDone ? "Hiding nothing" : "Show completed"}
-        </button>
       </div>
 
       {/* ── Flagged jobs & products (from Projects) ─────────────────── */}
@@ -599,16 +629,16 @@ export default function TasksPanel({
 
       {/* ── Task list ───────────────────────────────────────────────── */}
       {activeView !== "flagged" && (
-      <section className="mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <section className="mt-2.5 overflow-hidden rounded-2xl border bg-card shadow-sm">
         {allTasks === undefined ? (
-          <div className="flex items-center justify-center gap-2 px-5 py-14 text-sm text-muted-foreground">
+          <div className="flex items-center justify-center gap-2 px-5 py-10 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
             Loading your tasks…
           </div>
         ) : (
           <>
           {tasks.length === 0 ? (
-          <div className="px-6 py-14 text-center">
+          <div className="px-6 py-10 text-center">
             <Inbox className="mx-auto size-8 text-muted-foreground/40" />
             <p className="mt-3 font-medium">Nothing here</p>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -618,7 +648,7 @@ export default function TasksPanel({
                   ? "Star a task to pin what matters most."
                   : activeList
                     ? `Add your first task to “${activeList.name}”.`
-                    : "Add your first task above, or flag text from a note."}
+                    : "Add your first task with the + New task button, or flag text from a note."}
             </p>
           </div>
         ) : (
@@ -669,7 +699,7 @@ export default function TasksPanel({
                         isOpen && "bg-primary/[0.04]",
                       )}
                     >
-                      <div className="flex flex-wrap items-center gap-3 px-4 py-3.5 sm:px-5">
+                      <div className="flex flex-wrap items-center gap-2.5 px-3 py-2 sm:px-4">
                         <Checkbox
                           checked={task.isCompleted}
                           disabled={!canEdit || rightsByTask.get(task._id)?.canComplete === false}
@@ -679,7 +709,7 @@ export default function TasksPanel({
                               ? `Mark “${task.text}” as not done`
                               : `Mark “${task.text}” as done`
                           }
-                          className="size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3"
+                          className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
                         />
                         <button
                           type="button"
@@ -688,7 +718,7 @@ export default function TasksPanel({
                         >
                           <span
                             className={cn(
-                              "text-[15px] leading-relaxed transition-colors",
+                              "text-sm leading-5 transition-colors",
                               task.isCompleted && "text-muted-foreground line-through",
                             )}
                           >
@@ -866,7 +896,7 @@ export default function TasksPanel({
                             aria-label={task.starred ? "Remove star" : "Star task"}
                             title={task.starred ? "Unstar" : "Star"}
                             className={cn(
-                              "grid size-7 place-items-center rounded-md transition-colors hover:bg-accent",
+                              "grid size-6 place-items-center rounded-md transition-colors hover:bg-accent",
                               task.starred ? "text-amber-500" : "text-muted-foreground opacity-0 group-hover/task:opacity-100",
                             )}
                             onClick={() =>
@@ -875,14 +905,14 @@ export default function TasksPanel({
                               )
                             }
                           >
-                            <Star className={cn("size-4", task.starred && "fill-amber-400")} />
+                            <Star className={cn("size-3.5", task.starred && "fill-amber-400")} />
                           </button>
                           {canDelete && (
                             <button
                               type="button"
                               aria-label="Delete task"
                               title="Delete"
-                              className="hidden size-7 place-items-center rounded-md text-muted-foreground hover:text-destructive group-hover/task:grid"
+                              className="hidden size-6 place-items-center rounded-md text-muted-foreground hover:text-destructive group-hover/task:grid"
                               onClick={() => void handleDelete(task._id)}
                             >
                               <Trash2 className="size-3.5" />

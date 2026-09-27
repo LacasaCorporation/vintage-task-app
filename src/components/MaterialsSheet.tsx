@@ -345,6 +345,7 @@ export default function MaterialsSheet({
                 <th className="w-28 px-3 py-2 font-semibold">Sub-cat.</th>
                 <th className="w-16 px-3 py-2 font-semibold">Unit</th>
                 <th className="w-28 px-3 py-2 text-right font-semibold">Unit price</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">Opening</th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">Income</th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">Outgoing</th>
                 <th className="w-28 px-3 py-2 text-right font-semibold">Balance</th>
@@ -354,14 +355,14 @@ export default function MaterialsSheet({
             <tbody className="divide-y divide-border/60">
               {loading ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading materials…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
                     {search || categoryFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No raw materials yet — add your first one above."}
@@ -374,6 +375,7 @@ export default function MaterialsSheet({
                   // a material with no recorded movement still has a balance
                   const income = stock?.income ?? 0;
                   const outgoing = stock?.outgoing ?? 0;
+                  const opening = stock?.opening ?? 0;
                   const movementRow: StockRow = stock ?? {
                     materialId: m._id,
                     name: m.name,
@@ -421,6 +423,12 @@ export default function MaterialsSheet({
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.subCategory ?? "—"}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.unit}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{money(m.pricePerUnit)}</td>
+                    <td
+                      className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground"
+                      title="Opening — stock carried in from before these transactions"
+                    >
+                      {opening === 0 ? "—" : opening.toLocaleString()}
+                    </td>
                     <td
                       className="px-3 py-2 text-right text-xs tabular-nums text-emerald-600 dark:text-emerald-400"
                       title="Income — everything bought on a bill"
@@ -485,7 +493,7 @@ export default function MaterialsSheet({
                   </tr>
                   {open && (
                     <tr>
-                      <td colSpan={11} className="p-0">
+                      <td colSpan={13} className="p-0">
                         <StockMovementList row={movementRow} />
                       </td>
                     </tr>

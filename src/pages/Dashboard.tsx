@@ -447,7 +447,6 @@ export default function Dashboard() {
   const addFgM = useMutation(api.costing.addFinishedGood);
   const updateFgM = useMutation(api.costing.updateFinishedGood);
   const detachJobsM = useMutation(api.costing.setFgJobs);
-  const removeFgM = useMutation(api.costing.removeFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
   const updateProjectM = useMutation(api.costing.updateProject);
   const removeProjectM = useMutation(api.costing.removeProject);
@@ -648,27 +647,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleRenameFg = async (fg: {
-    _id: FgId;
-    name: string;
-    projectName?: string;
-  }) => {
-    const name = await prompt({
-      title: "Rename product",
-      label: "Product name",
-      initial: fg.name,
-      required: true,
-    });
-    if (name === null) return;
-    const clean = name.trim();
-    if (!clean) return;
-    try {
-      await updateFgM({ id: fg._id, name: clean });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't rename the product.");
-    }
-  };
-
   const handleEditFg = async (fg: {
     _id: FgId;
     projectName?: string;
@@ -724,40 +702,6 @@ export default function Dashboard() {
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the product.");
-    }
-  };
-
-  const handleDeleteFg = async (fg: {
-    _id: FgId;
-    name: string;
-    productionStartedAt?: number;
-  }) => {
-    // production is holding raw materials out of stock, so it has to be
-    // stopped first — the server refuses the delete otherwise
-    if (fg.productionStartedAt !== undefined) {
-      await confirm({
-        title: `“${fg.name}” is in production`,
-        message:
-          "Stop production before deleting this product. Stopping puts the raw materials it is using back into stock.",
-        confirmLabel: "Got it",
-        icon: "danger",
-      });
-      return;
-    }
-    const ok = await confirm({
-      title: `Delete “${fg.name}”?`,
-      message:
-        "The product and all its costing lines will be permanently removed, and it will disappear from the Tasks page as well. This cannot be undone.",
-      confirmLabel: "Delete product",
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await removeFgM({ id: fg._id });
-      if (costingView?.kind === "fg" && costingView.fgId === fg._id) setCostingView(null);
-      toast.success("Product deleted.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't delete the product.");
     }
   };
 
@@ -835,12 +779,8 @@ export default function Dashboard() {
             <CostingSidebar
               finishedGoods={finishedGoods ?? []}
               materials={materials ?? []}
-              loading={finishedGoods === undefined}
               view={costingView}
               onSelectView={setCostingView}
-              onNewFg={canDoItem("projects", "create") ? (p) => void handleNewFg(p) : undefined}
-              onRenameFg={canDoItem("products", "edit") ? (fg) => void handleRenameFg(fg) : undefined}
-              onDeleteFg={canDoItem("products", "delete") ? (fg) => void handleDeleteFg(fg) : undefined}
               onMaterialsClick={() => setCostingView({ kind: "materials" })}
               showMaterials={canDoItem("materials", "view")}
               showPurchase={canDoItem("purchases", "view")}
@@ -998,14 +938,14 @@ export default function Dashboard() {
         </header>
 
         {/* wide content area — uses the full window width */}
-        <main className="w-full flex-1 px-4 pb-16 pt-8 sm:px-8">
+        <main className="w-full flex-1 px-4 pb-12 pt-6 sm:px-8">
           {section === "tasks" && (
-            <div className="mb-6">
-              <h1 className="font-display text-3xl font-bold tracking-tight">
+            <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              <h1 className="font-display text-xl font-semibold tracking-tight">
                 {greetingForHour(new Date().getHours())}
                 {firstName ? `, ${firstName}` : ""}.
               </h1>
-              <p className="mt-1 text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {format(new Date(), "EEEE, MMMM d")}
               </p>
             </div>

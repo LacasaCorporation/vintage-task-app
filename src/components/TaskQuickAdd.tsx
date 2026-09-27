@@ -1,72 +1,65 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Loader2, Plus } from "lucide-react";
 
-/** The quick-add row; falls back to a note when the role can't create tasks. */
+/** The compact “+ New task” trigger; falls back to a note when the role can't create tasks. */
 export function TaskQuickAdd({
   canCreate,
-  draft,
   isAdding,
   listName,
-  onDraftChange,
-  onSubmit,
-  onFocus,
+  onClick,
 }: {
   canCreate: boolean;
-  draft: string;
   isAdding: boolean;
   listName?: string;
-  onDraftChange: (value: string) => void;
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
-  onFocus: () => void;
+  onClick: () => void;
 }) {
   if (!canCreate) {
     return (
-      <p className="mt-4 rounded-xl border border-dashed bg-card px-4 py-3 text-center text-sm text-muted-foreground">
+      <p className="rounded-lg border border-dashed bg-card px-3 py-1.5 text-xs text-muted-foreground">
         You can view tasks, but creating new ones isn't allowed for your role.
       </p>
     );
   }
   return (
-    <form onSubmit={onSubmit} className="mt-4 flex gap-2" onFocus={onFocus}>
-      <Input
-        value={draft}
-        onChange={(e) => onDraftChange(e.target.value)}
-        maxLength={280}
-        placeholder={
-          listName
-            ? `Add to “${listName}”… use #tag for labels`
-            : "Add a task… #work for tags, “tomorrow 3pm” to schedule later"
-        }
-        aria-label="New task"
-        className="h-11 flex-1 rounded-xl bg-card shadow-sm placeholder:text-muted-foreground/70"
-      />
-      <Button
-        type="submit"
-        disabled={!draft.trim() || isAdding}
-        className="h-11 rounded-xl px-5 shadow-sm"
-      >
-        {isAdding ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-        Add task
-      </Button>
-    </form>
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      disabled={isAdding}
+      onClick={onClick}
+      title={
+        listName
+          ? `New task in “${listName}” — due date, priority & notes`
+          : "New task — due date, priority & notes"
+      }
+      className="h-7 shrink-0 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs font-medium text-primary transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-primary"
+    >
+      {isAdding ? (
+        <Loader2 className="size-3.5 animate-spin" />
+      ) : (
+        <Plus className="size-3.5" />
+      )}
+      New task
+    </Button>
   );
 }
 
-/** The three headline tiles above the workspace: current view, done, open. */
+/** A slim one-line readout of the view: total, completed, open. */
 export default function TaskStats({
   tiles,
 }: {
   tiles: { label: string; value: number }[];
 }) {
   return (
-    <section className="grid grid-cols-3 gap-3">
+    <dl className="flex min-w-0 flex-wrap items-baseline gap-x-3.5 gap-y-0.5">
       {tiles.map((stat) => (
-        <div key={stat.label} className="rounded-xl border bg-card p-4 text-center shadow-sm">
-          <p className="font-display text-2xl font-semibold tabular-nums">{stat.value}</p>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">{stat.label}</p>
+        <div key={stat.label} className="flex min-w-0 items-baseline gap-1">
+          <dd className="text-sm font-semibold tabular-nums text-foreground">
+            {stat.value}
+          </dd>
+          <dt className="truncate text-[11px] text-muted-foreground">{stat.label}</dt>
         </div>
       ))}
-    </section>
+    </dl>
   );
 }
