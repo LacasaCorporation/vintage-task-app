@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
-import { batchCost, costByProduct } from "@/lib/product-cost";
+import { costByProduct } from "@/lib/product-cost";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -341,7 +341,9 @@ export default function ProductForm({
         `Sales Price (${currencyCode})`,
       ].join(","),
       ...rows.map((f) => {
-        const cost = batchCost(costByFg.get(f._id) ?? 0, f);
+        // per unit, exactly like a raw material row — the batch lives on the
+        // job link, not on this price
+        const cost = costByFg.get(f._id) ?? 0;
         const total = cost * (1 + (f.markupPct ?? 0) / 100);
         return [
           `"${(f.projectCode ?? "").replace(/"/g, '""')}"`,
@@ -711,24 +713,25 @@ export default function ProductForm({
                 <th className="w-16 px-3 py-2 font-semibold">Unit</th>
                 <th className="w-28 px-3 py-2 font-semibold">Category</th>
                 <th className="w-16 px-3 py-2 text-right font-semibold">Margin %</th>
-                <th className="w-24 px-3 py-2 text-right font-semibold">Cost</th>
-                <th className="w-28 px-3 py-2 text-right font-semibold">Sales price</th>
-                <th className="w-24 px-3 py-2 text-right font-semibold">Stock</th>
-                <th className="w-24 px-3 py-2 text-right font-semibold">In production</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">Cost / unit</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">Price / unit</th>
+                <th className="w-20 px-3 py-2 text-right font-semibold">Stock</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">Stock value</th>
+                <th className="w-20 px-3 py-2 text-right font-semibold">In production</th>
                 <th className="w-16 px-2 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {allItems === undefined || finishedGoods === undefined ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading products…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">
                     {search || projectFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No products yet — create your first FG above."}
@@ -736,8 +739,11 @@ export default function ProductForm({
                 </tr>
               ) : (
                 rows.map((f, i) => {
-                  const cost = batchCost(costByFg.get(f._id) ?? 0, f);
+                  // per unit, matching the raw material list; the job link
+                  // multiplies by its own batch when the project totals it
+                  const cost = costByFg.get(f._id) ?? 0;
                   const total = cost * (1 + (f.markupPct ?? 0) / 100);
+                  const stock = f.stock ?? 0;
                   const active = activeFgId === f._id;
                   return (
                     <tr
@@ -821,23 +827,27 @@ export default function ProductForm({
                         <span
                           className={cn(
                             "inline-flex items-center gap-1",
-                            (f.stock ?? 0) < 0
+                            stock < 0
                               ? "text-destructive"
-                              : (f.stock ?? 0) > 0
+                              : stock > 0
                                 ? "text-foreground"
                                 : "text-muted-foreground/60",
                           )}
                           title={
-                            (f.stock ?? 0) < 0
-                              ? `Short ${Math.abs(f.stock ?? 0)} ${f.unit ?? "pcs"} — produce or adjust`
-                              : `${(f.stock ?? 0)} ${f.unit ?? "pcs"} ready to sell`
+                            stock < 0
+                              ? `Short ${Math.abs(stock)} ${f.unit ?? "pcs"} — produce or adjust`
+                              : `${stock} ${f.unit ?? "pcs"} ready to sell`
                           }
                         >
-                          {(f.stock ?? 0) < 0 && (
-                            <AlertTriangle className="size-3 shrink-0" />
-                          )}
-                          {(f.stock ?? 0).toLocaleString()}
+                          {stock < 0 && <AlertTriangle className="size-3 shrink-0" />}
+                          {stock.toLocaleString()}
                         </span>
+                      </td>
+                      <td
+                        className="px-3 py-1.5 text-right text-xs tabular-nums"
+                        title={`${stock.toLocaleString()} ${f.unit ?? "pcs"} at ${money(total)} each`}
+                      >
+                        {money(total * stock)}
                       </td>
                       <td className="px-3 py-1.5 text-right text-xs tabular-nums">
                         {f.inProduction ? (

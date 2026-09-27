@@ -247,9 +247,11 @@ export default function CostingPanel({
   const { format, format: money, code: currencyCode } = useWorkspaceCurrency();
   const markupPct = activeFg?.markupPct ?? 0;
 
+  // keyed on whichever product the sheet is showing, not on the view kind —
+  // the sheet also opens as an overlay, where the view is still the list
   const items = useQuery(
     api.costing.listFgItems,
-    view?.kind === "fg" ? { fgId: view.fgId } : "skip",
+    activeFgId === null ? "skip" : { fgId: activeFgId },
   );
   const rows = useMemo(() => items ?? [], [items]);
 
