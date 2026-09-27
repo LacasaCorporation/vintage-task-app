@@ -199,6 +199,13 @@ export default function StockMovementPanel() {
                         </span>
                       </p>
                     )}
+                    {row.opening !== 0 && (
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        {row.opening > 0
+                          ? `Already had ${qty(row.opening)} ${row.unit} on hand before any of these movements — stock from bills recorded before movements were tracked, or a figure set by hand.`
+                          : `${qty(-row.opening)} ${row.unit} is unaccounted for: more has gone out than the bills and the movements add up to.`}
+                      </p>
+                    )}
                   </div>
                 )}
               </li>

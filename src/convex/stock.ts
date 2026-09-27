@@ -94,10 +94,11 @@ export type StockRow = {
   /** What is on hand right now, straight from the material. */
   balance: number;
   /**
-   * income - outgoing - balance. Not zero when stock was set by hand, or for
-   * bills that predate the ledger, so the report can say so out loud.
+   * Stock that was already on hand before the movement ledger existed, or
+   * that was set without a movement. Without it the arithmetic looks broken:
+   * opening + income - outgoing = balance.
    */
-  unexplained: number;
+  opening: number;
   /** The most recent movements, newest first. */
   movements: {
     _id: Id<"stockMovements">;
@@ -181,7 +182,7 @@ export const report = query({
         income: incomeQty,
         outgoing,
         balance,
-        unexplained: round(incomeQty - outgoing - balance),
+        opening: round(balance - incomeQty + outgoing),
         movements: (entry?.movements ?? [])
           .sort((a, b) => b.at - a.at)
           .slice(0, 4),
