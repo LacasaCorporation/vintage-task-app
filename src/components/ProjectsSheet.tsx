@@ -30,7 +30,7 @@ import { ProductionButton } from "@/components/FlaggedLists";
 import ProductQtyInline from "@/components/ProductQtyInline";
 import ProductCodeInline from "@/components/ProductCodeInline";
 import ProductTagsInline from "@/components/ProductTagsInline";
-import { batchCost, costByProduct } from "@/lib/product-cost";
+import { batchCost, batchQty, costByProduct } from "@/lib/product-cost";
 import MoneyBracket from "@/components/MoneyBracket";
 import PriorityChip from "@/components/PriorityChip";
 import CustomersPanel from "@/components/CustomersPanel";
@@ -64,6 +64,21 @@ import ProjectsPrintSheet, {
 import { cn } from "@/lib/utils";
 
 type FgDoc = Doc<"finishedGoods">;
+
+/**
+ * What a product's cost bracket reads: "3 × $500.00 = $1,500.00", so the
+ * multiplication is visible rather than just the answer. A product with no
+ * quantity set is one of itself, and the breakdown would only be noise.
+ */
+function productCostLabel(
+  fg: FgDoc,
+  unitCost: number,
+  money: (n: number) => string,
+): string {
+  const qty = batchQty(fg);
+  const total = unitCost * qty;
+  return qty > 1 ? `${qty} × ${money(unitCost)} = ${money(total)}` : money(total);
+}
 type ProjectDoc = Doc<"projects">;
 type JobDoc = Doc<"projectJobs">;
 
@@ -1234,9 +1249,9 @@ export default function ProjectsSheet({
                                         <ProductCodeInline code={fg.code} />
                                         <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                                         <MoneyBracket
-                                          amount={money(batchCost(costByFg.get(fg._id) ?? 0, fg))}
+                                          amount={productCostLabel(fg, costByFg.get(fg._id) ?? 0, money)}
                                           tone="cost"
-                                          title="Production cost for the whole batch"
+                                          title="Quantity × unit cost = production cost for the whole batch"
                                         />
                                         <ProductTagsInline tags={fg.tags} />
                                       </span>
@@ -1344,9 +1359,9 @@ export default function ProjectsSheet({
                                 <ProductCodeInline code={fg.code} />
                                 <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                                 <MoneyBracket
-                                  amount={money(batchCost(costByFg.get(fg._id) ?? 0, fg))}
+                                  amount={productCostLabel(fg, costByFg.get(fg._id) ?? 0, money)}
                                   tone="cost"
-                                  title="Production cost for the whole batch"
+                                  title="Quantity × unit cost = production cost for the whole batch"
                                 />
                                 <ProductTagsInline tags={fg.tags} />
                               </span>
