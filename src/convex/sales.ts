@@ -1,5 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
+import { postSale, postSaleReceipt, reverseEntry } from "./ledger";
+import { defaultTaxPct } from "./accountingDefaults";
 import { getSettings } from "./settings";
 import { currencySymbol } from "../lib/currency";
 import { returnStock as unsellStock, sellStock as logSale } from "./productStock";
@@ -73,6 +75,16 @@ function priceLines(
 }
 
 /** Every quotation, newest first. */
+/** The workspace default tax rate, for the invoice form to prefill. */
+export const postingDefaults = query({
+  args: {},
+  handler: async (ctx): Promise<{ taxPct: number }> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return { taxPct: 0 };
+    return { taxPct: await defaultTaxPct(ctx, userId) };
+  },
+});
+
 export const listQuotations = query({
   args: {},
   handler: async (ctx) => {
@@ -255,6 +267,11 @@ export const convertToSale = mutation({
       quotationId: quote._id,
     });
     await sellStock(ctx, userId, quote.lines, String(saleId));
+    const createdSale = await ctx.db.get(saleId);
+    if (createdSale !== null) {
+      const entryId = await postSale(ctx, userId, createdSale);
+      await ctx.db.patch(saleId, { entryId });
+    }
     await ctx.db.patch(quote._id, {
       status: "accepted",
       invoicedAs: saleId,
@@ -333,11 +350,24 @@ export const createSale = mutation({
       total: grand,
     });
     await sellStock(ctx, userId, resolved, String(saleId));
+    // the invoice reaches the ledger in the same call, so the sales list and
+    // the accounts can never drift apart
+    const created = await ctx.db.get(saleId);
+    if (created !== null) {
+      const entryId = await postSale(ctx, userId, created);
+      await ctx.db.patch(saleId, { entryId });
+    }
     return saleId;
   },
 });
 
-/** Mark a sales bill paid or unpaid. */
+/**
+ * Mark a sales bill paid or unpaid.
+ *
+ * The customer settling is its own event, so it gets its own entry: the money
+ * comes in and clears the receivable. Un-paying reverses exactly that entry.
+ * The invoice's own entry is never touched here.
+ */
 export const setSalePaid = mutation({
   args: { id: v.id("sales"), paid: v.boolean() },
   handler: async (ctx, { id, paid }) => {
@@ -346,7 +376,71 @@ export const setSalePaid = mutation({
     const sale = await ctx.db.get(id);
     if (sale === null) return;
     if (sale.ownerId !== userId) throw new Error("Not your bill.");
-    await ctx.db.patch(id, { isPaid: paid || undefined, paidAt: paid ? Date.now() : undefined });
+    if ((sale.isPaid === true) === paid) return; // nothing changed
+
+    if (paid) {
+      const entryId = await postSaleReceipt(ctx, userId, sale, false);
+      await ctx.db.patch(id, {
+        isPaid: true,
+        paidAt: Date.now(),
+        paymentEntryId: entryId,
+      });
+      return;
+    }
+    await reverseEntry(ctx, userId, sale.paymentEntryId);
+    await ctx.db.patch(id, {
+      isPaid: undefined,
+      paidAt: undefined,
+      paymentEntryId: undefined,
+    });
+  },
+});
+
+/**
+ * Post every sales bill that never reached the ledger — invoices raised before
+ * sales wrote to the accounts. Reports what it fixed and what it could not.
+ */
+export const postMissing = mutation({
+  args: {},
+  handler: async (ctx): Promise<{ posted: number; failed: string[] }> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const sales = await ctx.db
+      .query("sales")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    let posted = 0;
+    const failed: string[] = [];
+    for (const sale of sales) {
+      if (sale.entryId === undefined) {
+        try {
+          const entryId = await postSale(ctx, userId, sale);
+          await ctx.db.patch(sale._id, { entryId });
+          posted++;
+        } catch (error) {
+          failed.push(
+            `${sale.number}: ${error instanceof Error ? error.message : "could not post"}`,
+          );
+          continue;
+        }
+      }
+      // an invoice already marked paid needs its receipt entry too
+      const fresh = await ctx.db.get(sale._id);
+      if (fresh !== null && fresh.isPaid === true && fresh.paymentEntryId === undefined) {
+        try {
+          const paymentEntryId = await postSaleReceipt(ctx, userId, fresh, false);
+          await ctx.db.patch(sale._id, { paymentEntryId });
+          posted++;
+        } catch (error) {
+          failed.push(
+            `${sale.number} (receipt): ${
+              error instanceof Error ? error.message : "could not post"
+            }`,
+          );
+        }
+      }
+    }
+    return { posted, failed };
   },
 });
 
@@ -366,6 +460,9 @@ export const removeSale = mutation({
         status: "accepted",
       });
     }
+    // take the invoice and its settlement back out of the ledger
+    await reverseEntry(ctx, userId, sale.entryId);
+    await reverseEntry(ctx, userId, sale.paymentEntryId);
     // the bill never happened, so the goods it took go back on the shelf
     for (const line of sale.lines) {
       if (!(line.qty > 0)) continue;

@@ -261,6 +261,120 @@ export const setCurrency = mutation({
 });
 
 /**
+ * Which accounts the automatic postings use, and the default tax rate.
+ *
+ * Read back with the chart attached so the Settings screen can show a name and
+ * code rather than an opaque id, and can tell a stale pointer — an account
+ * that has since been deleted — from a live one.
+ */
+export const getAccountingDefaults = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const settingsDoc = await getSettings(ctx, userId);
+    if (settingsDoc === null) return null;
+    const accounts = await ctx.db
+      .query("accounts")
+      .withIndex("by_owner", (q) => q.eq("ownerId", settingsDoc.ownerId))
+      .collect();
+    const postable = accounts.filter((a) => a.isGroup !== true);
+    const chosen = settingsDoc.accounting;
+    const live = (id: Id<"accounts"> | undefined) =>
+      id !== undefined && postable.some((a) => a._id === id);
+    return {
+      accounts: postable
+        .map((a) => ({ _id: a._id, code: a.code, name: a.name, type: a.type }))
+        .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
+      ids: {
+        cashAccountId: chosen?.cashAccountId,
+        bankAccountId: chosen?.bankAccountId,
+        receivableAccountId: chosen?.receivableAccountId,
+        payableAccountId: chosen?.payableAccountId,
+        salesAccountId: chosen?.salesAccountId,
+        purchaseAccountId: chosen?.purchaseAccountId,
+        taxAccountId: chosen?.taxAccountId,
+      },
+      /** True when a saved pointer no longer resolves to a real account. */
+      stale: {
+        cashAccountId:
+          chosen?.cashAccountId !== undefined && !live(chosen.cashAccountId),
+        bankAccountId:
+          chosen?.bankAccountId !== undefined && !live(chosen.bankAccountId),
+        receivableAccountId:
+          chosen?.receivableAccountId !== undefined &&
+          !live(chosen.receivableAccountId),
+        payableAccountId:
+          chosen?.payableAccountId !== undefined && !live(chosen.payableAccountId),
+        salesAccountId:
+          chosen?.salesAccountId !== undefined && !live(chosen.salesAccountId),
+        purchaseAccountId:
+          chosen?.purchaseAccountId !== undefined && !live(chosen.purchaseAccountId),
+        taxAccountId:
+          chosen?.taxAccountId !== undefined && !live(chosen.taxAccountId),
+      },
+      taxPct: Math.max(0, chosen?.taxPct ?? 0),
+    };
+  },
+});
+
+/**
+ * Save the accounting defaults. Passing null for an account clears it, which
+ * puts that posting back on the standard-code fallback — so clearing a field
+ * is a real choice, not a dead end.
+ */
+export const setAccountingDefaults = mutation({
+  args: {
+    cashAccountId: v.optional(v.union(v.id("accounts"), v.null())),
+    bankAccountId: v.optional(v.union(v.id("accounts"), v.null())),
+    receivableAccountId: v.optional(v.union(v.id("accounts"), v.null())),
+    payableAccountId: v.optional(v.union(v.id("accounts"), v.null())),
+    salesAccountId: v.optional(v.union(v.id("accounts"), v.null())),
+    purchaseAccountId: v.optional(v.union(v.id("accounts"), v.null())),
+    taxAccountId: v.optional(v.union(v.id("accounts"), v.null())),
+    taxPct: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const settingsDoc = await getOrCreateSettings(ctx, userId);
+    const role =
+      settingsDoc.ownerId === userId
+        ? "super"
+        : settingsDoc.members.find((m) => m.userId === userId)?.role;
+    if (role !== "super" && role !== "admin")
+      throw new Error("Only an admin can change the accounting defaults.");
+
+    const accounts = await ctx.db
+      .query("accounts")
+      .withIndex("by_owner", (q) => q.eq("ownerId", settingsDoc.ownerId))
+      .collect();
+    const check = (id: Id<"accounts"> | null | undefined, what: string) => {
+      if (id === undefined || id === null) return undefined;
+      const hit = accounts.find((a) => a._id === id);
+      if (hit === undefined) throw new Error(`That ${what} account no longer exists.`);
+      if (hit.isGroup === true)
+        throw new Error(`${hit.name} is a heading — pick a real account.`);
+      return id;
+    };
+
+    await ctx.db.patch(settingsDoc._id, {
+      accounting: {
+        cashAccountId: check(args.cashAccountId, "cash"),
+        bankAccountId: check(args.bankAccountId, "bank"),
+        receivableAccountId: check(args.receivableAccountId, "receivable"),
+        payableAccountId: check(args.payableAccountId, "payable"),
+        salesAccountId: check(args.salesAccountId, "sales"),
+        purchaseAccountId: check(args.purchaseAccountId, "purchases"),
+        taxAccountId: check(args.taxAccountId, "tax"),
+        taxPct: Math.max(0, args.taxPct ?? 0) || undefined,
+      },
+    });
+    return true;
+  },
+});
+
+/**
  * Claim any pending invite for the caller's email and register them as a
  * member. Called once per sign-in from the client; silently no-ops when
  * there's no invite.

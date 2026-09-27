@@ -1,5 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
+import { postBill, postBillPayment, reverseEntry } from "./ledger";
+import { defaultTaxPct } from "./accountingDefaults";
 import { setStockTo, stockIn, stockOut } from "./stock";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -25,6 +27,18 @@ async function nextPurchaseNumber(
 }
 
 /** Every purchase bill, newest first. */
+/**
+ * The default tax rate and where bills post, for the bill form to prefill.
+ */
+export const postingDefaults = query({
+  args: {},
+  handler: async (ctx): Promise<{ taxPct: number }> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return { taxPct: 0 };
+    return { taxPct: await defaultTaxPct(ctx, userId) };
+  },
+});
+
 export const list = query({
   args: {},
   handler: async (ctx) => {
@@ -140,6 +154,13 @@ export const create = mutation({    args: {
     // remember each line so this bill can be edited and reversed later
     for (const line of resolved) {
       await ctx.db.insert("purchaseLines", { ownerId: userId, purchaseId, ...line });
+    }
+    // the bill reaches the ledger in the same call, so the register and the
+    // accounts can never drift apart
+    const created = await ctx.db.get(purchaseId);
+    if (created !== null) {
+      const entryId = await postBill(ctx, userId, created);
+      await ctx.db.patch(purchaseId, { entryId });
     }
     // a bill raised from an order *is* that order's delivery: the stock is
     // already in from the lines above, so the order is closed out here rather
@@ -262,11 +283,31 @@ export const update = mutation({
       lines: resolved,
       total: Math.round(grand * 100) / 100,
     });
+    // the old entries described a bill that no longer exists, so they are
+    // reversed and the corrected bill posted in their place
+    const wasPaid = bill.isPaid === true;
+    await reverseEntry(ctx, userId, bill.entryId);
+    await reverseEntry(ctx, userId, bill.paymentEntryId);
+    const updated = await ctx.db.get(id);
+    if (updated !== null) {
+      const entryId = await postBill(ctx, userId, updated);
+      const paymentEntryId = wasPaid
+        ? await postBillPayment(ctx, userId, updated, false)
+        : undefined;
+      await ctx.db.patch(id, { entryId, paymentEntryId });
+    }
     return id;
   },
 });
 
-/** Mark a bill paid / unpaid. */
+/**
+ * Mark a bill paid / unpaid.
+ *
+ * Settling is its own event, so it gets its own entry: paying clears the
+ * payable against the till, and un-paying reverses exactly that entry and
+ * nothing else. The bill's own entry is never touched here, which is what
+ * keeps the purchase and the payment readable as two separate facts.
+ */
 export const setPaid = mutation({
   args: { id: v.id("purchases"), paid: v.boolean() },
   handler: async (ctx, { id, paid }) => {
@@ -275,7 +316,64 @@ export const setPaid = mutation({
     const bill = await ctx.db.get(id);
     if (bill === null) throw new Error("That bill no longer exists.");
     if (bill.ownerId !== userId) throw new Error("Not your bill.");
-    await ctx.db.patch(id, { isPaid: paid || undefined });
+    if ((bill.isPaid === true) === paid) return; // nothing changed
+
+    if (paid) {
+      const entryId = await postBillPayment(ctx, userId, bill, false);
+      await ctx.db.patch(id, { isPaid: true, paymentEntryId: entryId });
+      return;
+    }
+    await reverseEntry(ctx, userId, bill.paymentEntryId);
+    await ctx.db.patch(id, { isPaid: undefined, paymentEntryId: undefined });
+  },
+});
+
+/**
+ * Post every bill that never reached the ledger — rows recorded before bills
+ * wrote to the accounts, or entries lost to a failed call. It reports what it
+ * fixed rather than failing the whole run on one bad row.
+ */
+export const postMissing = mutation({
+  args: {},
+  handler: async (ctx): Promise<{ posted: number; failed: string[] }> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const bills = await ctx.db
+      .query("purchases")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    let posted = 0;
+    const failed: string[] = [];
+    for (const bill of bills) {
+      if (bill.entryId === undefined) {
+        try {
+          const entryId = await postBill(ctx, userId, bill);
+          await ctx.db.patch(bill._id, { entryId });
+          posted++;
+        } catch (error) {
+          failed.push(
+            `${bill.number}: ${error instanceof Error ? error.message : "could not post"}`,
+          );
+          continue;
+        }
+      }
+      // a bill already marked paid needs its settlement entry too
+      const fresh = await ctx.db.get(bill._id);
+      if (fresh !== null && fresh.isPaid === true && fresh.paymentEntryId === undefined) {
+        try {
+          const paymentEntryId = await postBillPayment(ctx, userId, fresh, false);
+          await ctx.db.patch(bill._id, { paymentEntryId });
+          posted++;
+        } catch (error) {
+          failed.push(
+            `${bill.number} (payment): ${
+              error instanceof Error ? error.message : "could not post"
+            }`,
+          );
+        }
+      }
+    }
+    return { posted, failed };
   },
 });
 
@@ -291,6 +389,9 @@ export const remove = mutation({
     const bill = await ctx.db.get(id);
     if (bill === null) return;
     if (bill.ownerId !== userId) throw new Error("Not your bill.");
+    // take the bill and its settlement back out of the ledger
+    await reverseEntry(ctx, userId, bill.entryId);
+    await reverseEntry(ctx, userId, bill.paymentEntryId);
     // the order it came from is open again — the goods are no longer booked in
     if (bill.lpoId !== undefined) {
       const lpo = await ctx.db.get(bill.lpoId);

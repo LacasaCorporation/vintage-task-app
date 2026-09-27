@@ -1,14 +1,13 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { postEntry } from "./accounting";
+import { resolveDefaults } from "./accountingDefaults";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 
 const round = (n: number) => Math.round(n * 100) / 100;
 
-/** Cash in hand, then the bank — what an expense is normally paid from. */
-const CASH_CODES = ["1100", "1110", "1120"];
 
 export type ExpenseDoc = Doc<"expenses">;
 
@@ -74,14 +73,25 @@ export const options = query({
       .query("accounts")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
+    // cash first, then the bank — the accounts Settings names as money
+    let payFrom: { id: Id<"accounts">; name: string; code: string }[] = [];
+    try {
+      const d = await resolveDefaults(ctx, userId);
+      payFrom = [d.cash, d.bank].map((a) => ({
+        id: a._id,
+        name: a.name,
+        code: a.code,
+      }));
+    } catch {
+      // no chart yet — the form simply offers nothing to pay from
+      payFrom = [];
+    }
     return {
       categories: accounts
         .filter((a) => a.type === "expense" && a.isGroup !== true)
         .map((a) => ({ id: a._id, name: a.name }))
         .sort((a, b) => a.name.localeCompare(b.name)),
-      payFrom: accounts
-        .filter((a) => a.isGroup !== true && CASH_CODES.includes(a.code))
-        .map((a) => ({ id: a._id, name: a.name, code: a.code })),
+      payFrom,
     };
   },
 });
@@ -146,17 +156,8 @@ export const create = mutation({
 
     let paidFrom = args.paidFrom;
     if (paidFrom === undefined) {
-      const accounts = await ctx.db
-        .query("accounts")
-        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-        .collect();
-      const cash = accounts.find(
-        (a) => a.isGroup !== true && CASH_CODES.includes(a.code),
-      );
-      if (cash === undefined) {
-        throw new Error("Set up a cash or bank account before recording expenses.");
-      }
-      paidFrom = cash._id;
+      // falls back to the configured cash account, then the standard code
+      paidFrom = (await resolveDefaults(ctx, userId)).cash._id;
     }
     const cashAccount = await ctx.db.get(paidFrom);
     if (cashAccount === null || cashAccount.ownerId !== userId) {

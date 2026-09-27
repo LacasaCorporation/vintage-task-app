@@ -7,10 +7,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronLeft,
   ClipboardList,
   Eye,
+  FileSpreadsheet,
   Link2,
   List,
   Loader2,
@@ -69,6 +71,37 @@ export default function PurchasePanel({
   const updateBill = useMutation(api.purchases.update);
   const setPaid = useMutation(api.purchases.setPaid);
   const removeBill = useMutation(api.purchases.remove);
+  const postMissingBills = useMutation(api.purchases.postMissing);
+  const [repairingBills, setRepairingBills] = useState(false);
+
+  /**
+   * Bills recorded before the register wrote to the ledger have no entry. The
+   * list says so and offers to fix it, rather than showing a bill as done when
+   * the accounts never heard about it.
+   */
+  const unpostedBills = (bills ?? []).filter((b) => b.entryId === undefined);
+
+  const repairBills = async () => {
+    setRepairingBills(true);
+    try {
+      const { posted, failed } = await postMissingBills({});
+      if (posted > 0) {
+        toast.success(
+          `Posted ${posted} journal ${posted === 1 ? "entry" : "entries"} for bills.`,
+        );
+      }
+      if (failed.length > 0) toast.error(`Couldn't post: ${failed.join("; ")}.`);
+      if (posted === 0 && failed.length === 0) {
+        toast.success("Every bill is already in the accounts.");
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't post the missing entries.",
+      );
+    } finally {
+      setRepairingBills(false);
+    }
+  };
   const vendors = useQuery(api.contacts.listVendors);
   const lpos = useQuery(api.lpo.list);
   const expenses = useQuery(api.expenses.list);
@@ -515,6 +548,31 @@ export default function PurchasePanel({
         </section>
       )}
 
+      {tab === "list" && viewed === null && unpostedBills.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <strong>
+              {unpostedBills.length} bill{unpostedBills.length === 1 ? "" : "s"}
+            </strong>{" "}
+            {unpostedBills.length === 1 ? "is" : "are"} not in the chart of accounts.
+          </span>
+          <button
+            type="button"
+            onClick={() => void repairBills()}
+            disabled={repairingBills}
+            className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+          >
+            {repairingBills ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <FileSpreadsheet className="size-3" />
+            )}
+            Post to accounts
+          </button>
+        </div>
+      )}
+
       {tab === "list" && viewed === null && (
         <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
           <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
@@ -546,6 +604,7 @@ export default function PurchasePanel({
                     <th className="px-3 py-2 text-right font-medium">Items</th>
                     <th className="px-3 py-2 text-right font-medium">Amount</th>
                     <th className="px-3 py-2 text-center font-medium">Paid</th>
+                    <th className="px-3 py-2 text-left font-medium">Journal</th>
                     <th className="w-10 px-2 py-2" />
                   </tr>
                 </thead>
@@ -602,6 +661,23 @@ export default function PurchasePanel({
                           aria-label={`Mark bill ${bill.number} as paid`}
                           className="mx-auto size-4 rounded-full border-2 border-border data-[state=checked]:border-emerald-500 data-[state=checked]:bg-emerald-500 data-[state=checked]:text-white"
                         />
+                      </td>
+                      <td className="px-3 py-2.5 text-xs">
+                        {bill.entryId !== undefined ? (
+                          <span
+                            className="text-muted-foreground"
+                            title="Posted to the chart of accounts"
+                          >
+                            {bill.isPaid === true ? "posted + paid" : "posted"}
+                          </span>
+                        ) : (
+                          <span
+                            className="text-amber-600 dark:text-amber-400"
+                            title="Not in the chart of accounts yet — use “Post to accounts” above"
+                          >
+                            not posted
+                          </span>
+                        )}
                       </td>
                       <td className="px-2 py-2 text-center">
                         <div className="flex items-center justify-center gap-0.5">

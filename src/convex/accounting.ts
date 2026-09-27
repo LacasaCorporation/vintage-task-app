@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
+import { moneyAccountIds } from "./accountingDefaults";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -43,9 +44,6 @@ export type EntryRow = {
   debit: number;
   credit: number;
 };
-
-/** Accounts whose movement is money in or out of the bank / till. */
-const CASH_CODES = ["1100", "1110", "1120"];
 
 function signFor(type: AccountType): number {
   return type === "income" || type === "liability" || type === "equity" ? 1 : -1;
@@ -473,11 +471,11 @@ export const dayBook = query({
       .query("accounts")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
-    const cashIds = new Set(
-      accounts.filter((a) => CASH_CODES.includes(a.code)).map((a) => a._id),
-    );
+    // the cash book follows the accounts Settings names as cash and bank, so
+    // recoding or renaming them does not quietly empty this report
+    const cashIds = await moneyAccountIds(ctx, userId);
     const cashCodes = new Set(
-      accounts.filter((a) => CASH_CODES.includes(a.code)).map((a) => a.code),
+      accounts.filter((a) => cashIds.has(a._id)).map((a) => a.code),
     );
     const entries = await ctx.db
       .query("journalEntries")

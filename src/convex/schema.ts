@@ -88,6 +88,25 @@ const settings = defineTable({
   currency: v.optional(v.string()),
   /** Ordered workflow statuses for Projects. Start and Finish are fixed. */
   projectStatuses: v.optional(v.array(v.string())),
+  /**
+   * Which accounts the automatic postings use. A bill, an invoice, a receipt
+   * and a payment all read these instead of guessing from an account code, so
+   * a firm that recodes or renames its chart keeps posting correctly. Anything
+   * left out falls back to the standard code for that job.
+   */
+  accounting: v.optional(
+    v.object({
+      cashAccountId: v.optional(v.id("accounts")),
+      bankAccountId: v.optional(v.id("accounts")),
+      receivableAccountId: v.optional(v.id("accounts")),
+      payableAccountId: v.optional(v.id("accounts")),
+      salesAccountId: v.optional(v.id("accounts")),
+      purchaseAccountId: v.optional(v.id("accounts")),
+      taxAccountId: v.optional(v.id("accounts")),
+      /** Rate offered on new bills and invoices, e.g. 18 for 18%. */
+      taxPct: v.optional(v.number()),
+    }),
+  ),
   members: v.array(teamMemberValidator), // every user + role + restrictions
 }).index("by_owner", ["ownerId"]);
 
@@ -366,6 +385,13 @@ const schema = defineSchema(
       total: v.number(),
       isPaid: v.optional(v.boolean()),
       /**
+       * The journal entry this bill posted. Absent means it never reached the
+       * ledger — the register offers to repair it rather than hiding that.
+       */
+      entryId: v.optional(v.id("journalEntries")),
+      /** The entry that settled this bill, when it has been paid. */
+      paymentEntryId: v.optional(v.id("journalEntries")),
+      /**
        * The purchase order this bill was raised from. A bill raised from an
        * order is that order's delivery, so the order is closed out with it.
        */
@@ -593,6 +619,10 @@ const schema = defineSchema(
       total: v.number(),
       isPaid: v.optional(v.boolean()),
       paidAt: v.optional(v.number()),
+      /** The journal entry this invoice posted. */
+      entryId: v.optional(v.id("journalEntries")),
+      /** The entry that settled this invoice, when the customer has paid. */
+      paymentEntryId: v.optional(v.id("journalEntries")),
       /** The quote this bill came from, when it was converted from one. */
       quotationId: v.optional(v.id("quotations")),
     })

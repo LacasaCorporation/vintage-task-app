@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import MasterDataManager from "@/components/MasterDataManager";
 import { useAppDialogs } from "@/components/AppDialogs";
 import CurrencyPicker from "@/components/CurrencyPicker";
+import AccountingDefaultsCard from "@/components/AccountingDefaultsCard";
 import { CreateFirmButton } from "@/components/FirmSwitcher";
 import { cn } from "@/lib/utils";
 import { downloadBackupFile } from "@/lib/backup-download";
@@ -1090,6 +1091,8 @@ export default function SettingsPanel() {
           </div>
         </div>
       </section>
+
+      <AccountingDefaultsCard canEdit={canManage} />
 
       {/* member list */}
       <section
