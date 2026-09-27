@@ -8,6 +8,7 @@ import {
   Pencil,
   Plus,
   Receipt,
+  ShoppingCart,
   Trash2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -20,6 +21,7 @@ type MaterialDoc = Doc<"rawMaterials">;
 export type CostingView =
   | { kind: "materials" }
   | { kind: "purchase" }
+  | { kind: "sales" }
   | { kind: "products" }
   | { kind: "projects" }
   | { kind: "fg"; fgId: FgDoc["_id"] }
@@ -38,7 +40,9 @@ export default function CostingSidebar({
   onMaterialsClick,
   showMaterials = true,
   showPurchase = true,
+  showSales = true,
   purchaseCount = 0,
+  salesCount = 0,
 }: {
   finishedGoods: FgDoc[];
   materials: MaterialDoc[];
@@ -51,7 +55,9 @@ export default function CostingSidebar({
   onMaterialsClick: () => void;
   showMaterials?: boolean;
   showPurchase?: boolean;
+  showSales?: boolean;
   purchaseCount?: number;
+  salesCount?: number;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -110,6 +116,19 @@ export default function CostingSidebar({
             unit: "bill",
             active: view?.kind === "purchase",
             onClick: () => onSelectView({ kind: "purchase" }),
+          },
+        ]
+      : []),
+    ...(showSales
+      ? [
+          {
+            id: "sales" as const,
+            label: "Sales",
+            icon: ShoppingCart,
+            count: salesCount,
+            unit: "bill",
+            active: view?.kind === "sales",
+            onClick: () => onSelectView({ kind: "sales" }),
           },
         ]
       : []),

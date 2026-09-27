@@ -440,6 +440,8 @@ export default function Dashboard() {
   // ── Costing (raw materials + sheets) ─────────────────────────────
   const materials = useQuery(api.costing.listMaterials);
   const purchases = useQuery(api.purchases.list);
+  const salesInvoices = useQuery(api.sales.listSales);
+  const quotations = useQuery(api.sales.listQuotations);
   const finishedGoods = useQuery(api.costing.listFinishedGoods);
   const allJobs = useQuery(api.jobs.listJobs);
   const addFgM = useMutation(api.costing.addFinishedGood);
@@ -843,6 +845,8 @@ export default function Dashboard() {
               showMaterials={canDoItem("materials", "view")}
               showPurchase={canDoItem("purchases", "view")}
               purchaseCount={purchases?.length ?? 0}
+              showSales={canDoItem("purchases", "view")}
+              salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
             />
           ) : section === "tasks" ? (
             <TasksSidebar

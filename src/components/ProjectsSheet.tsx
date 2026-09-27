@@ -580,17 +580,18 @@ export default function ProjectsSheet({
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <p className="text-[11px] text-muted-foreground">
-            {tab === "projects" &&
-              "A project groups jobs, and jobs group finished goods — its cost and total are the sum of all its products."}
-            {tab === "jobs" &&
-              "Every job with the cost and sales value of the products under it."}
-            {tab === "products" &&
-              "Every product across all projects, with its production state."}
-            {tab === "customers" &&
-              "Everyone your projects are for, and the projects behind each one."}
-          </p>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {onNewProject && tab === "projects" && (
+            <button
+              type="button"
+              onClick={onNewProject}
+              aria-label="New project"
+              title="New project — with due date, assignee, description & more"
+              className="grid size-7 shrink-0 place-items-center rounded-lg border border-dashed border-primary/40 text-primary transition-colors hover:bg-primary/10"
+            >
+              <Plus className="size-3.5" />
+            </button>
+          )}
           {tab !== "customers" && (
             <Button
               type="button"
@@ -633,22 +634,10 @@ export default function ProjectsSheet({
 
       {tab === "customers" && <CustomersPanel />}
 
-      {/* new project bar */}
-      {onNewProject && tab === "projects" && (
-        <button
-          type="button"
-          onClick={onNewProject}
-          className="flex w-full items-center gap-1.5 rounded-xl border border-dashed bg-card/60 px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <Plus className="size-3.5" />
-          New project — with due date, assignee, description &amp; more
-        </button>
-      )}
-
       {/* listing sheet */}
       <section
         className={cn(
-          "mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm",
+          "mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm",
           tab !== "projects" && "hidden",
         )}
       >
@@ -660,14 +649,14 @@ export default function ProjectsSheet({
               {totals.products} product{totals.products === 1 ? "" : "s"}
             </span>
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
             <div className="relative">
               <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search projects…"
-                className="w-40 rounded-lg border bg-background py-1 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
+                className="h-7 w-40 rounded-lg border bg-background pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
               />
             </div>
             <FilterMenu
@@ -701,7 +690,7 @@ export default function ProjectsSheet({
           <p className="px-4 py-12 text-center text-sm text-muted-foreground">
             {search
               ? `Nothing matches “${search}”.`
-              : "No projects yet — create one above."}
+              : "No projects yet — use the + button to add one."}
           </p>
         ) : (
           <ul className="divide-y divide-border/60">
@@ -801,7 +790,7 @@ export default function ProjectsSheet({
                           aria-label={`Jobs of “${p.name}”`}
                           title="Show / hide jobs"
                           className={cn(
-                            "flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                            "flex h-6 items-center gap-1 rounded-full px-1.5 text-[10px] font-medium",
                             expanded === p.key
                               ? "bg-primary/10 text-primary"
                               : "bg-muted text-muted-foreground hover:text-foreground",
@@ -822,7 +811,7 @@ export default function ProjectsSheet({
                           type="button"
                           aria-label={`New job under “${p.name}”`}
                           title="Create a job (task) under this project"
-                          className="flex items-center gap-1 rounded-full border border-dashed border-primary/40 px-1.5 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10"
+                          className="flex h-6 items-center gap-1 rounded-full border border-dashed border-primary/40 px-1.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10"
                           onClick={() => {
                             setExpanded(p.key);
                             setJobDialog({

@@ -8,6 +8,7 @@ import ProductForm from "@/components/ProductForm";
 import ProjectsSheet from "@/components/ProjectsSheet";
 import type { CostingView } from "@/components/CostingSidebar";
 import PurchasePanel from "@/components/PurchasePanel";
+import SalesPanel from "@/components/SalesPanel";
 import {
   ChevronDown,
   AlertTriangle,
@@ -583,6 +584,13 @@ export default function CostingPanel({
       {view?.kind === "purchase" && canViewPurchase ? (
         <PurchasePanel
           materials={materials}
+          canCreate={canCreatePurchase}
+          canEdit={canEditPurchase}
+          canDelete={canDeletePurchase}
+        />
+      ) : view?.kind === "sales" ? (
+        <SalesPanel
+          products={finishedGoods ?? []}
           canCreate={canCreatePurchase}
           canEdit={canEditPurchase}
           canDelete={canDeletePurchase}

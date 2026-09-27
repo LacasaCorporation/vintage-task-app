@@ -429,6 +429,78 @@ const schema = defineSchema(
       .index("by_owner", ["ownerId"])
       .index("by_name", ["name"]),
 
+    /**
+     * A quotation sent to a customer: what was offered, at what price. It is a
+     * quote, not money in — turning one into a sales bill copies its lines.
+     */
+    quotations: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // auto QT0001, QT0002, …
+      customerId: v.optional(v.id("customers")),
+      customerName: v.optional(v.string()),
+      customerAddress: v.optional(v.string()),
+      quotedAt: v.number(), // ms
+      validUntil: v.optional(v.number()),
+      note: v.optional(v.string()),
+      currency: v.optional(v.string()),
+      discountPct: v.optional(v.number()),
+      taxPct: v.optional(v.number()),
+      lines: v.array(
+        v.object({
+          productId: v.id("finishedGoods"),
+          name: v.string(),
+          unit: v.optional(v.string()),
+          qty: v.number(),
+          unitPrice: v.number(),
+        }),
+      ),
+      total: v.number(),
+      status: v.optional(
+        v.union(
+          v.literal("draft"),
+          v.literal("sent"),
+          v.literal("accepted"),
+          v.literal("rejected"),
+        ),
+      ),
+      /** Set once this quote has been turned into a sales bill. */
+      invoicedAs: v.optional(v.id("sales")),
+      invoicedAt: v.optional(v.number()),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_customer", ["customerId"]),
+
+    /** A sales bill: what the customer was actually invoiced for. */
+    sales: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // auto SAL0001, SAL0002, …
+      customerId: v.optional(v.id("customers")),
+      customerName: v.optional(v.string()),
+      customerAddress: v.optional(v.string()),
+      soldAt: v.number(), // ms
+      dueAt: v.optional(v.number()),
+      note: v.optional(v.string()),
+      currency: v.optional(v.string()),
+      discountPct: v.optional(v.number()),
+      taxPct: v.optional(v.number()),
+      lines: v.array(
+        v.object({
+          productId: v.id("finishedGoods"),
+          name: v.string(),
+          unit: v.optional(v.string()),
+          qty: v.number(),
+          unitPrice: v.number(),
+        }),
+      ),
+      total: v.number(),
+      isPaid: v.optional(v.boolean()),
+      paidAt: v.optional(v.number()),
+      /** The quote this bill came from, when it was converted from one. */
+      quotationId: v.optional(v.id("quotations")),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_customer", ["customerId"]),
+
     // a costing sheet for a job / project / task
     costingSheets: defineTable({
       ownerId: v.id("users"),
