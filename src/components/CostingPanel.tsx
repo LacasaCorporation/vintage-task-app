@@ -51,79 +51,39 @@ const NEW_MATERIAL = "__new__";
 const cellCls =
   "w-full bg-transparent px-2 py-1 text-xs outline-none focus:bg-primary/5 focus:ring-2 focus:ring-primary/30 rounded-md";
 
-const CHIP_TONE: Record<
-  "cost" | "margin" | "sales",
-  { box: string; label: string; value: string }
-> = {
-  cost: {
-    box: "border-border bg-muted/60",
-    label: "text-muted-foreground",
-    value: "text-foreground",
-  },
-  margin: {
-    box: "border-amber-500/30 bg-amber-500/10",
-    label: "text-amber-700/80 dark:text-amber-400/80",
-    value: "text-amber-700 dark:text-amber-400",
-  },
-  sales: {
-    box: "border-primary/30 bg-primary/10",
-    label: "text-primary/80",
-    value: "text-primary",
-  },
-};
-
-/** The little chevron between two summary chips. */
+/** The little chevron between two figures on the summary line. */
 function Arrow() {
   return (
     <ChevronRight
-      className="size-3.5 shrink-0 text-muted-foreground/50"
+      className="size-3 shrink-0 text-muted-foreground/40"
       aria-hidden
     />
   );
 }
 
-/** One bracketed figure in the summary line; `children` replaces the value. */
-function Chip({
-  tone,
+/** One figure on the thin summary line: a muted label and its value. */
+function Figure({
   label,
-  value,
-  detail,
   children,
+  strong,
 }: {
-  tone: "cost" | "margin" | "sales";
   label: string;
-  value?: string;
-  detail?: string;
-  children?: React.ReactNode;
+  children: React.ReactNode;
+  strong?: boolean;
 }) {
-  const t = CHIP_TONE[tone];
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-2 rounded-lg border px-2.5 py-1",
-        t.box,
-      )}
-    >
-      <span className="flex flex-col leading-tight">
-        <span
-          className={cn(
-            "text-[9px] font-semibold tracking-widest uppercase",
-            t.label,
-          )}
-        >
-          {label}
-        </span>
-        {children ?? (
-          <span className={cn("text-sm font-bold tabular-nums", t.value)}>
-            {value}
-          </span>
-        )}
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className="text-[10px] font-medium tracking-wider text-muted-foreground uppercase">
+        {label}
       </span>
-      {detail && (
-        <span className="text-[11px] tabular-nums text-muted-foreground">
-          {detail}
-        </span>
-      )}
+      <span
+        className={cn(
+          "text-xs tabular-nums",
+          strong ? "font-semibold text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {children}
+      </span>
     </span>
   );
 }
@@ -1165,15 +1125,12 @@ export default function CostingPanel({
 
           {rows.length > 0 && (
             /* ── the summary line: cost → margin → sales price ───────── */
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <Chip tone="cost" label="Cost" value={money(totals.subtotal)} />
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/60 pt-2 text-muted-foreground">
+              <Figure label="Cost" strong>
+                {money(totals.subtotal)}
+              </Figure>
               <Arrow />
-              <Chip
-                tone="margin"
-                label="Margin"
-                value={`${markupPct}%`}
-                detail={`+${money(totals.markup)}`}
-              >
+              <Figure label="Margin">
                 <input
                   type="number"
                   min="0"
@@ -1188,22 +1145,19 @@ export default function CostingPanel({
                     }
                   }}
                   aria-label="Margin percent"
-                  className="w-9 rounded border border-amber-500/30 bg-card px-1 py-0.5 text-right text-xs font-semibold tabular-nums outline-none focus:ring-2 focus:ring-amber-500/40"
+                  className="w-8 border-b border-transparent bg-transparent px-0.5 text-right text-xs text-muted-foreground tabular-nums outline-none focus:border-primary/60 focus:text-foreground"
                 />
-                <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-                  %
-                </span>
-              </Chip>
+                %{" "}
+                {money(totals.markup)}
+              </Figure>
               <Arrow />
-              <Chip
-                tone="sales"
-                label="Sales price"
-                value={money(totals.grand)}
-                detail={`${money(totals.salesPerUnit)} / ${activeFg.unit ?? "pcs"}`}
-              />
-              <span className="ml-1 text-[11px] text-muted-foreground">
-                cost per unit {money(totals.perUnit)} / {activeFg.unit ?? "pcs"}
-              </span>
+              <Figure label="Sales price" strong>
+                {money(totals.grand)}
+              </Figure>
+              <span className="text-muted-foreground/50">·</span>
+              <Figure label="Cost / unit">
+                {money(totals.perUnit)} {activeFg.unit ?? "pcs"}
+              </Figure>
             </div>
           )}
 
