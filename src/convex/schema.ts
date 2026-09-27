@@ -364,6 +364,11 @@ const schema = defineSchema(
       ),
       total: v.number(),
       isPaid: v.optional(v.boolean()),
+      /**
+       * The purchase order this bill was raised from. A bill raised from an
+       * order is that order's delivery, so the order is closed out with it.
+       */
+      lpoId: v.optional(v.id("lpos")),
     }).index("by_owner", ["ownerId"]),
 
     /**
@@ -462,6 +467,12 @@ const schema = defineSchema(
       ),
       total: v.number(),
       receivedAt: v.optional(v.number()),
+      /**
+       * The purchase bill raised from this order. Setting it also marks the
+       * order received, so the goods come into stock exactly once — through
+       * either the receipt or the bill, never both.
+       */
+      billId: v.optional(v.id("purchases")),
     })
       .index("by_owner", ["ownerId"])
       .index("by_status", ["status"]),

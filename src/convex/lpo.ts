@@ -177,6 +177,9 @@ export const setStatus = mutation({
     if (lpo.status === "received") {
       throw new Error("This order is already received — the stock is in.");
     }
+    if (lpo.billId !== undefined) {
+      throw new Error("This order has already been billed.");
+    }
     await ctx.db.patch(id, { status });
   },
 });
@@ -200,6 +203,10 @@ export const receive = mutation({
     }
     if (lpo.status === "cancelled") {
       throw new Error("This order was cancelled — raise a new one instead.");
+    }
+    // the bill raised from this order already brought the goods in
+    if (lpo.billId !== undefined) {
+      throw new Error("This order has already been billed — its stock is in.");
     }
     const at = Date.now();
     for (const line of lpo.lines) {
@@ -226,6 +233,11 @@ export const remove = mutation({
     if (userId === null) throw new Error("Sign in first.");
     const lpo = await ctx.db.get(id);
     if (lpo === null || lpo.ownerId !== userId) return;
+    if (lpo.billId !== undefined) {
+      throw new Error(
+        "This order has been billed — delete the purchase bill instead.",
+      );
+    }
     if (lpo.status === "received") {
       throw new Error(
         "This order is already received — delete the purchase bill instead.",

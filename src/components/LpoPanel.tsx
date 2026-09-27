@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ClipboardList,
+  FileText,
   Loader2,
   PackageCheck,
   Pencil,
@@ -314,8 +315,9 @@ function LpoForm({
 
 /**
  * Local purchase orders: what has been asked of a vendor and what has landed.
- * Receiving an order is the only step that touches stock, so an order can sit
- * as a draft or be cancelled without ever touching the books.
+ * The goods come in exactly once — either as a plain receipt, or as a bill
+ * raised from the order — so the stock is never counted twice for one
+ * delivery.
  */
 export default function LpoPanel({
   materials,
@@ -324,6 +326,8 @@ export default function LpoPanel({
   canDelete,
   formOpen,
   onFormOpenChange,
+  onCreateBill,
+  billNumberOf,
 }: {
   materials: MaterialDoc[];
   canCreate: boolean;
@@ -331,6 +335,10 @@ export default function LpoPanel({
   canDelete: boolean;
   formOpen: boolean;
   onFormOpenChange: (open: boolean) => void;
+  /** Opens the bill form pre-filled from this order's lines. */
+  onCreateBill: (lpo: LpoDoc) => void;
+  /** The bill number an order was raised into, so the row can name it. */
+  billNumberOf: (billId: Id<"purchases">) => string | undefined;
 }) {
   const lpos = useQuery(api.lpo.list);
   const { format: money } = useWorkspaceCurrency();
@@ -400,7 +408,7 @@ export default function LpoPanel({
                   <th className="w-16 px-3 py-2 text-right">Items</th>
                   <th className="w-28 px-3 py-2 text-right">Total</th>
                   <th className="w-24 px-3 py-2">Status</th>
-                  <th className="w-56 px-2 py-2" />
+                  <th className="w-72 px-2 py-2" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
@@ -446,6 +454,11 @@ export default function LpoPanel({
                         >
                           {STATUS_LABEL[l.status]}
                         </span>
+                        {l.billId !== undefined && (
+                          <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
+                            {billNumberOf(l.billId) ?? "billed"}
+                          </span>
+                        )}
                       </td>
                       <td className="px-2 py-1 text-right">
                         <span className="inline-flex items-center gap-1">
@@ -468,28 +481,42 @@ export default function LpoPanel({
                             </Button>
                           )}
                           {l.status !== "received" && l.status !== "cancelled" && canEdit && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              disabled={busy === l._id}
-                              onClick={() =>
-                                void act(
-                                  l._id,
-                                  () => receive({ id: l._id }),
-                                  `${l.number} received — stock updated.`,
-                                )
-                              }
-                              className="h-7 rounded-lg px-2 text-xs text-emerald-600 hover:text-emerald-600"
-                            >
-                              {busy === l._id ? (
-                                <Loader2 className="size-3 animate-spin" />
-                              ) : (
-                                <PackageCheck className="size-3" />
-                              )}
-                              Receive
-                            </Button>
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={busy === l._id}
+                                onClick={() => onCreateBill(l)}
+                                title="Open the bill form with these lines filled in — saving it brings the stock in"
+                                className="h-7 rounded-lg px-2 text-xs text-emerald-600 hover:text-emerald-600"
+                              >
+                                <FileText className="size-3" /> Bill
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                disabled={busy === l._id}
+                                onClick={() =>
+                                  void act(
+                                    l._id,
+                                    () => receive({ id: l._id }),
+                                    `${l.number} received — stock updated.`,
+                                  )
+                                }
+                                title="Goods are here but there is no bill yet"
+                                className="h-7 rounded-lg px-2 text-xs"
+                              >
+                                {busy === l._id ? (
+                                  <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                  <PackageCheck className="size-3" />
+                                )}
+                                Receive
+                              </Button>
+                            </>
                           )}
-                          {l.status !== "received" && l.status !== "cancelled" && canEdit && (
+                          {l.status !== "received" && l.status !== "cancelled" && l.billId === undefined && canEdit && (
                             <button
                               type="button"
                               aria-label={`Edit ${l.number}`}
@@ -518,7 +545,7 @@ export default function LpoPanel({
                               Cancel
                             </Button>
                           )}
-                          {l.status !== "received" && canDelete && (
+                          {l.status !== "received" && l.billId === undefined && canDelete && (
                             <button
                               type="button"
                               aria-label={`Delete ${l.number}`}

@@ -52,6 +52,8 @@ export const create = mutation({    args: {
     currency: v.optional(v.string()),
     discountPct: v.optional(v.number()),
     taxPct: v.optional(v.number()),
+    /** The purchase order this bill is being raised from, if any. */
+    lpoId: v.optional(v.id("lpos")),
     lines: v.array(
       v.object({
         materialId: v.id("rawMaterials"),
@@ -65,6 +67,25 @@ export const create = mutation({    args: {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     if (lines.length === 0) throw new Error("Add at least one material to the bill.");
+    // an order that was already received informally has its stock in; billing
+    // it too would count the same delivery twice
+    if (args.lpoId !== undefined) {
+      const lpo = await ctx.db.get(args.lpoId);
+      if (lpo === null || lpo.ownerId !== userId) {
+        throw new Error("That order no longer exists.");
+      }
+      if (lpo.billId !== undefined) {
+        throw new Error(`${lpo.number} has already been billed.`);
+      }
+      if (lpo.status === "received") {
+        throw new Error(
+          `${lpo.number} was already received, so its stock is in. Delete the order's receipt first if you want this bill to bring the goods in.`,
+        );
+      }
+      if (lpo.status === "cancelled") {
+        throw new Error(`${lpo.number} was cancelled — raise a new order instead.`);
+      }
+    }
 
     const number = await nextPurchaseNumber(ctx, userId);
     const at = purchasedAt ?? Date.now();
@@ -114,10 +135,28 @@ export const create = mutation({    args: {
       lines: resolved,
       total: Math.round(grand * 100) / 100,
       isPaid: undefined,
+      lpoId: args.lpoId,
     });
     // remember each line so this bill can be edited and reversed later
     for (const line of resolved) {
       await ctx.db.insert("purchaseLines", { ownerId: userId, purchaseId, ...line });
+    }
+    // a bill raised from an order *is* that order's delivery: the stock is
+    // already in from the lines above, so the order is closed out here rather
+    // than received a second time
+    if (args.lpoId !== undefined) {
+      const lpo = await ctx.db.get(args.lpoId);
+      if (lpo === null || lpo.ownerId !== userId) {
+        throw new Error("That order no longer exists.");
+      }
+      if (lpo.billId !== undefined) {
+        throw new Error(`${lpo.number} has already been billed.`);
+      }
+      await ctx.db.patch(args.lpoId, {
+        status: "received",
+        receivedAt: lpo.receivedAt ?? at,
+        billId: purchaseId,
+      });
     }
     return purchaseId;
   },
@@ -252,6 +291,17 @@ export const remove = mutation({
     const bill = await ctx.db.get(id);
     if (bill === null) return;
     if (bill.ownerId !== userId) throw new Error("Not your bill.");
+    // the order it came from is open again — the goods are no longer booked in
+    if (bill.lpoId !== undefined) {
+      const lpo = await ctx.db.get(bill.lpoId);
+      if (lpo !== null && lpo.ownerId === userId) {
+        await ctx.db.patch(bill.lpoId, {
+          status: lpo.status === "received" ? "ordered" : lpo.status,
+          billId: undefined,
+          receivedAt: undefined,
+        });
+      }
+    }
     // prefer the stored lines so a bill edited since creation still reverses
     const stored = await ctx.db
       .query("purchaseLines")

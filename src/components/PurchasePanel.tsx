@@ -75,6 +75,8 @@ export default function PurchasePanel({
   const [lpoFormOpen, setLpoFormOpen] = useState(false);
   const [expenseFormOpen, setExpenseFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<Id<"purchases"> | null>(null);
+  /** The purchase order this bill is being raised from, if any. */
+  const [fromLpoId, setFromLpoId] = useState<Id<"lpos"> | null>(null);
   const [viewingId, setViewingId] = useState<Id<"purchases"> | null>(null);
   const [vendorPickerOpen, setVendorPickerOpen] = useState(false);
   const [vendorEditing, setVendorEditing] = useState<Doc<"vendors"> | null>(null);
@@ -111,6 +113,7 @@ export default function PurchasePanel({
 
   const resetForm = () => {
     setEditingId(null);
+    setFromLpoId(null);
     setSupplierId(undefined);
     setSupplier("");
     setSupplierAddress("");
@@ -144,6 +147,31 @@ export default function PurchasePanel({
     setTab("bill");
   };
 
+  /**
+   * Open the bill form pre-filled from a purchase order, so the vendor's
+   * delivery becomes a bill without retyping every line. Saving it closes the
+   * order out and is what brings the stock in.
+   */
+  const startFromLpo = (lpo: Doc<"lpos">) => {
+    resetForm();
+    setFromLpoId(lpo._id);
+    setSupplier(lpo.vendor ?? "");
+    setPurchasedOn(todayInput());
+    setNote(lpo.note ?? "");
+    setLines(
+      lpo.lines.length > 0
+        ? lpo.lines.map((line) => ({
+            materialId: line.materialId,
+            qty: String(line.qty),
+            rate: String(line.unitCost),
+          }))
+        : [emptyLine()],
+    );
+    setViewingId(null);
+    setTab("bill");
+    toast.success(`${lpo.number} loaded — check the lines and save the bill.`);
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const valid = lines.filter((l) => l.materialId !== "" && num(l.qty) > 0);
@@ -161,6 +189,7 @@ export default function PurchasePanel({
         note: note.trim() || undefined,
         discountPct: num(discount) || undefined,
         taxPct: num(tax) || undefined,
+        lpoId: fromLpoId ?? undefined,
         lines: valid.map((l) => ({
           materialId: l.materialId as Id<"rawMaterials">,
           qty: num(l.qty),
@@ -172,7 +201,11 @@ export default function PurchasePanel({
         toast.success("Bill updated — stock adjusted.");
       } else {
         await createBill(args);
-        toast.success("Bill saved — stock updated.");
+        toast.success(
+          fromLpoId === null
+            ? "Bill saved — stock updated."
+            : "Bill saved — the order is closed and its stock is in.",
+        );
       }
       const wasEditing = editingId;
       resetForm();
@@ -287,6 +320,8 @@ export default function PurchasePanel({
           canDelete={canDelete}
           formOpen={lpoFormOpen}
           onFormOpenChange={setLpoFormOpen}
+          onCreateBill={startFromLpo}
+          billNumberOf={(id) => bills?.find((b) => b._id === id)?.number}
         />
       )}
 
@@ -761,6 +796,16 @@ export default function PurchasePanel({
           onSubmit={submit}
           className="overflow-hidden rounded-2xl border bg-card shadow-sm"
         >
+          {fromLpoId !== null && (
+            <p className="flex items-center gap-2 border-b border-border/60 bg-emerald-500/[0.07] px-5 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+              <Link2 className="size-3.5 shrink-0" />
+              Raised from{" "}
+              <span className="font-mono font-medium">
+                {lpos?.find((l) => l._id === fromLpoId)?.number ?? "an order"}
+              </span>
+              — saving closes the order out and brings its stock in.
+            </p>
+          )}
           {/* letterhead */}
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 bg-muted/30 px-5 py-4">
             <div>
