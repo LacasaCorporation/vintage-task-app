@@ -16,6 +16,9 @@ import { toast } from "@/lib/toast";
 
 const fieldCls =
   "h-9 w-full rounded-lg border bg-card px-2.5 text-sm outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30";
+/** A real dropdown: a native select needs its own look and padding. */
+const selectCls =
+  "h-9 w-full cursor-pointer appearance-none rounded-lg border bg-card px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30";
 
 /**
  * Create a raw material without leaving the costing sheet: the dropdown that
@@ -35,11 +38,15 @@ export default function CreateMaterialDialog({
   onCreated: (materialId: string) => void;
 }) {
   const addMaterial = useMutation(api.costing.addMaterial);
+  // managed master data, so both dropdowns offer the same values as the rest
+  // of the app instead of free text that can drift
   const units = useQuery(api.costing.listUnits) ?? [];
+  const categories = useQuery(api.costing.listCategories) ?? [];
+  const topCategories = categories.filter((c) => c.parentId === undefined);
   const [name, setName] = useState(initialName ?? "");
   const [code, setCode] = useState("");
   const [category, setCategory] = useState("");
-  const [unit, setUnit] = useState(units[0]?.name ?? "pcs");
+  const [unit, setUnit] = useState("");
   const [price, setPrice] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -64,6 +71,7 @@ export default function CreateMaterialDialog({
         unit: unit.trim() || "pcs",
         pricePerUnit: priceNum,
       });
+      if (!unit.trim()) toast.info(`No unit chosen — saved as “pcs”.`);
       toast.success(`“${clean}” added to raw materials.`);
       onCreated(id);
       onClose();
@@ -115,29 +123,37 @@ export default function CreateMaterialDialog({
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium">Category</label>
-              <Input
+              <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                placeholder="e.g. Timber"
-                className={fieldCls}
-              />
+                aria-label="Category"
+                className={selectCls}
+              >
+                <option value="">Not set</option>
+                {topCategories.map((c) => (
+                  <option key={c._id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium">Unit</label>
-              <Input
-                list="create-material-units"
+              <select
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
-                placeholder="pcs"
-                className={fieldCls}
-              />
-              <datalist id="create-material-units">
+                aria-label="Unit"
+                className={selectCls}
+              >
+                <option value="">Not set</option>
                 {units.map((u) => (
-                  <option key={u._id} value={u.name} />
+                  <option key={u._id} value={u.name}>
+                    {u.name}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium">Price per unit *</label>
