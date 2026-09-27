@@ -121,6 +121,8 @@ export default function PrimaryNav({
   // collapsed by default: the two stock lists are a second step, not the
   // place the sidebar starts
   const [inventoryOpen, setInventoryOpen] = useState(false);
+  // the Accounts drill-down opens on its own whenever you are inside it
+  const [accountsOpen, setAccountsOpen] = useState(false);
   const inCosting = section === "costing";
   const projectCount = useMemo(
     () => new Set(finishedGoods.map((fg) => fg.projectName ?? "Standalone")).size,
@@ -128,6 +130,14 @@ export default function PrimaryNav({
   );
   const onMaterials = view?.kind === "materials";
   const onProducts = view?.kind === "products";
+  const inAccounting = inCosting && view?.kind === "accounting";
+  /**
+   * The header row IS "Chart of accounts", so it is left out of the
+   * drill-down. That way exactly one row is ever highlighted: the header when
+   * the chart is open, one child when any other page is.
+   */
+  const accountsActive = inAccounting && view?.tab === "accounts";
+  const accountsExpanded = inAccounting || accountsOpen;
 
   return (
     <div className="flex flex-col gap-0.5">
@@ -179,14 +189,70 @@ export default function PrimaryNav({
           onClick={() => onSelectView({ kind: "sales" })}
         />
       )}
+      {/* accounts: a group whose header is the chart of accounts itself */}
       {canViewAccounting && (
-        <NavRow
-          label="Accounts"
-          Icon={BookOpen}
-          active={inCosting && view?.kind === "accounting"}
-          n={accountCount}
-          onClick={() => onSelectView({ kind: "accounting", tab: "accounts" })}
-        />
+        <div className="mt-2">
+          <div
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-2 py-1 transition-colors",
+              accountsActive ? "bg-primary/10" : "hover:bg-accent",
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setAccountsOpen((v) => !v)}
+              aria-expanded={accountsExpanded}
+              aria-label={
+                accountsExpanded ? "Hide the Accounts pages" : "Show the Accounts pages"
+              }
+              className="grid size-4 shrink-0 place-items-center rounded text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none"
+            >
+              <ChevronDown
+                className={cn(
+                  "size-3 transition-transform",
+                  !accountsExpanded && "-rotate-90",
+                )}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectView({ kind: "accounting", tab: "accounts" })}
+              aria-current={accountsActive ? "page" : undefined}
+              className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
+            >
+              <BookOpen
+                className={cn(
+                  "size-4 shrink-0",
+                  accountsActive ? "text-primary" : "text-muted-foreground/70",
+                )}
+              />
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-sm",
+                  accountsActive ? "font-medium text-primary" : "text-foreground/85",
+                )}
+              >
+                Accounts
+              </span>
+              <span className={countCls}>{accountCount}</span>
+            </button>
+          </div>
+
+          {accountsExpanded && (
+            <div className="ml-3 border-l border-border/60 pl-1">
+              {ACCOUNTING_TABS.filter((t) => t.id !== "accounts").map((t) => (
+                <NavRow
+                  key={t.id}
+                  label={t.label}
+                  Icon={t.icon}
+                  active={inAccounting && view?.tab === t.id}
+                  sub
+                  onClick={() => onSelectView({ kind: "accounting", tab: t.id })}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* inventory: what you stock and what you sell, as one collapsible group */}
@@ -234,21 +300,6 @@ export default function PrimaryNav({
         </>
       )}
 
-      {/* the other accounting pages sit under the Accounts entry */}
-      {canViewAccounting && inCosting && view?.kind === "accounting" && (
-        <div className="ml-3 border-l border-border/60 pl-1">
-          {ACCOUNTING_TABS.map((t) => (
-            <NavRow
-              key={t.id}
-              label={t.label}
-              Icon={t.icon}
-              active={view.tab === t.id}
-              sub
-              onClick={() => onSelectView({ kind: "accounting", tab: t.id })}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
