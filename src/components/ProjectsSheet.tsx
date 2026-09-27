@@ -1222,6 +1222,9 @@ export default function ProjectsSheet({
                                         </span>
                                         <ProductCodeInline code={fg.code} />
                                         <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
+                                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                                          {money(costByFg.get(fg._id) ?? 0)}
+                                        </span>
                                         <ProductTagsInline tags={fg.tags} />
                                       </span>
                                       {fg.note && (
@@ -1229,9 +1232,6 @@ export default function ProjectsSheet({
                                           {fg.note}
                                         </span>
                                       )}
-                                    </span>
-                                    <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                                      {money(costByFg.get(fg._id) ?? 0)}
                                     </span>
                                     <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
                                   </button>
@@ -1330,6 +1330,9 @@ export default function ProjectsSheet({
                                 </span>
                                 <ProductCodeInline code={fg.code} />
                                 <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
+                                <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                                  {money(costByFg.get(fg._id) ?? 0)}
+                                </span>
                                 <ProductTagsInline tags={fg.tags} />
                               </span>
                               {fg.note && (
@@ -1337,9 +1340,6 @@ export default function ProjectsSheet({
                                   {fg.note}
                                 </span>
                               )}
-                            </span>
-                            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                              {money(costByFg.get(fg._id) ?? 0)}
                             </span>
                             <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
                           </button>
