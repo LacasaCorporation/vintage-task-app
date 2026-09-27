@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import MaterialsSheet from "@/components/MaterialsSheet";
 import CreateMaterialDialog from "@/components/CreateMaterialDialog";
-import { EditProductDialog } from "@/components/ProjectDialogs";
 import ProductForm from "@/components/ProductForm";
 import ProjectsSheet from "@/components/ProjectsSheet";
 import type { CostingView } from "@/components/CostingSidebar";
@@ -147,8 +146,6 @@ export default function CostingPanel({
   const [projectFocus, setProjectFocus] = useState<string | null>(null);
   /** The product whose costing sheet is open over the current view. */
   const [sheetId, setSheetId] = useState<Id<"finishedGoods"> | null>(null);
-  /** Editing a product's details from inside the sheet. */
-  const [editingFg, setEditingFg] = useState<FgDoc | null>(null);
   const addFgItem = useMutation(api.costing.addFgItem);
   const updateItem = useMutation(api.costing.updateItem);
   const removeItem = useMutation(api.costing.removeItem);
@@ -335,6 +332,38 @@ export default function CostingPanel({
       }
     };
     guardProduction("Saving the sheet", run);
+  };
+
+  /**
+   * The one save for this sheet: the product's own record first, then any
+   * line edits still sitting in the draft.
+   */
+  const saveAll = async () => {
+    if (!activeFg || savingSheet) return;
+    setSavingSheet(true);
+    try {
+      await updateFg({
+        id: activeFg._id,
+        name: activeFg.name,
+        code: activeFg.code ?? "",
+        unit: activeFg.unit ?? "",
+        projectName: activeFg.projectName,
+        note: activeFg.note,
+      });
+      for (const r of rows) {
+        const d = drafts.find((x) => x.id === r._id);
+        if (!d) continue;
+        if (d.label === r.label && d.qty === r.qty && d.unitPrice === r.unitPrice) {
+          continue;
+        }
+        await updateItem({ id: r._id, label: d.label, qty: d.qty, unitPrice: d.unitPrice });
+      }
+      toast.success(`“${activeFg.name}” saved.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't save.");
+    } finally {
+      setSavingSheet(false);
+    }
   };
 
   // Ctrl/Cmd+S saves the sheet.
@@ -819,16 +848,35 @@ export default function CostingPanel({
               </div>
             </dl>
             {canEdit && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 shrink-0 rounded-lg text-xs"
-                onClick={() => setEditingFg(activeFg)}
-              >
-                <Pencil className="size-3" />
-                Edit
-              </Button>
+              <>
+                <span
+                  className={cn(
+                    "text-[11px] transition-opacity",
+                    isDirty ? "text-amber-600" : "text-muted-foreground/60 opacity-0",
+                  )}
+                >
+                  Unsaved changes
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={savingSheet}
+                  onClick={() => void saveAll()}
+                  title="Save the product details and any sheet changes (Ctrl/Cmd+S)"
+                  className={cn(
+                    "h-7 shrink-0 gap-1.5 rounded-lg text-xs",
+                    isDirty && "animate-pulse",
+                  )}
+                >
+                  {savingSheet ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Save className="size-3" />
+                  )}
+                  {savingSheet ? "Saving" : "Save"}
+                </Button>
+              </>
             )}
           </div>
 
@@ -1180,30 +1228,6 @@ export default function CostingPanel({
 
           {rows.length > 0 && (
             <div className="mt-2 flex items-center justify-end gap-1.5">
-              <span
-                className={cn(
-                  "mr-auto pl-1 text-[11px] transition-opacity",
-                  isDirty ? "text-amber-600" : "text-muted-foreground/60 opacity-0",
-                )}
-              >
-                Unsaved changes
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={!isDirty || savingSheet}
-                onClick={() => void saveSheet()}
-                title="Save all sheet edits (Ctrl/Cmd+S)"
-                className={cn("h-7 gap-1.5 rounded-lg text-xs", isDirty && "animate-pulse")}
-              >
-                {savingSheet ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Save className="size-3.5" />
-                )}
-                {isDirty ? "Save" : "Saved"}
-              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -1268,13 +1292,6 @@ export default function CostingPanel({
             initialProject={view?.kind === "products" ? projectFocus : null}
           />
         </div>
-      )}
-
-      {editingFg && (
-        <EditProductDialog
-          fg={editingFg}
-          onClose={() => setEditingFg(null)}
-        />
       )}
 
       <CreateMaterialDialog

@@ -30,10 +30,12 @@ import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
 import ConnectJobDialog from "@/components/ConnectJobDialog";
+import { EditProductDialog } from "@/components/ProjectDialogs";
 import {
   AlertTriangle,
   Factory,
   Link2,
+  Pencil,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -197,6 +199,8 @@ export default function ProductForm({
   const attachToJobM = useMutation(api.costing.attachToJob);
   /** The product being connected to a job, if the dialog is open. */
   const [linkTarget, setLinkTarget] = useState<FgDoc | null>(null);
+  /** The product whose details dialog is open, if any. */
+  const [editTarget, setEditTarget] = useState<FgDoc | null>(null);
   const selectedProjectId = useMemo(
     () => (projectDocs ?? []).find((p) => p.name === project)?._id,
     [projectDocs, project],
@@ -871,6 +875,12 @@ export default function ProductForm({
                                   </span>
                                 </div>
                               </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setEditTarget(f)}>
+                                <Pencil className="size-3.5" />
+                                <span className="text-xs font-medium">
+                                  Edit details
+                                </span>
+                              </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => setLinkTarget(f)}
                               >
@@ -925,6 +935,13 @@ export default function ProductForm({
             await attachToJobM({ fgId: linkTarget._id, jobId, qty });
             toast.success(`“${linkTarget.name}” connected — ${qty} needed.`);
           }}
+        />
+      )}
+
+      {editTarget && (
+        <EditProductDialog
+          fg={editTarget}
+          onClose={() => setEditTarget(null)}
         />
       )}
 
