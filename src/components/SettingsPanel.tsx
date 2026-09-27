@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import MasterDataManager from "@/components/MasterDataManager";
 import { useAppDialogs } from "@/components/AppDialogs";
 import CurrencyPicker from "@/components/CurrencyPicker";
-import AccountingDefaultsCard from "@/components/AccountingDefaultsCard";
+import AccountingSettingsPage from "@/components/AccountingSettingsPage";
 import { CreateFirmButton } from "@/components/FirmSwitcher";
 import { cn } from "@/lib/utils";
 import { downloadBackupFile } from "@/lib/backup-download";
@@ -58,6 +58,7 @@ import {
   Download,
   DatabaseBackup,
   Settings as SettingsIcon,
+  Scale,
   Shapes,
   ShieldCheck,
   SlidersHorizontal,
@@ -122,22 +123,68 @@ type ProvisionedLogin = {
 };
 
 /**
- * The settings tabs, in the same order as the <section> elements below and in
- * index.css. CSS shows only the active one, so a new section must be added to
- * all three in step.
+ * The settings areas. index.css shows only the active one by id, so a new
+ * section needs a row here and a matching id — the order of the <section>
+ * elements below no longer matters.
  */
 const SETTINGS_TABS = [
-  ["organisation", "Organisation", Building2],
-  ["people", "Users & roles", Users],
-  ["groups", "User groups", UserRound],
-  ["team", "Team hierarchy", GitBranch],
-  ["credentials", "Credentials", KeyRound],
-  ["roles", "Custom roles", Tags],
-  ["catalog", "Units & categories", Shapes],
-  ["data", "Backup & restore", DatabaseBackup],
+  {
+    id: "organisation",
+    label: "Organisation",
+    description: "Name, code, your login",
+    icon: Building2,
+  },
+  {
+    id: "people",
+    label: "Users & roles",
+    description: "People and permissions",
+    icon: Users,
+  },
+  {
+    id: "groups",
+    label: "User groups",
+    description: "Groups you assign work to",
+    icon: UserRound,
+  },
+  {
+    id: "team",
+    label: "Team hierarchy",
+    description: "Who reports to whom",
+    icon: GitBranch,
+  },
+  {
+    id: "credentials",
+    label: "Credentials",
+    description: "Logins and passwords",
+    icon: KeyRound,
+  },
+  {
+    id: "roles",
+    label: "Custom roles",
+    description: "Reusable permission sets",
+    icon: Tags,
+  },
+  {
+    id: "accounting",
+    label: "Accounting",
+    description: "Defaults and the chart of accounts",
+    icon: Scale,
+  },
+  {
+    id: "catalog",
+    label: "Units & categories",
+    description: "Shared mastering data",
+    icon: Shapes,
+  },
+  {
+    id: "data",
+    label: "Backup & restore",
+    description: "Export or import your data",
+    icon: DatabaseBackup,
+  },
 ] as const;
 
-type SettingsTabId = (typeof SETTINGS_TABS)[number][0];
+type SettingsTabId = (typeof SETTINGS_TABS)[number]["id"];
 
 /** Readable, easy-to-dictate password for a freshly created login. */
 function makePassword(): string {  const words = [
@@ -942,7 +989,7 @@ export default function SettingsPanel() {
   };
 
   return (
-    <div className="space-y-6" data-settings-tab={settingsTab}>
+    <div className="space-y-6">
       {/* header */}
       <div>
         <h1 className="font-display flex items-center gap-2 text-3xl font-bold tracking-tight">
@@ -979,30 +1026,63 @@ export default function SettingsPanel() {
         </div>
       </div>
 
-      {/* ── Tabs: one page per settings area ─────────────────────────── */}
-      <nav
-        className="flex flex-wrap items-center gap-1 rounded-xl border bg-card p-1 shadow-sm"
-        aria-label="Settings sections"
-      >
-        {SETTINGS_TABS.map(([id, label, Icon]) => (
-          <button
-            key={id}
-            type="button"
-            aria-current={settingsTab === id ? "page" : undefined}
-            aria-pressed={settingsTab === id}
-            onClick={() => setPickedTab(id)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-              settingsTab === id
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <Icon className="size-3.5" />
-            {label}
-          </button>
-        ))}
-      </nav>
+      {/* ── Areas: a second column, so each one is labelled and described ── */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+        <nav
+          className="shrink-0 lg:sticky lg:top-20 lg:w-60"
+          aria-label="Settings sections"
+        >
+          <p className="mb-2 hidden text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase lg:block">
+            Settings
+          </p>
+          <ul className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+            {SETTINGS_TABS.map(({ id, label, description, icon: Icon }) => {
+              const active = settingsTab === id;
+              return (
+                <li key={id} className="shrink-0 lg:shrink">
+                  <button
+                    type="button"
+                    aria-current={active ? "page" : undefined}
+                    aria-pressed={active}
+                    onClick={() => setPickedTab(id)}
+                    className={cn(
+                      "flex w-full items-center gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors",
+                      active
+                        ? "border-primary/30 bg-primary/[0.07]"
+                        : "border-transparent hover:bg-accent/60",
+                    )}
+                  >
+                    <Icon
+                      className={cn(
+                        "size-4 shrink-0",
+                        active
+                          ? "text-primary"
+                          : "text-muted-foreground",
+                      )}
+                    />
+                    <span className="min-w-0">
+                      <span
+                        className={cn(
+                          "block truncate text-sm font-medium",
+                          active ? "text-primary" : "text-foreground",
+                        )}
+                      >
+                        {label}
+                      </span>
+                      <span className="hidden truncate text-[11px] text-muted-foreground lg:block">
+                        {description}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        {/* only the active section is on screen — see the data-settings-tab
+            rules in index.css */}
+        <div className="min-w-0 flex-1 space-y-6" data-settings-tab={settingsTab}>
 
       {/* organisation */}
       <section
@@ -1092,7 +1172,7 @@ export default function SettingsPanel() {
         </div>
       </section>
 
-      <AccountingDefaultsCard canEdit={canManage} />
+      <AccountingSettingsPage canEdit={canManage} />
 
       {/* member list */}
       <section
@@ -1960,6 +2040,8 @@ export default function SettingsPanel() {
         <strong>Permissions</strong> on a user for individual overrides (they
         layer on top of the assigned role).
       </p>
+        </div>
+      </div>
 
       {/* create-user dialog: username + password, or an email invite */}
       <Dialog
