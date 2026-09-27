@@ -27,7 +27,6 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlarmClock,
-  Briefcase,
   CalendarDays,
   ChevronDown,
   Clock,
@@ -331,15 +330,8 @@ export default function TasksPanel({
           count: viewCounts.starred,
           hint: "The tasks you have starred",
         },
-        {
-          view: "flagged",
-          label: "Productions",
-          Icon: Briefcase,
-          count: (flaggedItems?.jobs.length ?? 0) + (flaggedItems?.fgs.length ?? 0),
-          hint: "Flagged jobs and products, worked start → complete",
-        },
       ] as const,
-    [viewCounts, flaggedItems],
+    [viewCounts],
   );
 
   const handleAdd = async () => {

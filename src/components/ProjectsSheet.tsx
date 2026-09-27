@@ -235,6 +235,7 @@ export default function ProjectsSheet({
   const updateJob = useMutation(api.jobs.updateJob);
   const setJobFlag = useMutation(api.jobs.setJobFlag);
   const setFgFlag = useMutation(api.costing.setFgFlag);
+  const setProjectFlag = useMutation(api.costing.setProjectFlag);
   const addProjectM = useMutation(api.costing.addProject);
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const { confirm } = useAppDialogs();
@@ -260,15 +261,40 @@ export default function ProjectsSheet({
   /** All FG products — the clone picker searches across every project. */
   const allProducts = finishedGoods;
 
-  /** Toggle the flag on a job (a flagged job shows all of its products). */
+  /**
+   * Toggle the flag on a job. Flagging flags all of its products too; a job
+   * that is only flagged because a product is flagged under it cannot be
+   * unflagged until that product clears its own flag.
+   */
   const toggleJobFlag = async (job: JobDoc) => {
     setFlagBusy(`j:${job._id}`);
     try {
       await setJobFlag({ id: job._id, flagged: !job.isFlagged });
       toast.success(
         job.isFlagged
-          ? "Flag removed from job and all its products."
-          : "Job flagged — all its products were flagged too.",
+          ? "Flag removed from the job."
+          : "Job flagged — its products and project were flagged too.",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
+    } finally {
+      setFlagBusy(null);
+    }
+  };
+
+  /**
+   * Toggle the flag on a project. Flagging cascades down through every job
+   * and product under it; the project keeps the flag for as long as anything
+   * beneath it is still flagged.
+   */
+  const toggleProjectFlag = async (project: ProjectDoc) => {
+    setFlagBusy(`p:${project._id}`);
+    try {
+      await setProjectFlag({ id: project._id, flagged: !project.isFlagged });
+      toast.success(
+        project.isFlagged
+          ? "Flag removed from the project."
+          : "Project flagged — its jobs and products were flagged too.",
       );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
@@ -285,7 +311,7 @@ export default function ProjectsSheet({
       toast.success(
         fg.isFlagged
           ? "Flag removed from product."
-          : "Product flagged — its job is flagged too.",
+          : "Product flagged — its job and project are flagged too.",
       );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
@@ -828,6 +854,40 @@ export default function ProjectsSheet({
 
                     {/* actions */}
                     <span className="ml-auto flex shrink-0 items-center gap-1">
+                      {detail && (
+                        <button
+                          type="button"
+                          title={
+                            detail.isFlagged
+                              ? "Remove flag from this project"
+                              : "Flag this project — flags its jobs and products too"
+                          }
+                          aria-label={
+                            detail.isFlagged
+                              ? `Remove flag from \u201c${p.name}\u201d`
+                              : `Flag \u201c${p.name}\u201d`
+                          }
+                          className={cn(
+                            "grid size-6 shrink-0 place-items-center rounded-md transition-colors",
+                            detail.isFlagged
+                              ? "text-amber-500"
+                              : "text-muted-foreground/40 hover:text-amber-500",
+                          )}
+                          onClick={() => void toggleProjectFlag(detail)}
+                          disabled={flagBusy !== null}
+                        >
+                          {flagBusy === `p:${detail._id}` ? (
+                            <Loader2 className="size-3 animate-spin" />
+                          ) : (
+                            <Flag
+                              className={cn(
+                                "size-3",
+                                detail.isFlagged && "fill-current",
+                              )}
+                            />
+                          )}
+                        </button>
+                      )}
                       <button
                           type="button"
                           aria-label={`Jobs of “${p.name}”`}
@@ -998,6 +1058,11 @@ export default function ProjectsSheet({
                                 : allJobProducts.filter((f) => f.isFlagged)
                               : allJobProducts;
                           const products = allJobProducts.length;
+                          // a flagged product holds its job's flag: the job
+                          // cannot be unflagged until the product is
+                          const hasFlaggedProduct = allJobProducts.some(
+                            (f) => f.isFlagged,
+                          );
                           // in flagged view hide normal jobs with nothing flagged
                           if (
                             flagFilter === "flagged" &&
@@ -1072,9 +1137,11 @@ export default function ProjectsSheet({
                                 title={
                                   job.status === "completed"
                                     ? "Completed — all flagged products are done"
-                                    : job.isFlagged
-                                      ? "Remove flag (products stay)"
-                                      : "Flag this job — flags all its products too"
+                                    : job.isFlagged && hasFlaggedProduct
+                                      ? "Held by a flagged product — remove that flag first"
+                                      : job.isFlagged
+                                        ? "Remove flag from this job"
+                                        : "Flag this job — flags all its products too"
                                 }
                                 aria-label={
                                   job.isFlagged
@@ -1090,7 +1157,7 @@ export default function ProjectsSheet({
                                       : "text-muted-foreground/40 hover:text-amber-500",
                                 )}
                                 onClick={() => void toggleJobFlag(job)}
-                                disabled={flagBusy !== null}
+                                disabled={flagBusy !== null || (job.isFlagged && hasFlaggedProduct)}
                               >
                                 {flagBusy === `j:${job._id}` ? (
                                   <Loader2 className="size-3 animate-spin" />

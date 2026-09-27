@@ -1,5 +1,11 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
+import {
+  clearAncestorsIfOrphaned,
+  flagAncestors,
+  jobHasFlaggedProduct,
+  jobIdsOf,
+} from "./flagCascade";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -254,9 +260,11 @@ export const reopenJob = mutation({
 });
 
 /**
- * Flag (or unflag) a job. Flagging cascades: every product attached to the job
- * is flagged too, so the whole job shows in the todo list. Unflagging removes
- * the flag from the job and all of its products.
+ * Flag (or unflag) a job. Flagging cascades down to every product attached to
+ * the job and up to the job's project, so the whole branch shows in the
+ * Productions view. Unflagging is refused while any of those products is still
+ * flagged — the leaf owns the flag, and its job and project keep theirs until
+ * the product clears it.
  */
 export const setJobFlag = mutation({
   args: { id: v.id("projectJobs"), flagged: v.boolean() },
@@ -266,6 +274,12 @@ export const setJobFlag = mutation({
     const job = await ctx.db.get(id);
     if (job === null || job.ownerId !== userId)
       throw new Error("That job no longer exists.");
+
+    if (!flagged && (await jobHasFlaggedProduct(ctx, userId, id)))
+      throw new Error(
+        "This job still has a flagged product — remove the flag from the product first.",
+      );
+
     const flaggedAt = flagged ? Date.now() : undefined;
     await ctx.db.patch(id, {
       isFlagged: flagged || undefined,
@@ -274,28 +288,33 @@ export const setJobFlag = mutation({
       fgDueAt: job.dueAt,
       fgPriority: job.priority,
     });
-    // cascade to every product attached to this job (single or multi-link)
-    const fgs = await ctx.db
-      .query("finishedGoods")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    for (const fg of fgs) {
-      const linked =
-        fg.jobId === id || (fg.jobIds ?? []).includes(id);
-      if (linked) {
+
+    if (flagged) {
+      // cascade down to every product attached to this job (single or multi-link)
+      const fgs = await ctx.db
+        .query("finishedGoods")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+      for (const fg of fgs) {
+        if (!jobIdsOf(fg).includes(id)) continue;
         await ctx.db.patch(fg._id, {
-          isFlagged: flagged || undefined,
+          isFlagged: true,
           flaggedAt,
           // products inherit the job's due date & priority so board cards and
           // details start in sync (they can be edited per product afterwards)
-          dueAt: flagged ? (job.fgDueAt ?? job.dueAt) : undefined,
-          priority: flagged ? (job.fgPriority ?? job.priority) : undefined,
+          dueAt: job.fgDueAt ?? job.dueAt,
+          priority: job.fgPriority ?? job.priority,
           // a newly flagged product starts its life as "Listed"
-          ...(flagged && fg.projectStatus === undefined
+          ...(fg.projectStatus === undefined
             ? { projectStatus: PROJECT_STATUS_START }
             : {}),
         });
       }
+      // cascade up to the project this job belongs to
+      await flagAncestors(ctx, userId, [id], Date.now());
+    } else {
+      // nothing flagged is left under this job, so the project may drop too
+      await clearAncestorsIfOrphaned(ctx, userId, [id]);
     }
   },
 });

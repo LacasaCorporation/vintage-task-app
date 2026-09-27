@@ -1,6 +1,12 @@
 import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { scopeUserId } from "./org";
+import {
+  clearAncestorsIfOrphaned,
+  flagAncestors,
+  jobIdsOf,
+  projectHasFlaggedWork,
+} from "./flagCascade";
 import { syncProductionConsumption, landRun, landableQty } from "./production";
 import { getSettings } from "./settings";
 import type { MutationCtx } from "./_generated/server";
@@ -1147,8 +1153,10 @@ export const listJobProducts = query({
 
 /**
  * Flag (or unflag) a product. A flagged product surfaces as a subtask under
- * its job; flagging a product also turns the job's flag on so the job shows
- * as the main task in the todo list. Unflagging only clears the product.
+ * its job; flagging a product also turns the flag on for its job and for that
+ * job's project, so the whole chain shows in the Productions view. Unflagging
+ * clears only the product — the job and project keep their flag until nothing
+ * flagged is left under them.
  */
 export const setFgFlag = mutation({
   args: { id: v.id("finishedGoods"), flagged: v.boolean() },
@@ -1158,13 +1166,13 @@ export const setFgFlag = mutation({
     const fg = await ctx.db.get(id);
     if (fg === null || fg.ownerId !== userId)
       throw new Error("That product no longer exists.");
-    if (flagged && fg.jobId === undefined && (fg.jobIds ?? []).length === 0)
+    const jobIds = jobIdsOf(fg);
+    if (flagged && jobIds.length === 0)
       throw new Error("Attach the product to a job before flagging it.");
     const flaggedAt = flagged ? Date.now() : undefined;
     await ctx.db.patch(id, { isFlagged: flagged || undefined, flaggedAt });
     if (flagged) {
       // inherit due date & priority from the parent job at flag time
-      const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
       const parent = jobIds.length > 0 ? await ctx.db.get(jobIds[0]!) : null;
       if (fg.dueAt === undefined && parent?.dueAt !== undefined)
         await ctx.db.patch(id, { dueAt: parent.dueAt });
@@ -1174,14 +1182,67 @@ export const setFgFlag = mutation({
       if (fg.projectStatus === undefined) {
         await ctx.db.patch(id, { projectStatus: PROJECT_STATUS_START });
       }
-      // cascade up: the job of a flagged product is flagged as well
-      for (const jid of jobIds) {
-        const job = await ctx.db.get(jid);
-        if (job !== null && job.ownerId === userId && job.isFlagged !== true) {
-          await ctx.db.patch(jid, { isFlagged: true, flaggedAt });
+      // cascade up: a flagged product flags its job, and the job's project
+      await flagAncestors(ctx, userId, jobIds, Date.now());
+    } else {
+      // the product was the last flagged thing under its job or project, so
+      // they drop the flag it lent them
+      await clearAncestorsIfOrphaned(ctx, userId, jobIds);
+    }
+  },
+});
+
+/**
+ * Flag (or unflag) a project. Flagging turns the flag on for the project and
+ * for every job and product under it. Unflagging is refused while anything
+ * under the project is still flagged — clear the products first.
+ */
+export const setProjectFlag = mutation({
+  args: { id: v.id("projects"), flagged: v.boolean() },
+  handler: async (ctx, { id, flagged }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const project = await ctx.db.get(id);
+    if (project === null || project.ownerId !== userId)
+      throw new Error("That project no longer exists.");
+    const jobs = await ctx.db
+      .query("projectJobs")
+      .withIndex("by_project", (q) => q.eq("projectId", id))
+      .collect();
+    const flaggedAt = flagged ? Date.now() : undefined;
+
+    if (flagged) {
+      await ctx.db.patch(id, { isFlagged: true, flaggedAt });
+      const fgs = await ctx.db
+        .query("finishedGoods")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+      for (const job of jobs) {
+        if (job.ownerId !== userId) continue;
+        if (job.isFlagged !== true) {
+          await ctx.db.patch(job._id, { isFlagged: true, flaggedAt });
+        }
+        for (const fg of fgs) {
+          if (fg.isFlagged === true || !jobIdsOf(fg).includes(job._id)) continue;
+          await ctx.db.patch(fg._id, {
+            isFlagged: true,
+            flaggedAt,
+            dueAt: fg.dueAt ?? job.dueAt,
+            priority: fg.priority ?? job.priority,
+            ...(fg.projectStatus === undefined
+              ? { projectStatus: PROJECT_STATUS_START }
+              : {}),
+          });
         }
       }
+      return;
     }
+
+    if (await projectHasFlaggedWork(ctx, userId, id))
+      throw new Error(
+        "This project still has flagged work under it — remove the flag from its products first.",
+      );
+    await ctx.db.patch(id, { isFlagged: undefined, flaggedAt: undefined });
   },
 });
 

@@ -1,6 +1,7 @@
 import type { Doc } from "@/convex/_generated/dataModel";
 import {
   BookOpen,
+  Briefcase,
   CheckSquare,
   ChevronDown,
   Folder,
@@ -86,12 +87,15 @@ export default function PrimaryNav({
   purchaseCount,
   salesCount,
   accountCount,
+  productionsCount,
   onSelectSection,
   onSelectView,
+  onOpenProductions,
   canViewMaterials,
   canViewPurchase,
   canViewSales,
   canViewAccounting,
+  inProductions,
 }: {
   section: PrimarySection;
   view: CostingView;
@@ -100,12 +104,18 @@ export default function PrimaryNav({
   purchaseCount: number;
   salesCount: number;
   accountCount: number;
+  /** Flagged products, plus flagged jobs that have none of their own. */
+  productionsCount: number;
   onSelectSection: (section: PrimarySection) => void;
   onSelectView: (view: CostingView) => void;
+  /** Open the Productions board — it lives in the Tasks workspace. */
+  onOpenProductions: () => void;
   canViewMaterials: boolean;
   canViewPurchase: boolean;
   canViewSales: boolean;
   canViewAccounting: boolean;
+  /** True when the Tasks workspace is showing the Productions board. */
+  inProductions: boolean;
 }) {
   const [inventoryOpen, setInventoryOpen] = useState(true);
   const inCosting = section === "costing";
@@ -148,6 +158,14 @@ export default function PrimaryNav({
         active={inCosting && (view?.kind === "projects" || view === null)}
         n={projectCount}
         onClick={() => onSelectView({ kind: "projects" })}
+      />
+      {/* the flagged work: projects, jobs and products, worked start → complete */}
+      <NavRow
+        label="Productions"
+        Icon={Briefcase}
+        active={section === "tasks" && inProductions}
+        n={productionsCount}
+        onClick={onOpenProductions}
       />
       {canViewSales && (
         <NavRow

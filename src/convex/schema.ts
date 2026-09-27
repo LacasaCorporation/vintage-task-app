@@ -755,6 +755,11 @@ const schema = defineSchema(
       budget: v.optional(v.number()), // planned budget
       /** Ordered custom Projects status; Start and Finish are fixed. */
       projectStatus: v.optional(v.string()),
+      // flagged projects surface in the Productions view; a project is flagged
+      // because something under it is flagged, not on its own
+      isFlagged: v.optional(v.boolean()),
+      // timestamp when the project was added to the flagged todo list
+      flaggedAt: v.optional(v.number()),
     }).index("by_owner", ["ownerId"]),
 
     // one line inside a costing sheet
