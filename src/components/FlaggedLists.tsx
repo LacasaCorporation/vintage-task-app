@@ -3,6 +3,7 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
 import ProductQtyInline from "@/components/ProductQtyInline";
 import ProductCodeInline from "@/components/ProductCodeInline";
+import ProductMetaInline from "@/components/ProductMetaInline";
 import StatusSelect from "@/components/StatusSelect";
 import AssigneeChip from "@/components/AssigneeChip";
 import { assigneesOfTask } from "@/lib/task-people";
@@ -425,6 +426,7 @@ export function FlaggedItemsList({
                         <span className="min-w-0 truncate">{fg.name}</span>
                         <ProductCodeInline code={fg.code} />
                         <ProductQtyInline qty={fg.qty} unit={fg.unit} />
+                        <ProductMetaInline priority={fg.priority} tags={fg.tags} />
                       </span>
                       {fg.note && (
                         <span className="w-full truncate text-[10px] text-muted-foreground/80 line-through-0">
@@ -802,6 +804,7 @@ export function FlaggedProductsList({
               <span className="min-w-0 truncate">{fg.name}</span>
               <ProductCodeInline code={fg.code} />
               <ProductQtyInline qty={fg.qty} unit={fg.unit} />
+              <ProductMetaInline priority={fg.priority} tags={fg.tags} />
             </span>
             {fg.note && (
               <span className="w-full truncate text-[10px] font-normal text-muted-foreground/80 line-through-0">
