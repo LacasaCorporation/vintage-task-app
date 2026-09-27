@@ -237,7 +237,8 @@ export default function ProjectsSheet({
   const updateJob = useMutation(api.jobs.updateJob);
   const setJobFlag = useMutation(api.jobs.setJobFlag);
   const setFgFlag = useMutation(api.costing.setFgFlag);
-  const removeFg = useMutation(api.costing.removeFinishedGood);
+  const detachFromJobM = useMutation(api.costing.detachFromJob);
+  const detachFromProjectM = useMutation(api.costing.detachFromProject);
   const addProjectM = useMutation(api.costing.addProject);
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const { confirm } = useAppDialogs();
@@ -247,31 +248,68 @@ export default function ProjectsSheet({
    * production has to be stopped before one can be removed, so a running
    * product is stopped at with an explanation instead of a confirm.
    */
-  const handleDeleteProduct = async (fg: FgDoc) => {
+  /**
+   * Removing a product from a job. The product itself is untouched — it keeps
+   * its stock, its recipe and its place in the main products list; only the
+   * link to this job goes.
+   */
+  const handleDetachFromJob = async (fg: FgDoc, jobId: Id<"projectJobs">) => {
     if (fg.productionStartedAt !== undefined) {
       await confirm({
         title: `“${fg.name}” is in production`,
         message:
-          "Stop production before deleting this product. Stopping puts the raw materials it is using back into stock.",
+          "Stop production before removing it from this job. Stopping puts the raw materials it is using back into stock.",
         confirmLabel: "Got it",
         danger: true,
       });
       return;
     }
     const ok = await confirm({
-      title: `Delete “${fg.name}”?`,
+      title: `Remove “${fg.name}” from this job?`,
       message:
-        "The product and its costing lines are permanently removed, and it disappears from the Tasks page too. Its job and project stay.",
-      confirmLabel: "Delete product",
+        "The product itself stays exactly as it is — its stock, recipe and place in the products list are all kept. Only this job link is removed.",
+      confirmLabel: "Remove from job",
       danger: true,
     });
     if (!ok) return;
     try {
-      await removeFg({ id: fg._id });
-      toast.success("Product deleted.");
+      await detachFromJobM({ fgId: fg._id, jobId });
+      toast.success(`“${fg.name}” removed from this job.`);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Couldn't delete the product.",
+        error instanceof Error ? error.message : "Couldn't remove it from the job.",
+      );
+    }
+  };
+
+  /** The same idea for a product grouped under a project but on no job. */
+  const handleDetachFromProject = async (fg: FgDoc) => {
+    if (fg.productionStartedAt !== undefined) {
+      await confirm({
+        title: `“${fg.name}” is in production`,
+        message:
+          "Stop production before moving it out of this project. Stopping puts the raw materials it is using back into stock.",
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
+    const ok = await confirm({
+      title: `Remove “${fg.name}” from this project?`,
+      message:
+        "The product stays exactly as it is — its stock, recipe and place in the products list are all kept. It just stops being listed under this project.",
+      confirmLabel: "Remove from project",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await detachFromProjectM({ fgId: fg._id });
+      toast.success(`“${fg.name}” removed from this project.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't remove it from the project.",
       );
     }
   };
@@ -1347,12 +1385,12 @@ export default function ProjectsSheet({
                                     type="button"
                                     title={
                                       fg.productionStartedAt !== undefined
-                                        ? "Stop production before deleting"
-                                        : "Delete product"
+                                        ? "Stop production before removing"
+                                        : "Remove from this job — the product itself is kept"
                                     }
-                                    aria-label={`Delete product “${fg.name}”`}
+                                    aria-label={`Remove ${fg.name} from this job`}
                                     className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
-                                    onClick={() => void handleDeleteProduct(fg)}
+                                    onClick={() => void handleDetachFromJob(fg, job._id)}
                                   >
                                     <Trash2 className="size-3" />
                                   </button>
@@ -1456,12 +1494,12 @@ export default function ProjectsSheet({
                             type="button"
                             title={
                               fg.productionStartedAt !== undefined
-                                ? "Stop production before deleting"
-                                : "Delete product"
+                                ? "Stop production before removing"
+                                : "Remove from this project — the product itself is kept"
                             }
-                            aria-label={`Delete product “${fg.name}”`}
+                            aria-label={`Remove ${fg.name} from this project`}
                             className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
-                            onClick={() => void handleDeleteProduct(fg)}
+                            onClick={() => void handleDetachFromProject(fg)}
                           >
                             <Trash2 className="size-3" />
                           </button>

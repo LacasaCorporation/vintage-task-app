@@ -1070,6 +1070,29 @@ export const detachFromJob = mutation({
   },
 });
 
+/**
+ * Take a product out of a project it is only grouped under — it stays a
+ * standalone product and keeps its stock, recipe and history.
+ */
+export const detachFromProject = mutation({
+  args: { fgId: v.id("finishedGoods") },
+  handler: async (ctx, { fgId }): Promise<void> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(fgId);
+    if (fg === null || fg.ownerId !== userId)
+      throw new Error("That product no longer exists.");
+    if (fg.productionStartedAt !== undefined)
+      throw new Error("Stop production before moving this product.");
+    if (fg.projectName === undefined)
+      throw new Error("That product isn't under a project.");
+    await ctx.db.patch(fgId, {
+      projectName: undefined,
+      projectCode: undefined,
+    });
+  },
+});
+
 /** The batch each job needs, keyed `jobId|fgId`, for the project totals. */
 export const listJobProducts = query({
   args: {},
