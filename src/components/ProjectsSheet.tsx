@@ -30,6 +30,7 @@ import { ProductionButton } from "@/components/FlaggedLists";
 import ProductQtyInline from "@/components/ProductQtyInline";
 import ProductCodeInline from "@/components/ProductCodeInline";
 import ProductTagsInline from "@/components/ProductTagsInline";
+import { batchCost, costByProduct } from "@/lib/product-cost";
 import PriorityChip from "@/components/PriorityChip";
 import CustomersPanel from "@/components/CustomersPanel";
 import {
@@ -312,14 +313,10 @@ export default function ProjectsSheet({
     }
   };
 
-  const costByFg = useMemo(() => {
-    const map = new Map<Id<"finishedGoods">, number>();
-    for (const item of allItems ?? []) {
-      if (item.fgId === undefined) continue;
-      map.set(item.fgId, (map.get(item.fgId) ?? 0) + item.qty * item.unitPrice);
-    }
-    return map;
-  }, [allItems]);
+  const costByFg = useMemo(
+    () => costByProduct(allItems ?? []),
+    [allItems],
+  );
 
   /** Merge the project entity (details) with its FG aggregation (numbers). */
   const rows = useMemo<ProjectRow[]>(() => {
@@ -339,7 +336,9 @@ export default function ProjectsSheet({
         jobs: [],
       };
       row.products += 1;
-      const c = costByFg.get(fg._id) ?? 0;
+      // the sheet prices one product, so the quantity decides what the
+      // project is actually worth
+      const c = batchCost(costByFg.get(fg._id) ?? 0, fg);
       row.cost += c;
       row.total += c * (1 + (fg.markupPct ?? 0) / 100);
       row.fgIds.push(fg._id);
@@ -1222,8 +1221,11 @@ export default function ProjectsSheet({
                                         </span>
                                         <ProductCodeInline code={fg.code} />
                                         <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
-                                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                                          {money(costByFg.get(fg._id) ?? 0)}
+                                        <span
+                                          className="shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                                          title="Cost for the whole batch"
+                                        >
+                                          {money(batchCost(costByFg.get(fg._id) ?? 0, fg))}
                                         </span>
                                         <ProductTagsInline tags={fg.tags} />
                                       </span>
@@ -1330,8 +1332,11 @@ export default function ProjectsSheet({
                                 </span>
                                 <ProductCodeInline code={fg.code} />
                                 <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
-                                <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                                  {money(costByFg.get(fg._id) ?? 0)}
+                                <span
+                                  className="shrink-0 text-[10px] tabular-nums text-muted-foreground"
+                                  title="Cost for the whole batch"
+                                >
+                                  {money(batchCost(costByFg.get(fg._id) ?? 0, fg))}
                                 </span>
                                 <ProductTagsInline tags={fg.tags} />
                               </span>

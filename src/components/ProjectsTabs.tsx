@@ -10,6 +10,7 @@ import { useMemo } from "react";
 import { ProductionButton } from "@/components/FlaggedLists";
 import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { batchCost } from "@/lib/product-cost";
 
 /** What the product list is narrowed down to. */
 export type ProductFilter =
@@ -168,7 +169,7 @@ export function JobsList({
       let cost = 0;
       let total = 0;
       for (const fg of products) {
-        const c = costByFg.get(fg._id) ?? 0;
+        const c = batchCost(costByFg.get(fg._id) ?? 0, fg);
         cost += c;
         total += c * (1 + (fg.markupPct ?? 0) / 100);
       }
@@ -297,7 +298,7 @@ export function ProductsList({
   const rows = useMemo(
     () =>
       finishedGoods.map((fg) => {
-        const cost = costByFg.get(fg._id) ?? 0;
+        const cost = batchCost(costByFg.get(fg._id) ?? 0, fg);
         return {
           fg,
           cost,

@@ -9,6 +9,7 @@ import {
 } from "@/lib/project-statuses";
 import { formatDueLabel } from "@/lib/task-utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { batchCost } from "@/lib/product-cost";
 
 type FgDoc = Doc<"finishedGoods">;
 type JobDoc = Doc<"projectJobs">;
@@ -59,7 +60,7 @@ export function buildPrintRows(
     let cost = 0;
     let total = 0;
     for (const fg of products) {
-      const c = costByFg.get(fg._id) ?? 0;
+      const c = batchCost(costByFg.get(fg._id) ?? 0, fg);
       cost += c;
       total += c * (1 + (fg.markupPct ?? 0) / 100);
     }

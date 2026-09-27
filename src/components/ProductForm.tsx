@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { batchCost, costByProduct } from "@/lib/product-cost";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -136,14 +137,10 @@ export default function ProductForm({
 
   // product costs across all FGs (single query, grouped client-side)
   const allItems = useQuery(api.costing.listAllItems);
-  const costByFg = useMemo(() => {
-    const map = new Map<Id<"finishedGoods">, number>();
-    for (const item of allItems ?? []) {
-      if (item.fgId === undefined) continue;
-      map.set(item.fgId, (map.get(item.fgId) ?? 0) + item.qty * item.unitPrice);
-    }
-    return map;
-  }, [allItems]);
+  const costByFg = useMemo(
+    () => costByProduct(allItems ?? []),
+    [allItems],
+  );
 
   // every project that exists as a record, plus names still only on products
   const projects = useMemo(() => {
@@ -294,7 +291,7 @@ export default function ProductForm({
         `Sales Price (${currencyCode})`,
       ].join(","),
       ...rows.map((f) => {
-        const cost = costByFg.get(f._id) ?? 0;
+        const cost = batchCost(costByFg.get(f._id) ?? 0, f);
         const total = cost * (1 + (f.markupPct ?? 0) / 100);
         return [
           `"${(f.projectCode ?? "").replace(/"/g, '""')}"`,
@@ -675,7 +672,7 @@ export default function ProductForm({
                 </tr>
               ) : (
                 rows.map((f, i) => {
-                  const cost = costByFg.get(f._id) ?? 0;
+                  const cost = batchCost(costByFg.get(f._id) ?? 0, f);
                   const total = cost * (1 + (f.markupPct ?? 0) / 100);
                   const active = activeFgId === f._id;
                   return (
