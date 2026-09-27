@@ -335,6 +335,9 @@ const schema = defineSchema(
       pricePerUnit: v.number(),
       // how much is on hand; raised by purchase bills, lowered by usage
       stock: v.optional(v.number()),
+      // what was already on hand before any bill was recorded; set from the
+      // Opening balance tab and kept as the authoritative figure
+      opening: v.optional(v.number()),
     }).index("by_owner", ["ownerId"]),
 
     // a purchase bill: buying raw materials, which adds to their stock

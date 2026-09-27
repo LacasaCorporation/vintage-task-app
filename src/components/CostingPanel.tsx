@@ -727,7 +727,7 @@ export default function CostingPanel({
             if (view?.kind === "fg") onSelectView(null);
           }}
         >
-          <DialogContent className="max-h-[92vh] gap-0 overflow-y-auto p-0 sm:max-w-[min(100%,1080px)]">
+          <DialogContent className="max-h-[92vh] gap-0 overflow-y-auto p-0 sm:max-w-[min(100%,1240px)]">
             <DialogTitle className="sr-only">
               Costing sheet — {activeFg.name}
             </DialogTitle>
@@ -1193,7 +1193,7 @@ export default function CostingPanel({
 
           {rows.length > 0 && (
             /* ── the summary line: cost → margin → sales price ───────── */
-            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/60 pt-2 text-muted-foreground">
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-2 text-muted-foreground">
               <Figure label="Cost" strong>
                 {money(totals.subtotal)}
               </Figure>
@@ -1213,7 +1213,7 @@ export default function CostingPanel({
                     }
                   }}
                   aria-label="Margin percent"
-                  className="w-8 border-b border-transparent bg-transparent px-0.5 text-right text-xs text-muted-foreground tabular-nums outline-none focus:border-primary/60 focus:text-foreground"
+                  className="w-12 border-b border-transparent bg-transparent px-0.5 text-right text-xs text-muted-foreground tabular-nums outline-none focus:border-primary/60 focus:text-foreground"
                 />
                 %{" "}
                 {money(totals.markup)}

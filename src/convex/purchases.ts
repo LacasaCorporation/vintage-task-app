@@ -1,6 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
-import { stockIn, stockOut } from "./stock";
+import { setStockTo, stockIn, stockOut } from "./stock";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -301,12 +301,12 @@ export const adjustStock = mutation({
     if (material === null) throw new Error("That material no longer exists.");
     if (material.ownerId !== userId) throw new Error("Not your material.");
     // negative stock is a real state (a shortage) and is shown, not blocked
-    // a hand-set figure is a correction: log the difference, not the total
-    await stockIn(ctx, {
+    // a hand-set figure is a correction: log the difference, not the total,
+    // and let the opening absorb it so the ledger still balances
+    await setStockTo(ctx, {
       ownerId: userId,
       material,
-      qty: stock - (material.stock ?? 0),
-      source: "adjustment",
+      stock,
       ref: "Stock correction",
     });
   },

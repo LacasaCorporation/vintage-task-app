@@ -94,14 +94,14 @@ function OpeningBalances({
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-sm">
+          <table className="w-full min-w-[620px] text-sm">
             <thead>
               <tr className="border-b border-border/70 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
                 <th className="w-24 px-3 py-2">Code</th>
                 <th className="px-3 py-2">Material</th>
                 <th className="w-16 px-3 py-2">Unit</th>
-                <th className="w-28 px-3 py-2 text-right">Current balance</th>
-                <th className="w-40 px-3 py-2 text-right">Opening qty</th>
+                <th className="w-32 px-3 py-2 text-right">Current balance</th>
+                <th className="w-48 px-3 py-2 text-right">Opening qty</th>
                 <th className="w-20 px-2 py-2" />
               </tr>
             </thead>
@@ -135,7 +135,7 @@ function OpeningBalances({
                           }
                           placeholder="0"
                           aria-label={`Opening quantity for ${m.name}`}
-                          className="h-7 w-24 rounded-lg border bg-background px-2 text-right text-xs tabular-nums outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
+                          className="h-7 w-32 rounded-lg border bg-background px-2 text-right text-xs tabular-nums outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
                         />
                         <span className="text-[11px] text-muted-foreground">
                           {m.unit}

@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type {
   MovementDirection,
@@ -78,6 +78,81 @@ export async function stockOut(
 }
 
 /**
+ * What the ledger already explains for one material: what bills brought in,
+ * and what production has net-taken. Corrections are deliberately left out —
+ * they move the opening figure, they are not trade — so posting one can never
+ * inflate the outgoing column and bounce the opening back to its old value.
+ */
+async function ledgerTotals(
+  ctx: QueryCtx,
+  ownerId: Id<"users">,
+  materialId: Id<"rawMaterials">,
+): Promise<{ income: number; outgoing: number }> {
+  let income = 0;
+  const lines = await ctx.db
+    .query("purchaseLines")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+    .collect();
+  for (const line of lines) {
+    if (line.materialId === materialId) income += line.qty;
+  }
+  let outgoing = 0;
+  const moves = await ctx.db
+    .query("stockMovements")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+    .collect();
+  for (const m of moves) {
+    if (m.materialId !== materialId) continue;
+    // production is the only real consumer; a stop hands the same units back
+    if (m.source === "production" && m.direction === "out") outgoing += m.qty;
+    if (m.source === "production-return" && m.direction === "in") outgoing -= m.qty;
+  }
+  return { income: round(income), outgoing: round(outgoing) };
+}
+
+/**
+ * Force a material to a hand-counted stock figure. The opening absorbs the
+ * difference, so `opening + income - outgoing === balance` keeps holding and
+ * the correction stays visible as a movement instead of a silent edit.
+ */
+export async function setStockTo(
+  ctx: MutationCtx,
+  args: {
+    ownerId: Id<"users">;
+    material: Doc<"rawMaterials">;
+    stock: number;
+    ref: string;
+    at?: number;
+  },
+): Promise<void> {
+  const { material } = args;
+  const { income, outgoing } = await ledgerTotals(
+    ctx,
+    args.ownerId,
+    material._id,
+  );
+  const current = round(material.stock ?? 0);
+  const previousOpening = round(
+    material.opening ?? current - income + outgoing,
+  );
+  const nextOpening = round(previousOpening + (round(args.stock) - current));
+  const delta = round(args.stock - current);
+  if (delta !== 0) {
+    await stockIn(ctx, {
+      ownerId: args.ownerId,
+      material,
+      qty: delta,
+      source: "adjustment",
+      ref: args.ref,
+      at: args.at,
+    });
+  }
+  if (nextOpening !== previousOpening) {
+    await ctx.db.patch(material._id, { opening: nextOpening });
+  }
+}
+
+/**
  * The stock report: for every material, what came in, what went out, and what
  * is left. Income comes from the bill lines so it is complete even for bills
  * saved before the ledger existed; outgoing comes from the movements, so
@@ -120,7 +195,16 @@ export const report = query({
         outgoing: 0,
         movements: [],
       };
-      if (m.direction === "out") entry.outgoing += m.qty;
+      // only production consumes stock; corrections adjust the opening, and a
+      // stopped run hands its units back, so neither belongs in "issued"
+      if (m.source === "production" && m.direction === "out") {
+        entry.outgoing += m.qty;
+      } else if (
+        m.source === "production-return" &&
+        m.direction === "in"
+      ) {
+        entry.outgoing -= m.qty;
+      }
       entry.movements.push({
         _id: m._id,
         qty: m.qty,
@@ -148,7 +232,11 @@ export const report = query({
         income: incomeQty,
         outgoing,
         balance,
-        opening: round(balance - incomeQty + outgoing),
+        // a stored opening is what the user typed and always wins; older
+        // materials fall back to the residual the ledger can explain
+        opening: round(
+          material.opening ?? balance - incomeQty + outgoing,
+        ),
         movements: (entry?.movements ?? [])
           .sort((a, b) => b.at - a.at)
           .slice(0, 4),
@@ -186,16 +274,23 @@ export const setOpening = mutation({
       throw new Error("That material no longer exists.");
     }
     const target = round(Math.max(0, qty));
-    const delta = round(target - (material.stock ?? 0));
-    if (delta === 0) return;
-    // `move` reads the sign, so a lower opening is recorded as going out.
-    await stockIn(ctx, {
-      ownerId,
-      material,
-      qty: delta,
-      source: "adjustment",
-      ref: "Opening balance",
-      at,
-    });
+    const { income, outgoing } = await ledgerTotals(ctx, ownerId, materialId);
+    // the ledger reads opening + income - outgoing = balance, so this is the
+    // stock on hand that the requested opening implies
+    const targetBalance = round(target + income - outgoing);
+    const delta = round(targetBalance - round(material.stock ?? 0));
+    if (delta !== 0) {
+      // `move` reads the sign, so a lower opening is recorded as going out
+      await stockIn(ctx, {
+        ownerId,
+        material,
+        qty: delta,
+        source: "adjustment",
+        ref: "Opening balance",
+        at,
+      });
+    }
+    // stored, not derived: the figure the user typed is the figure shown
+    await ctx.db.patch(materialId, { opening: target });
   },
 });
