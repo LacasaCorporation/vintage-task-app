@@ -115,7 +115,6 @@ export default function CostingPanel({
   const addFgItem = useMutation(api.costing.addFgItem);
   const updateItem = useMutation(api.costing.updateItem);
   const removeItem = useMutation(api.costing.removeItem);
-  const updateFg = useMutation(api.costing.updateFinishedGood);
   const setFgImage = useMutation(api.costing.setFgImage);
   const clearFgImageM = useMutation(api.costing.clearFgImage);
   const mergeDuplicates = useMutation(api.costing.mergeFgDuplicateItems);
@@ -754,10 +753,10 @@ export default function CostingPanel({
               </div>
               <div>
                 <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                  Sales price
+                  Total
                 </dt>
                 <dd className="text-sm font-bold tabular-nums text-primary">
-                  {money(totals.grand)}
+                  {money(totals.subtotal)}
                 </dd>
               </div>
             </dl>
@@ -1070,45 +1069,10 @@ export default function CostingPanel({
                   <tfoot>
                     <tr className="border-t border-border/70 bg-muted/30">
                       <td colSpan={4} className="px-3 py-1.5 text-right text-xs text-muted-foreground">
-                        Subtotal
+                        Lines
                         <span className="ml-1.5 text-[10px] opacity-70">
-                          ({rows.length} line{rows.length === 1 ? "" : "s"})
+                          {rows.length} row{rows.length === 1 ? "" : "s"}
                         </span>
-                      </td>
-                      <td colSpan={3} className="px-3 py-1.5 text-right font-medium tabular-nums">
-                        {money(totals.subtotal)}
-                      </td>
-                    </tr>
-                    <tr className="bg-muted/30">
-                      <td colSpan={4} className="px-3 py-1.5 text-right text-xs text-muted-foreground">
-                        <span className="inline-flex items-center gap-1">
-                          Margin
-                          <input
-                            type="number"
-                            min="0"
-                            step="any"
-                            value={markupPct}
-                            onChange={(e) => {
-                              const v = Number(e.target.value);
-                              if (Number.isFinite(v) && v >= 0 && activeFg) {
-                                void updateFg({ id: activeFg._id, markupPct: v }).catch(() =>
-                                  toast.error("Couldn't update the margin."),
-                                );
-                              }
-                            }}
-                            className="h-6 w-12 rounded border bg-card px-1 text-right text-xs tabular-nums outline-none focus:ring-2 focus:ring-primary/30"
-                            aria-label="Margin percent"
-                          />
-                          %
-                        </span>
-                      </td>
-                      <td colSpan={3} className="px-3 py-1.5 text-right font-medium tabular-nums">
-                        +{money(totals.markup)}
-                      </td>
-                    </tr>
-                    <tr className="bg-muted/30">
-                      <td colSpan={4} className="px-3 py-1.5 text-right text-xs text-muted-foreground">
-                        Cost per unit
                       </td>
                       <td colSpan={3} className="px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground">
                         {money(totals.perUnit)} / {activeFg.unit ?? "pcs"}
@@ -1118,17 +1082,14 @@ export default function CostingPanel({
                       <td colSpan={4} className="px-3 py-2 text-right text-sm font-semibold">
                         <span className="inline-flex items-center gap-1.5">
                           <Sigma className="size-3.5 text-primary" />
-                          Sales price
+                          Total cost
                         </span>
                       </td>
                       <td
                         colSpan={3}
                         className="px-3 py-2 text-right font-display text-base font-bold tabular-nums text-primary"
                       >
-                        {money(totals.grand)}
-                        <span className="ml-1.5 text-[10px] font-medium text-muted-foreground">
-                          ({money(totals.salesPerUnit)} / {activeFg.unit ?? "pcs"})
-                        </span>
+                        {money(totals.subtotal)}
                       </td>
                     </tr>
                   </tfoot>
