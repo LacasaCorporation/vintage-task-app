@@ -178,6 +178,125 @@ export const listAccounts = query({
   },
 });
 
+/**
+ * One account's ledger: every posting that touched it, oldest first, with the
+ * balance carried down each line.
+ *
+ * `from` / `to` narrow what is *shown*, not what is counted: the opening
+ * balance is everything before `from`, so a narrowed view still reconciles —
+ * opening + debits − credits is the closing balance, at any range.
+ */
+export const accountLedger = query({
+  args: {
+    accountId: v.id("accounts"),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    search: v.optional(v.string()),
+  },
+  handler: async (ctx, { accountId, from, to, search }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return null;
+    const account = await ctx.db.get(accountId);
+    if (account === null || account.ownerId !== userId) return null;
+
+    const [lines, entries] = await Promise.all([
+      ctx.db
+        .query("journalLines")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect(),
+      ctx.db
+        .query("journalEntries")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect(),
+    ]);
+    const entryOf = new Map(entries.map((e) => [e._id, e]));
+
+    // every line of this account, oldest first
+    const mine = lines
+      .filter((l) => l.accountId === accountId)
+      .map((l) => ({ line: l, entry: entryOf.get(l.entryId) }))
+      .filter((r): r is { line: typeof r.line; entry: NonNullable<typeof r.entry> } =>
+        r.entry !== undefined,
+      )
+      .sort((a, b) => a.entry.at - b.entry.at || a.entry.number.localeCompare(b.entry.number));
+
+    // what the account already stood at when the window opens
+    const opening = round(
+      mine
+        .filter((r) => from !== undefined && r.entry.at < from)
+        .reduce((sum, r) => sum + r.line.debit - r.line.credit, 0),
+    );
+
+    const term = (search ?? "").trim().toLowerCase();
+    let running = opening;
+    const rows: {
+      _id: Id<"journalLines">;
+      entryId: Id<"journalEntries">;
+      number: string;
+      at: number;
+      kind: Doc<"journalEntries">["kind"];
+      memo?: string;
+      party?: string;
+      lineMemo?: string;
+      debit: number;
+      credit: number;
+      balance: number;
+    }[] = [];
+    let debitTotal = 0;
+    let creditTotal = 0;
+    for (const { line, entry } of mine) {
+      if (from !== undefined && entry.at < from) continue;
+      if (to !== undefined && entry.at > to) continue;
+      running = round(running + line.debit - line.credit);
+      debitTotal = round(debitTotal + line.debit);
+      creditTotal = round(creditTotal + line.credit);
+      if (
+        term !== "" &&
+        !`${entry.number} ${entry.memo ?? ""} ${entry.party ?? ""} ${
+          line.memo ?? ""
+        } ${entry.kind}`
+          .toLowerCase()
+          .includes(term)
+      ) {
+        continue;
+      }
+      rows.push({
+        _id: line._id,
+        entryId: entry._id,
+        number: entry.number,
+        at: entry.at,
+        kind: entry.kind,
+        memo: entry.memo,
+        party: entry.party,
+        lineMemo: line.memo,
+        debit: round(line.debit),
+        credit: round(line.credit),
+        balance: running,
+      });
+    }
+
+    return {
+      account: {
+        _id: account._id,
+        code: account.code,
+        name: account.name,
+        type: account.type,
+        note: account.note,
+      },
+      opening,
+      rows,
+      totals: {
+        debit: debitTotal,
+        credit: creditTotal,
+        closing: round(opening + debitTotal - creditTotal),
+        // every line the account has ever had, so an empty window is not
+        // mistaken for an account that has never been used
+        lifetime: mine.length,
+      },
+    };
+  },
+});
+
 /** Journal entries newest first, each with its lines attached. */
 export const listEntries = query({
   args: { limit: v.optional(v.number()) },

@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Landmark,
   Loader2,
+  Pencil,
   Plus,
   Scale,
   ScrollText,
@@ -21,6 +22,7 @@ import type { DialogsApi } from "@/components/AppDialogs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
 import PageTabs from "@/components/PageTabs";
+import AccountLedgerDialog from "@/components/AccountLedgerDialog";
 import type { AccountType } from "@/convex/accounting";
 
 /** The sub-pages of the accounting module, in the order the sidebar lists them. */
@@ -140,6 +142,12 @@ export default function AccountingPanel({
   const dropEntry = useMutation(api.accounting.removeEntry);
 
   const [busy, setBusy] = useState(false);
+  /** The account whose ledger is open, if any. */
+  const [ledgerAccountId, setLedgerAccountId] = useState<Id<"accounts"> | null>(
+    null,
+  );
+  /** The entry to highlight after jumping out of a ledger row. */
+  const [focusEntry, setFocusEntry] = useState<Id<"journalEntries"> | null>(null);
 
   // a brand-new firm has no chart, so seed the standard one on first open
   useEffect(() => {
@@ -372,15 +380,20 @@ export default function AccountingPanel({
           title="Chart of accounts"
           count={`${(accounts ?? []).filter((a) => !a.isGroup).length} accounts`}
           actions={
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => void newAccount()}
-              className="h-7 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
-            >
-              <Plus className="size-3.5" /> Account
-            </Button>
+            <>
+              <span className="hidden text-[11px] text-muted-foreground sm:inline">
+                Click a row to open its ledger
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void newAccount()}
+                className="h-7 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
+              >
+                <Plus className="size-3.5" /> Account
+              </Button>
+            </>
           }
         >
           {accounts.length === 0 ? (
@@ -405,9 +418,13 @@ export default function AccountingPanel({
                   {accounts.map((a) => (
                     <tr
                       key={a._id}
+                      onClick={() => !a.isGroup && setLedgerAccountId(a._id)}
+                      title={a.isGroup ? undefined : `Open the ${a.name} ledger`}
                       className={cn(
-                        "transition-colors hover:bg-accent/40",
-                        a.isGroup && "bg-muted/20",
+                        "group/account transition-colors",
+                        a.isGroup
+                          ? "bg-muted/20"
+                          : "cursor-pointer hover:bg-accent/40",
                       )}
                     >
                       <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
@@ -419,7 +436,13 @@ export default function AccountingPanel({
                           a.isGroup ? "font-semibold" : "font-medium",
                         )}
                       >
-                        {a.name}
+                        {a.isGroup ? (
+                          a.name
+                        ) : (
+                          <span className="underline decoration-transparent underline-offset-2 transition-colors group-hover/account:decoration-current">
+                            {a.name}
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         {!a.isGroup && (
@@ -458,16 +481,36 @@ export default function AccountingPanel({
                           <span className="flex justify-end gap-0.5">
                             <button
                               type="button"
-                              aria-label={`Edit ${a.name}`}
-                              onClick={() => void editOne(a._id)}
+                              aria-label={`Open the ${a.name} ledger`}
+                              title="Open the ledger"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setLedgerAccountId(a._id);
+                              }}
                               className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
                             >
                               <ScrollText className="size-3" />
                             </button>
                             <button
                               type="button"
+                              aria-label={`Edit ${a.name}`}
+                              title="Edit account"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void editOne(a._id);
+                              }}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
+                            >
+                              <Pencil className="size-3" />
+                            </button>
+                            <button
+                              type="button"
                               aria-label={`Delete ${a.name}`}
-                              onClick={() => void deleteOne(a._id)}
+                              title="Delete account"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void deleteOne(a._id);
+                              }}
                               className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-destructive"
                             >
                               <Trash2 className="size-3.5" />
@@ -537,10 +580,30 @@ export default function AccountingPanel({
             money={money}
             kinds={tab === "journal" ? journalKinds : receiptKinds}
             onDelete={deleteEntry}
+            focusId={tab === "journal" ? focusEntry : null}
           />
         </Panel>
       ) : (
         <BookPanel cashOnly={tab === "cashbook"} money={money} />
+      )}
+
+      {ledgerAccountId !== null && (
+        <AccountLedgerDialog
+          accountId={ledgerAccountId}
+          money={money}
+          onClose={() => setLedgerAccountId(null)}
+          onOpenEntry={(entryId) => {
+            setLedgerAccountId(null);
+            setFocusEntry(entryId);
+            onTabChange("journal");
+          }}
+          onNewEntry={() => {
+            setLedgerAccountId(null);
+            // the entry editor is a portal-based prompt; let the dialog fully
+            // unmount first so its pointer-events lock is released
+            window.setTimeout(() => void compose("journal"), 0);
+          }}
+        />
       )}
     </div>
   );
@@ -841,6 +904,7 @@ function EntryTable({
   money,
   kinds,
   onDelete,
+  focusId,
 }: {
   entries: {
     _id: Id<"journalEntries">;
@@ -862,6 +926,8 @@ function EntryTable({
   money: (n: number) => string;
   kinds: EntryKind[];
   onDelete: (id: Id<"journalEntries">) => Promise<void>;
+  /** An entry to call out — where a ledger row just sent us. */
+  focusId?: Id<"journalEntries"> | null;
 }) {
   const shown = entries.filter((e) => kinds.includes(e.kind));
   if (shown.length === 0) {
@@ -875,7 +941,14 @@ function EntryTable({
   return (
     <ul className="divide-y divide-border/60">
       {shown.map((e) => (
-        <li key={e._id} className="group/entry px-4 py-2.5 transition-colors hover:bg-accent/40">
+        <li
+          key={e._id}
+          className={cn(
+            "group/entry px-4 py-2.5 transition-colors hover:bg-accent/40",
+            e._id === focusId &&
+              "bg-amber-500/10 ring-1 ring-amber-500/30 ring-inset",
+          )}
+        >
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-[11px] text-muted-foreground">
               {e.number}
