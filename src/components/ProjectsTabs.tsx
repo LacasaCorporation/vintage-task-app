@@ -171,7 +171,8 @@ export function JobsList({
       for (const fg of products) {
         const c = batchCost(costByFg.get(fg._id) ?? 0, fg);
         cost += c;
-        total += c * (1 + (fg.markupPct ?? 0) / 100);
+        // a job's value is what its products cost to make; margin is not added
+        total += c;
       }
       return { job, projectName: projectNameOf(job), products, cost, total };
     });
@@ -204,7 +205,7 @@ export function JobsList({
         filterIcon={Briefcase}
         right={
           <span className="text-xs tabular-nums text-muted-foreground">
-            {money(filtered.reduce((s, r) => s + r.total, 0))} total
+            {money(filtered.reduce((s, r) => s + r.total, 0))} production cost
           </span>
         }
       />

@@ -337,11 +337,11 @@ export default function ProjectsSheet({
         jobs: [],
       };
       row.products += 1;
-      // the sheet prices one product, so the quantity decides what the
-      // project is actually worth
+      // the sheet prices one product, so the quantity decides what it costs;
+      // the project value is that cost — margin is not added on top
       const c = batchCost(costByFg.get(fg._id) ?? 0, fg);
       row.cost += c;
-      row.total += c * (1 + (fg.markupPct ?? 0) / 100);
+      row.total += c;
       row.fgIds.push(fg._id);
       agg.set(fg.projectName, row);
     }
@@ -414,8 +414,7 @@ export default function ProjectsSheet({
         "Due date",
         `Budget (${defaultCurrencyCode})`,
         "Products",
-        `Cost (${defaultCurrencyCode})`,
-        `Sales Price (${defaultCurrencyCode})`,
+        `Value (${defaultCurrencyCode})`,
       ].join(","),
       ...filtered.map((p) =>
         [
@@ -430,11 +429,10 @@ export default function ProjectsSheet({
             : "",
           p.project?.budget?.toFixed(2) ?? "",
           String(p.products),
-          p.cost.toFixed(2),
           p.total.toFixed(2),
         ].join(","),
       ),
-      `,,,TOTAL,,,"",,${totals.products},${totals.cost.toFixed(2)},${totals.total.toFixed(2)}`,
+      `,,,TOTAL,,,"",,${totals.products},${totals.total.toFixed(2)}`,
     ];
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -833,7 +831,7 @@ export default function ProjectsSheet({
                         <MoneyBracket
                           amount={money(p.total)}
                           tone="primary"
-                          title={`Sales value of this project's products: cost ${money(p.cost)} + margin`}
+                          title="Project value — the production cost of its products, margin not added"
                         />
                       </span>
                       {onEditProject && detail && (
@@ -1447,15 +1445,9 @@ export default function ProjectsSheet({
               Products: {totals.products} · Jobs: {totals.jobs}
             </span>
             <MoneyBracket
-              amount={money(totals.cost)}
-              tone="cost"
-              title="Total production cost across every product, quantities included"
-              className="text-[11px]"
-            />
-            <MoneyBracket
               amount={money(totals.total)}
               tone="primary"
-              title="Total project value: production cost plus margin"
+              title="Total project value — the production cost of every product, quantities included, margin not added"
               className="text-[11px]"
             />
           </div>
