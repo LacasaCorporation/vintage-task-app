@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Flag,
   Folder,
-  Package,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -418,7 +417,6 @@ function JobRow({
                 <span className="min-w-0 truncate">{fg.name}</span>
                 <ProductQtyInline qty={fg.qty} unit={fg.unit} />
               </button>
-              <Package className="size-3 shrink-0 text-sky-500/70" />
               {fg.code && (
                 <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                   {fg.code}

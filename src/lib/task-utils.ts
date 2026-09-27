@@ -94,18 +94,20 @@ export function daysLeftLabel(ts: number): { text: string; overdue: boolean } {
 }
 
 /** Human label like "Today 3:00 PM", "Tomorrow", "Mon, Sep 24 · 9:00 AM". */
+/**
+ * A due date reads as a day, not a moment: "Wed, Sep 30" rather than
+ * "Wed, Sep 30 · 11:32 AM". The time is still picked in the date field, it
+ * just isn't shouted on every row.
+ */
 export function formatDueLabel(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const hasTime = d.getHours() !== 0 || d.getMinutes() !== 0;
   const today0 = startOfDay(now).getTime();
   const diffDays = Math.round((startOfDay(d).getTime() - today0) / 86_400_000);
-  if (diffDays === 0) return hasTime ? `Today ${time}` : "Today";
-  if (diffDays === 1) return hasTime ? `Tomorrow ${time}` : "Tomorrow";
-  if (diffDays === -1) return hasTime ? `Yesterday ${time}` : "Yesterday";
-  const date = d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-  return hasTime ? `${date} · ${time}` : date;
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Tomorrow";
+  if (diffDays === -1) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
 
 /** Default datetime-local value (next hour) for a new due date. */

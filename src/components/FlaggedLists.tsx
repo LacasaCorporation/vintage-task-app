@@ -423,7 +423,6 @@ export function FlaggedItemsList({
                       <span className="min-w-0 truncate">{fg.name}</span>
                       <ProductQtyInline qty={fg.qty} unit={fg.unit} />
                     </button>
-                    <Package className="size-3 shrink-0 text-sky-500/70" />
                     {fg.code && (
                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
                         {fg.code}
@@ -434,10 +433,7 @@ export function FlaggedItemsList({
                       inherited={fg.dueAt === undefined && job.dueAt !== undefined}
                     />
                     {showTags && (
-                      <>
-                        <span className={tagChip}>{data.projectNameOf(job)}</span>
-                        <span className={tagChip}>{job.name}</span>
-                      </>
+                      <span className={tagChip}>{data.projectNameOf(job)}</span>
                     )}
                     <StatusSelect
                       value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
@@ -801,15 +797,6 @@ export function FlaggedProductsList({
             <span className="min-w-0 truncate">{fg.name}</span>
             <ProductQtyInline qty={fg.qty} unit={fg.unit} />
           </button>
-          <Flag
-            className={cn(
-              "size-3.5 shrink-0",
-              fg.isCompleted
-                ? "fill-emerald-400 text-emerald-500"
-                : "fill-amber-400 text-amber-500",
-            )}
-          />
-          <Package className="size-3.5 shrink-0 text-sky-500/80" />
           <AssigneeChip
             userIds={assigneesOfTask(fg, rowPeopleById)}
             peopleById={rowPeopleById}
@@ -819,7 +806,6 @@ export function FlaggedProductsList({
               {fg.code}
             </span>
           )}
-          {parentJob && <span className={tagChip}>{parentJob.name}</span>}
           <DueChips
             dueAt={fg.dueAt ?? parentJob?.dueAt}
             inherited={fg.dueAt === undefined && parentJob?.dueAt !== undefined}
