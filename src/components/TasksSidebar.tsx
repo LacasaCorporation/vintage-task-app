@@ -1,7 +1,6 @@
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import type { TaskDoc } from "@/lib/task-utils";
 import { isDueToday, isOverdue } from "@/lib/task-utils";
-import TaskAssignPanel from "@/components/TaskAssignPanel";
 import { cn } from "@/lib/utils";
 import {
   Briefcase,
@@ -38,7 +37,6 @@ export default function TasksSidebar({
   onNewFolder,
   onDeleteFolder,
   flaggedCount = 0,
-  canEdit = true,
 }: {
   lists: Doc<"taskLists">[];
   folders: Doc<"taskFolders">[];
@@ -54,8 +52,6 @@ export default function TasksSidebar({
   onDeleteFolder?: (folder: Doc<"taskFolders">) => void;
   /** Count of flagged jobs/products (from the Projects section). */
   flaggedCount?: number;
-  /** False for viewers — the group picker then shows its controls disabled. */
-  canEdit?: boolean;
 }) {
   const openTasks = tasks.filter((t) => !t.isCompleted);
   const todayCount = openTasks.filter((t) => isDueToday(t) || isOverdue(t)).length;
@@ -175,8 +171,6 @@ export default function TasksSidebar({
 
   return (
     <div className="flex flex-col gap-0.5">
-      {/* hand a task to one person or to a whole group in the firm */}
-      <TaskAssignPanel tasks={tasks} canEdit={canEdit} />
       <div className="flex items-center justify-between px-2 pb-1">
         <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
           Lists

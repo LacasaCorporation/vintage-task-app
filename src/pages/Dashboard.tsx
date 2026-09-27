@@ -831,7 +831,6 @@ export default function Dashboard() {
               onMoveListToFolder={handleMoveListToFolder}
               onNewFolder={canDoItem("taskFolders", "create") ? handleNewFolder : undefined}
               onDeleteFolder={canDoItem("taskFolders", "delete") ? handleDeleteFolder : undefined}
-              canEdit={canDo("tasks", "edit")}
             />
           ) : (
             <NotesSidebar
