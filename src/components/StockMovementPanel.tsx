@@ -7,7 +7,6 @@ import {
   ChevronDown,
   Loader2,
   PackageOpen,
-  Pencil,
   Repeat,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -144,9 +143,14 @@ export default function StockMovementPanel() {
 
                 {open && (
                   <div className="border-t border-border/60 bg-muted/30 px-4 py-2.5">
-                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 text-[11px] text-muted-foreground">
                       <span>Movements</span>
                       <span className="tabular-nums">
+                        {row.opening !== 0 && (
+                          <>
+                            {qty(row.opening)} opening +{" "}
+                          </>
+                        )}
                         {qty(row.income)} in − {qty(row.outgoing)} out ={" "}
                         {qty(row.balance)} {row.unit}
                       </span>
@@ -188,16 +192,6 @@ export default function StockMovementPanel() {
                           </li>
                         ))}
                       </ul>
-                    )}
-                    {row.unexplained !== 0 && (
-                      <p className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-                        <Pencil className="mt-px size-3 shrink-0" />
-                        <span>
-                          {row.unexplained > 0
-                            ? `${qty(row.unexplained)} ${row.unit} was set by hand or came from a bill saved before movements were recorded.`
-                            : `${qty(-row.unexplained)} ${row.unit} left stock without a matching movement.`}
-                        </span>
-                      </p>
                     )}
                     {row.opening !== 0 && (
                       <p className="mt-2 text-[11px] text-muted-foreground">
