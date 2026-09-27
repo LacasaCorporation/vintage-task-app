@@ -73,6 +73,7 @@ import { useRef, useState } from "react";
 import { toast } from "@/lib/toast";
 import FirmLogoPicker from "@/components/FirmLogoPicker";
 import UserGroupsSettings from "@/components/UserGroupsSettings";
+import ClearTransactionsCard from "@/components/ClearTransactionsCard";
 
 type Role = "super" | "admin" | "user" | "member";
 type AssignableRole = Exclude<Role, "super">;
@@ -1945,6 +1946,7 @@ export default function SettingsPanel() {
               {restoring ? "Restoring…" : "Choose backup file"}
             </Button>
           </div>
+          <ClearTransactionsCard />
         </div>
       </section>
 
