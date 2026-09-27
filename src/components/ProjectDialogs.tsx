@@ -461,6 +461,8 @@ export function EditProductDialog({
   const [code, setCode] = useState(fg.code ?? "");
   const [qty, setQty] = useState(fg.qty === undefined ? "" : String(fg.qty));
   const [unit, setUnit] = useState(fg.unit ?? "");
+  const [project, setProject] = useState(fg.projectName ?? "");
+  const [note, setNote] = useState(fg.note ?? "");
   const [saving, setSaving] = useState(false);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -478,6 +480,8 @@ export function EditProductDialog({
         code: code.trim(),
         qty: qty.trim() === "" ? undefined : Number(qty),
         unit: unit.trim(),
+        projectName: project.trim() || undefined,
+        note: note.trim() || undefined,
       });
       toast.success(`“${clean}” updated.`);
       onClose();
@@ -506,15 +510,26 @@ export function EditProductDialog({
         </DialogHeader>
 
         <form onSubmit={handleSave} className="space-y-3">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium">Product name *</label>
-            <Input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Oak door panel"
-              className={inputCls}
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Project</label>
+              <Input
+                value={project}
+                onChange={(e) => setProject(e.target.value)}
+                placeholder="Standalone"
+                className={inputCls}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Product name *</label>
+              <Input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Oak door panel"
+                className={inputCls}
+              />
+            </div>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium">Code</label>
@@ -547,6 +562,15 @@ export function EditProductDialog({
                 className={inputCls}
               />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium">Note</label>
+            <Input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Anything worth remembering"
+              className={inputCls}
+            />
           </div>
           <DialogFooter className="pt-1">
             <Button

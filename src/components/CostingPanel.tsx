@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import MaterialsSheet from "@/components/MaterialsSheet";
 import CreateMaterialDialog from "@/components/CreateMaterialDialog";
+import { EditProductDialog } from "@/components/ProjectDialogs";
 import ProductForm from "@/components/ProductForm";
 import ProjectsSheet from "@/components/ProjectsSheet";
 import type { CostingView } from "@/components/CostingSidebar";
@@ -134,7 +135,6 @@ export default function CostingPanel({
   loading,
   view,
   onSelectView,
-  onEditFg,
   onNewProduct,
   onNewProject,
   onEditProject,
@@ -161,7 +161,6 @@ export default function CostingPanel({
   loading: boolean;
   view: CostingView;
   onSelectView: (view: CostingView) => void;
-  onEditFg: (fg: FgDoc) => void;
   onNewProduct?: (projectName: string) => void;
   onNewProject?: () => void;
   onEditProject?: (project: Doc<"projects">) => void;
@@ -189,6 +188,8 @@ export default function CostingPanel({
   const [projectFocus, setProjectFocus] = useState<string | null>(null);
   /** The product whose costing sheet is open over the current view. */
   const [sheetId, setSheetId] = useState<Id<"finishedGoods"> | null>(null);
+  /** Editing a product's details from inside the sheet. */
+  const [editingFg, setEditingFg] = useState<FgDoc | null>(null);
   const addFgItem = useMutation(api.costing.addFgItem);
   const updateItem = useMutation(api.costing.updateItem);
   const removeItem = useMutation(api.costing.removeItem);
@@ -844,7 +845,7 @@ export default function CostingPanel({
                 variant="outline"
                 size="sm"
                 className="h-7 shrink-0 rounded-lg text-xs"
-                onClick={() => onEditFg(activeFg)}
+                onClick={() => setEditingFg(activeFg)}
               >
                 <Pencil className="size-3" />
                 Edit
@@ -1296,6 +1297,13 @@ export default function CostingPanel({
             initialProject={view?.kind === "products" ? projectFocus : null}
           />
         </div>
+      )}
+
+      {editingFg && (
+        <EditProductDialog
+          fg={editingFg}
+          onClose={() => setEditingFg(null)}
+        />
       )}
 
       <CreateMaterialDialog

@@ -30,7 +30,6 @@ type NotebookId = Id<"notebooks">;
 type PageId = Id<"notePages">;
 type ListId = Id<"taskLists">;
 type FolderId = Id<"taskFolders">;
-type FgId = Id<"finishedGoods">;
 
 function greetingForHour(hour: number) {
   if (hour < 12) return "Good morning";
@@ -446,8 +445,6 @@ export default function Dashboard() {
   const finishedGoods = useQuery(api.costing.listFinishedGoods);
   const allJobs = useQuery(api.jobs.listJobs);
   const addFgM = useMutation(api.costing.addFinishedGood);
-  const updateFgM = useMutation(api.costing.updateFinishedGood);
-  const detachJobsM = useMutation(api.costing.setFgJobs);
   const addProjectM = useMutation(api.costing.addProject);
   const updateProjectM = useMutation(api.costing.updateProject);
   const removeProjectM = useMutation(api.costing.removeProject);
@@ -648,64 +645,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleEditFg = async (fg: {
-    _id: FgId;
-    projectName?: string;
-    name: string;
-    code?: string;
-    unit?: string;
-    note?: string;
-    markupPct?: number;
-  }) => {
-    const result = await promptMulti({
-      title: `Edit “${fg.name}”`,
-      message: "Update the product details.",
-      columns: 2,
-      confirmLabel: "Save changes",
-      fields: [
-        { key: "project", label: "Project (optional — blank = standalone)", initial: fg.projectName ?? "" },
-        { key: "name", label: "Product name", initial: fg.name, required: true },
-        { key: "code", label: "Code / SKU", initial: fg.code ?? "" },
-        { key: "unit", label: "Sold per (unit)", initial: fg.unit ?? "pcs" },
-        {
-          key: "markup",
-          label: "Margin % (sales price = cost + margin)",
-          initial: String(fg.markupPct ?? 0),
-          type: "number",
-          validate: (v) =>
-            v && (Number.isNaN(Number(v)) || Number(v) < 0)
-              ? "Enter a valid percentage."
-              : null,
-        },
-        { key: "note", label: "Note", initial: fg.note ?? "" },
-      ],
-    });
-    if (result === null) return;
-    const markup = Number(result.markup || 0);
-    if (!Number.isFinite(markup) || markup < 0) {
-      toast.error("Enter a valid markup.");
-      return;
-    }
-    try {
-      const newProject = result.project.trim();
-      if (!newProject && fg.projectName !== undefined) {
-        // blank project on an attached product → detach back to standalone
-        await detachJobsM({ id: fg._id, jobIds: [] });
-      }
-      await updateFgM({
-        id: fg._id,
-        ...(newProject ? { projectName: newProject } : {}),
-        name: result.name.trim() || fg.name,
-        code: result.code,
-        unit: result.unit,
-        note: result.note,
-        markupPct: markup,
-      });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the product.");
-    }
-  };
-
   // ── Shell chrome ────────────────────────────────────────────────────
   const firstName = user?.name?.trim().split(" ")[0] ?? "";
   // Who am I: the provisioned username when there is one, otherwise the
@@ -741,7 +680,7 @@ export default function Dashboard() {
     },
     {
       id: "costing",
-      label: "Projects",
+      label: "Operations",
       icon: Calculator,
       description: "Projects, products & materials",
     },
@@ -963,7 +902,6 @@ export default function Dashboard() {
               loading={finishedGoods === undefined}
               view={costingView}
               onSelectView={setCostingView}
-              onEditFg={(fg) => void handleEditFg(fg)}
               onNewProduct={(name) => void handleNewFg(name)}
               onNewProject={canDoItem("projects", "create") ? () => void handleNewProject() : undefined}
               onEditProject={(p) => void handleEditProject(p)}
