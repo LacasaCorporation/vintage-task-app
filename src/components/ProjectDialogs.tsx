@@ -21,7 +21,7 @@ import {
   Search as SearchIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import ProductQtyInline from "@/components/ProductQtyInline";
@@ -31,6 +31,8 @@ type FgDoc = Doc<"finishedGoods">;
 
 const inputCls =
   "h-9 w-full rounded-lg border bg-card px-2.5 text-sm outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30";
+const selectCls =
+  "h-9 w-full rounded-lg border bg-card px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/30";
 
 /** Inline form for creating / editing a job under a project. */
 export function JobDialog({
@@ -208,6 +210,8 @@ export function AddProductToJobDialog({
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("");
   const [qty, setQty] = useState("");
+  // the unit is a managed master value, so it is picked rather than typed
+  const units = useQuery(api.costing.listUnits) ?? [];
   const [saving, setSaving] = useState(false);
   const [cloneBusy, setCloneBusy] = useState<Id<"finishedGoods"> | null>(null);
   const [existingSearch, setExistingSearch] = useState("");
@@ -298,12 +302,24 @@ export function AddProductToJobDialog({
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium">Sold per (unit)</label>
-            <Input
+            <select
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
-              placeholder="e.g. pcs, m², set"
-              className={inputCls}
-            />
+              aria-label="Sold per unit"
+              className={selectCls}
+            >
+              <option value="">Not set</option>
+              {units.map((u) => (
+                <option key={u._id} value={u.name}>
+                  {u.name}
+                </option>
+              ))}
+            </select>
+            {units.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                No units set up yet — add them in Projects → Costing.
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium">How many to produce</label>
@@ -324,6 +340,30 @@ export function AddProductToJobDialog({
                 </span>
               )}
             </div>
+          </div>
+          {/* margin and cost are worked out by the costing sheet, so they are
+              shown frozen here rather than typed in */}
+          <div className="grid grid-cols-2 gap-3 rounded-xl border border-dashed bg-muted/20 p-2.5">
+            {[
+              { label: "Margin %", value: "0%" },
+              { label: "Cost", value: "—" },
+            ].map((field) => (
+              <div key={field.label} className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  {field.label}
+                </label>
+                <div
+                  className="flex h-9 items-center rounded-lg border border-dashed bg-card/60 px-2.5 text-sm text-muted-foreground/70 select-none"
+                  title="Calculated from the product's costing sheet"
+                >
+                  {field.value}
+                </div>
+              </div>
+            ))}
+            <p className="col-span-2 text-[11px] text-muted-foreground">
+              Margin and cost are calculated by the costing sheet — they fill in
+              once the product has its material lines.
+            </p>
           </div>
           <DialogFooter className="pt-1">
             <Button
