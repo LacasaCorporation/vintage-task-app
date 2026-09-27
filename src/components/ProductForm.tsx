@@ -253,9 +253,22 @@ export default function ProductForm({
   };
 
   const handleDelete = async (fg: FgDoc) => {
+    // production holds raw materials out of stock, so it must be stopped
+    // first — the server refuses the delete otherwise
+    if (fg.productionStartedAt !== undefined) {
+      await confirm({
+        title: `“${fg.name}” is in production`,
+        message:
+          "Stop production before deleting this product. Stopping puts the raw materials it is using back into stock.",
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
     const ok = await confirm({
       title: `Delete “${fg.name}”?`,
-      message: "The product and all its costing lines will be permanently removed. This cannot be undone.",
+      message:
+        "The product and all its costing lines will be permanently removed, and it will disappear from the Tasks page as well. This cannot be undone.",
       confirmLabel: "Delete product",
       danger: true,
     });

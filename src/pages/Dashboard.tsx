@@ -577,10 +577,24 @@ export default function Dashboard() {
   };
 
   const handleDeleteProject = async (project: Doc<"projects">) => {
+    // projects are the last level: products, then jobs, then the project
+    const jobCount = (allJobs ?? []).filter(
+      (j) => j.projectId === project._id,
+    ).length;
+    if (jobCount > 0) {
+      await confirm({
+        title: `“${project.name}” still has ${jobCount} job${jobCount === 1 ? "" : "s"}`,
+        message:
+          "Delete the products first, then the jobs, and the project can be deleted after that.",
+        confirmLabel: "Got it",
+        icon: "danger",
+      });
+      return;
+    }
     const ok = await confirm({
       title: `Delete “${project.name}”?`,
       message:
-        "The project information is removed. Its products are kept and become standalone.",
+        "The project information is removed. Any products still under it are kept and become standalone.",
       confirmLabel: "Delete project",
       danger: true,
       icon: "danger",
@@ -711,10 +725,27 @@ export default function Dashboard() {
     }
   };
 
-  const handleDeleteFg = async (fg: { _id: FgId; name: string }) => {
+  const handleDeleteFg = async (fg: {
+    _id: FgId;
+    name: string;
+    productionStartedAt?: number;
+  }) => {
+    // production is holding raw materials out of stock, so it has to be
+    // stopped first — the server refuses the delete otherwise
+    if (fg.productionStartedAt !== undefined) {
+      await confirm({
+        title: `“${fg.name}” is in production`,
+        message:
+          "Stop production before deleting this product. Stopping puts the raw materials it is using back into stock.",
+        confirmLabel: "Got it",
+        icon: "danger",
+      });
+      return;
+    }
     const ok = await confirm({
       title: `Delete “${fg.name}”?`,
-      message: "The product and all its costing lines will be permanently removed. This cannot be undone.",
+      message:
+        "The product and all its costing lines will be permanently removed, and it will disappear from the Tasks page as well. This cannot be undone.",
       confirmLabel: "Delete product",
       danger: true,
     });

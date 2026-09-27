@@ -1098,14 +1098,31 @@ export default function ProjectsSheet({
                                 </button>
                                 <button
                                   type="button"
-                                  title="Delete job (products are kept)"
+                                  title="Delete job"
                                   aria-label="Delete job"
                                   className="hidden size-5 place-items-center rounded-md text-muted-foreground hover:text-destructive group-hover/job:grid"
                                   onClick={async () => {
+                                    // products are the first level of the delete
+                                    // order, so a job waits until they are gone
+                                    const products = finishedGoods.filter(
+                                      (f) =>
+                                        f.jobId === job._id ||
+                                        (f.jobIds ?? []).includes(job._id),
+                                    );
+                                    if (products.length > 0) {
+                                      await confirm({
+                                        title: `“${job.name}” still has ${products.length} product${products.length === 1 ? "" : "s"}`,
+                                        message:
+                                          "Delete the products first — stopping production where needed — and then the job can be deleted.",
+                                        confirmLabel: "Got it",
+                                        danger: true,
+                                      });
+                                      return;
+                                    }
                                     const ok = await confirm({
                                       title: `Delete job “${job.name}”?`,
                                       message:
-                                        "Its products stay but lose the job link. This cannot be undone.",
+                                        "The job will be permanently removed and will disappear from the Tasks page as well. This cannot be undone.",
                                       confirmLabel: "Delete job",
                                       danger: true,
                                     });

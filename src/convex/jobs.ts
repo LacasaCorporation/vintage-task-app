@@ -300,7 +300,10 @@ export const setJobFlag = mutation({
   },
 });
 
-/** Delete a job. Its products stay (they just lose the job link). */
+/**
+ * Delete a job. Products are the first level of the delete order, so a job
+ * only goes once every product inside it has been deleted.
+ */
 export const removeJob = mutation({
   args: { id: v.id("projectJobs") },
   handler: async (ctx, { id }) => {
@@ -309,60 +312,18 @@ export const removeJob = mutation({
     const job = await ctx.db.get(id);
     if (job === null) return;
     if (job.ownerId !== userId) throw new Error("Not your job.");
-    // detach any products that point at this job (single or multi-link)
     const fgs = await ctx.db
       .query("finishedGoods")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
-    for (const fg of fgs) {
-      if (fg.jobId === id) {
-        const rest = (fg.jobIds ?? []).filter((j) => j !== id);
-        await ctx.db.patch(fg._id, {
-          jobId: rest[0],
-          jobIds: rest.length > 0 ? rest : undefined,
-        });
-      } else if (fg.jobIds?.includes(id)) {
-        const rest = fg.jobIds.filter((j) => j !== id);
-        await ctx.db.patch(fg._id, {
-          jobIds: rest.length > 0 ? rest : undefined,
-          jobId: rest[0],
-        });
-      }
-    }
+    const linked = fgs.filter(
+      (fg) => fg.jobId === id || (fg.jobIds ?? []).includes(id),
+    );
+    if (linked.length > 0)
+      throw new Error(
+        `This job still has ${linked.length} product${linked.length === 1 ? "" : "s"}. Delete the products first, then the job.`,
+      );
     await ctx.db.delete(id);
   },
 });
 
-/** Delete a project together with all of its jobs (products are detached). */
-export const removeJobsOfProject = mutation({
-  args: { projectId: v.id("projects") },
-  handler: async (ctx, { projectId }) => {
-    const userId = await scopeUserId(ctx);
-    if (userId === null) throw new Error("Sign in first.");
-    const project = await ctx.db.get(projectId);
-    if (project === null) return;
-    if (project.ownerId !== userId) throw new Error("Not your project.");
-    const jobs = await ctx.db
-      .query("projectJobs")
-      .withIndex("by_project", (q) => q.eq("projectId", projectId))
-      .collect();
-    const jobIds = new Set(jobs.map((j) => j._id));
-    const fgs = await ctx.db
-      .query("finishedGoods")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    for (const fg of fgs) {
-      const linked =
-        (fg.jobId !== undefined && jobIds.has(fg.jobId)) ||
-        fg.jobIds?.some((j) => jobIds.has(j));
-      if (linked) {
-        const rest = (fg.jobIds ?? []).filter((j) => !jobIds.has(j));
-        await ctx.db.patch(fg._id, {
-          jobId: rest[0],
-          jobIds: rest.length > 0 ? rest : undefined,
-        });
-      }
-    }
-    for (const j of jobs) await ctx.db.delete(j._id);
-  },
-});

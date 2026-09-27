@@ -697,6 +697,15 @@ export const removeProject = mutation({
     const project = await ctx.db.get(id);
     if (project === null) return;
     if (project.ownerId !== userId) throw new Error("Not your project.");
+    // a project is the last level to go: its jobs have to be deleted first
+    const jobs = await ctx.db
+      .query("projectJobs")
+      .withIndex("by_project", (q) => q.eq("projectId", id))
+      .collect();
+    if (jobs.length > 0)
+      throw new Error(
+        `This project still has ${jobs.length} job${jobs.length === 1 ? "" : "s"}. Delete the products first, then the jobs, then the project.`,
+      );
     await ctx.db.delete(id);
   },
 });
@@ -894,7 +903,11 @@ export const updateFinishedGood = mutation({
   },
 });
 
-/** Delete an FG product and all its costing lines. */
+/**
+ * Delete an FG product, its costing lines, its steps and its per-person grants.
+ * Products are the first level of the delete order: a job can only go once its
+ * products are gone, and a project only once its jobs are gone.
+ */
 export const removeFinishedGood = mutation({
   args: { id: v.id("finishedGoods") },
   handler: async (ctx, { id }) => {
@@ -903,11 +916,27 @@ export const removeFinishedGood = mutation({
     const fg = await ctx.db.get(id);
     if (fg === null) throw new Error("That product no longer exists.");
     if (fg.ownerId !== userId) throw new Error("Not your product.");
+    // production is holding raw materials out of stock: stop it first, which
+    // puts them back, so the ledger and the stock levels stay honest
+    if (fg.productionStartedAt !== undefined)
+      throw new Error(
+        "Production is running on this product. Stop production first, then delete the product.",
+      );
     const items = await ctx.db
       .query("costingItems")
       .withIndex("by_fg", (q) => q.eq("fgId", id))
       .collect();
     for (const item of items) await ctx.db.delete(item._id);
+    const steps = await ctx.db
+      .query("fgSteps")
+      .withIndex("by_fg", (q) => q.eq("fgId", id))
+      .collect();
+    for (const step of steps) await ctx.db.delete(step._id);
+    const grants = await ctx.db
+      .query("fgGrants")
+      .withIndex("by_fg", (q) => q.eq("fgId", id))
+      .collect();
+    for (const grant of grants) await ctx.db.delete(grant._id);
     await ctx.db.delete(id);
   },
 });
