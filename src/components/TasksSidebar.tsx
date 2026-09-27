@@ -50,7 +50,7 @@ export default function TasksSidebar({
   onMoveListToFolder: (list: Doc<"taskLists">) => void;
   onNewFolder?: () => void;
   onDeleteFolder?: (folder: Doc<"taskFolders">) => void;
-  /** Count of flagged jobs/products (from the Projects section). */
+  /** Count of flagged jobs/products (from the Productions view). */
   flaggedCount?: number;
 }) {
   const openTasks = tasks.filter((t) => !t.isCompleted);
@@ -225,7 +225,7 @@ export default function TasksSidebar({
       {smartRow("today", "Today", CalendarDays, todayCount)}
       {smartRow("starred", "Starred", Star, starredCount)}
 
-      {/* Projects: flagged jobs & products, worked start → complete */}
+      {/* Productions: flagged jobs & products, worked start → complete */}
       <button
         type="button"
         onClick={() => onSelectView("flagged")}
@@ -249,7 +249,7 @@ export default function TasksSidebar({
             activeView === "flagged" ? "font-medium text-primary" : "text-foreground/85",
           )}
         >
-          Projects
+          Productions
         </span>
         {flaggedCount > 0 && (
           <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium tabular-nums text-amber-700 dark:text-amber-400">
