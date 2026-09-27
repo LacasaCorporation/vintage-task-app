@@ -524,6 +524,37 @@ export default function ProjectsSheet({
     });
   }, [tab, projects, allJobs, finishedGoods, costByFg, filtered, search, jobFilter, productFilter, projectStatusesList, projectNameForJob]);
 
+  /**
+   * Deleting a job from the Job list. The server refuses it while any
+   * product is still linked, so say so up front rather than failing a click.
+   */
+  const handleDeleteJobFromList = async (job: JobDoc, productCount: number) => {
+    if (productCount > 0) {
+      await confirm({
+        title: `“${job.name}” still has ${productCount} product${productCount === 1 ? "" : "s"}`,
+        message:
+          "Delete the products first — stopping production where needed — and then the job can be deleted.",
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
+    const ok = await confirm({
+      title: `Delete job “${job.name}”?`,
+      message:
+        "The job will be permanently removed and will disappear from the Tasks page as well. This cannot be undone.",
+      confirmLabel: "Delete job",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await removeJob({ id: job._id });
+      toast.success("Job deleted.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed.");
+    }
+  };
+
   /** What the print header should say about the active filter. */
   const tabLabel =
     tab === "projects"
@@ -674,6 +705,16 @@ export default function ProjectsSheet({
           search={search}
           filter={jobFilter}
           onOpenProject={onOpenProject}
+          onEditJob={(job, projectName) =>
+            setJobDialog({
+              projectId: job.projectId,
+              projectLabel: projectName,
+              job,
+            })
+          }
+          onDeleteJob={(job, productCount) =>
+            void handleDeleteJobFromList(job, productCount)
+          }
         />
       )}
 

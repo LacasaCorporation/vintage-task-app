@@ -2,12 +2,15 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import {
   Briefcase,
   Package,
+  Pencil,
   Sigma,
+  Trash2,
 } from "lucide-react";
 import { useMemo } from "react";
 import { ProductionButton } from "@/components/FlaggedLists";
 import type { FilterOption } from "@/components/FilterMenu";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { cn } from "@/lib/utils";
 import { batchCost } from "@/lib/product-cost";
 
 /** What the product list is narrowed down to. */
@@ -110,6 +113,8 @@ export function JobsList({
   search,
   filter,
   onOpenProject,
+  onEditJob,
+  onDeleteJob,
 }: {
   jobs: JobDoc[];
   projects: ProjectDoc[] | undefined;
@@ -118,6 +123,9 @@ export function JobsList({
   search: string;
   filter: JobFilter;
   onOpenProject?: (projectName: string) => void;
+  onEditJob?: (job: JobDoc, projectName: string) => void;
+  /** The parent refuses the delete while products are still linked. */
+  onDeleteJob?: (job: JobDoc, productCount: number) => void;
 }) {
   const { format: money } = useWorkspaceCurrency();
   const rows = useMemo(() => {
@@ -179,11 +187,12 @@ export function JobsList({
                 <th className="px-3 py-2 text-right font-medium">Products</th>
                 <th className="px-3 py-2 text-right font-medium">Cost</th>
                 <th className="px-3 py-2 text-right font-medium">Sales price</th>
+                {(onEditJob || onDeleteJob) && <th className="w-16 px-2 py-2" />}
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {filtered.map(({ job, projectName, products, cost, total }) => (
-                <tr key={job._id} className="transition-colors hover:bg-accent/40">
+                <tr key={job._id} className="group/job transition-colors hover:bg-accent/40">
                   <td className="px-4 py-2.5">
                     <span className="flex items-center gap-2">
                       <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
@@ -217,6 +226,43 @@ export function JobsList({
                   <td className="px-3 py-2.5 text-right font-medium tabular-nums">
                     {money(total)}
                   </td>
+                  {(onEditJob || onDeleteJob) && (
+                    <td className="px-2 py-1 text-right">
+                      <span className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/job:opacity-100">
+                        {onEditJob && (
+                          <button
+                            type="button"
+                            aria-label={`Edit job “${job.name}”`}
+                            title="Edit job"
+                            className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-primary"
+                            onClick={() => onEditJob(job, projectName)}
+                          >
+                            <Pencil className="size-3.5" />
+                          </button>
+                        )}
+                        {onDeleteJob && (
+                          <button
+                            type="button"
+                            aria-label={`Delete job “${job.name}”`}
+                            title={
+                              products.length > 0
+                                ? `Has ${products.length} product${products.length === 1 ? "" : "s"} — delete those first`
+                                : "Delete job"
+                            }
+                            className={cn(
+                              "grid size-6 place-items-center rounded-md hover:bg-accent",
+                              products.length > 0
+                                ? "cursor-not-allowed text-muted-foreground/40"
+                                : "text-muted-foreground hover:text-destructive",
+                            )}
+                            onClick={() => onDeleteJob(job, products.length)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        )}
+                      </span>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

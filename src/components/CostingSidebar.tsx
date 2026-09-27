@@ -89,15 +89,6 @@ export default function CostingSidebar({
       active: view?.kind === "projects" || view === null,
       onClick: () => onSelectView({ kind: "projects" }),
     },
-    {
-      id: "products" as const,
-      label: "Products",
-      icon: Package,
-      count: finishedGoods.length,
-      unit: "product",
-      active: view?.kind === "products",
-      onClick: () => onSelectView({ kind: "products" }),
-    },
     ...(showPurchase
       ? [
           {
