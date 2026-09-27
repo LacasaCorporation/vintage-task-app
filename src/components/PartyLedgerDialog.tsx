@@ -255,12 +255,14 @@ export default function PartyLedgerDialog<TId extends string>({
     ? { from: fromInput(fromText), to: toText === "" ? undefined : endOfDay(toText) }
     : rangeBounds(range);
 
-  /** Every document, oldest first, with the outstanding side of it settled. */
+  /** Every document, oldest first, with its billed and settled sides split. */
   const all = documents
     .map((doc) => ({
       doc,
-      // charging adds to what is outstanding; settling takes it away
-      charged: doc.isPaid ? 0 : doc.total,
+      // A document is worth its total the moment it is raised. Settling it
+      // adds a matching figure on the other side, so a fully paid document
+      // leaves a balance of zero rather than counting backwards.
+      charged: doc.total,
       settled: doc.isPaid ? doc.total : 0,
     }))
     .sort((a, b) => a.doc.at - b.doc.at || a.doc.number.localeCompare(b.doc.number));

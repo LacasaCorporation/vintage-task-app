@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { moneyAccountIds } from "./accountingDefaults";
+import { requireItem } from "./authorize";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -558,6 +559,7 @@ export const createAccount = mutation({
   handler: async (ctx, args): Promise<Id<"accounts">> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in to manage accounts.");
+    await requireItem(ctx, userId, "accounting", "create");
     const code = args.code.trim();
     const name = args.name.trim();
     if (!code) throw new Error("Give the account a code.");
@@ -604,6 +606,7 @@ export const updateAccount = mutation({
   handler: async (ctx, args): Promise<void> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in to manage accounts.");
+    await requireItem(ctx, userId, "accounting", "edit");
     const account = await ctx.db.get(args.id);
     if (account === null || account.ownerId !== userId) {
       throw new Error("That account no longer exists.");
@@ -675,6 +678,7 @@ export const removeAccount = mutation({
   handler: async (ctx, { id }): Promise<void> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in to manage accounts.");
+    await requireItem(ctx, userId, "accounting", "delete");
     const account = await ctx.db.get(id);
     if (account === null || account.ownerId !== userId) {
       throw new Error("That account no longer exists.");
@@ -815,6 +819,7 @@ export const createEntry = mutation({
   handler: async (ctx, args): Promise<Id<"journalEntries">> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in to post to the ledger.");
+    await requireItem(ctx, userId, "accounting", "create");
     return postEntry(ctx, userId, args);
   },
 });
@@ -824,6 +829,7 @@ export const removeEntry = mutation({
   handler: async (ctx, { id }): Promise<void> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in to post to the ledger.");
+    await requireItem(ctx, userId, "accounting", "delete");
     const entry = await ctx.db.get(id);
     if (entry === null || entry.ownerId !== userId) {
       throw new Error("That entry no longer exists.");

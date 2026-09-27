@@ -14,9 +14,11 @@ import {
   ArrowRight,
   BookOpen,
   Coins,
+  Eye,
   Landmark,
   Layers,
   Loader2,
+  Lock,
   Percent,
   Plus,
   RotateCcw,
@@ -272,33 +274,48 @@ export default function AccountingSettingsPage({ canEdit }: { canEdit: boolean }
           </p>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => setCreating(true)}
-            className="h-7 gap-1.5 rounded-lg px-2 text-xs"
-          >
-            <Plus className="size-3.5" /> New account
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => void handleSave()}
-            disabled={!dirty || saving || !canEdit}
-            className="h-7 gap-1.5 rounded-lg px-2.5 text-xs"
-          >
-            {saving ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Save className="size-3.5" />
-            )}
-            Save
-          </Button>
+          {canEdit ? (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setCreating(true)}
+                className="h-7 gap-1.5 rounded-lg px-2 text-xs"
+              >
+                <Plus className="size-3.5" /> New account
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handleSave()}
+                disabled={!dirty || saving}
+                className="h-7 gap-1.5 rounded-lg px-2.5 text-xs"
+              >
+                {saving ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Save className="size-3.5" />
+                )}
+                Save
+              </Button>
+            </>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+              <Eye className="size-3" /> View only
+            </span>
+          )}
         </div>
       </header>
 
       <div className="space-y-5 px-5 py-4">
+        {!canEdit && (
+          <p className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <Lock className="size-3.5 shrink-0" />
+            You can read this page, but changing the defaults needs an admin.
+            Everything here stays as it was left until then.
+          </p>
+        )}
         {accounts.length === 0 ? (
           <p className="rounded-xl border border-dashed bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
             Your chart of accounts is empty. Create the standard chart from

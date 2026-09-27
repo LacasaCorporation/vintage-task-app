@@ -44,7 +44,7 @@ export default function CustomersPanel({
   /** Everything invoiced and received across the whole book, for the header. */
   const totals = (sales ?? []).reduce(
     (acc, s) => ({
-      invoiced: round2(acc.invoiced + (s.isPaid === true ? 0 : s.total)),
+      invoiced: round2(acc.invoiced + s.total),
       received: round2(acc.received + (s.isPaid === true ? s.total : 0)),
     }),
     { invoiced: 0, received: 0 },
@@ -119,15 +119,14 @@ export default function CustomersPanel({
                   (s) => s.customerId === customer._id,
                 );
                 const invoiced = round2(
-                  theirSales
-                    .filter((s) => s.isPaid !== true)
-                    .reduce((sum, s) => sum + s.total, 0),
+                  theirSales.reduce((sum, s) => sum + s.total, 0),
                 );
                 const received = round2(
                   theirSales
                     .filter((s) => s.isPaid === true)
                     .reduce((sum, s) => sum + s.total, 0),
                 );
+                const owing = round2(invoiced - received);
                 return (
                   <tr
                     key={customer._id}
@@ -207,12 +206,12 @@ export default function CustomersPanel({
                     <td
                       className={cn(
                         "px-3 py-2.5 text-right font-semibold tabular-nums",
-                        invoiced > 0
+                        owing > 0
                           ? "text-amber-600 dark:text-amber-400"
                           : "text-muted-foreground",
                       )}
                     >
-                      {theirSales.length > 0 ? money(invoiced) : "—"}
+                      {theirSales.length > 0 ? money(owing) : "—"}
                     </td>
                     <td className="px-2 py-2 text-center">
                       {onPick && (

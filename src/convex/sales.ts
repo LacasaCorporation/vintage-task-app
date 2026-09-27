@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import { requireItem } from "./authorize";
 import { scopeUserId } from "./org";
 import { postSale, postSaleReceipt, reverseEntry } from "./ledger";
 import { defaultTaxPct } from "./accountingDefaults";
@@ -129,6 +130,7 @@ export const createQuotation = mutation({
   handler: async (ctx, args) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "create");
     if (args.lines.length === 0) throw new Error("Add at least one product to the quote.");
 
     const resolved = [];
@@ -196,6 +198,7 @@ export const updateQuotation = mutation({
   handler: async (ctx, args) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "edit");
     const quote = await ctx.db.get(args.id);
     if (quote === null) throw new Error("That quotation no longer exists.");
     if (quote.ownerId !== userId) throw new Error("Not your quotation.");
@@ -286,6 +289,7 @@ export const removeQuotation = mutation({
   handler: async (ctx, { id }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "delete");
     const quote = await ctx.db.get(id);
     if (quote === null) return;
     if (quote.ownerId !== userId) throw new Error("Not your quotation.");
@@ -312,6 +316,7 @@ export const createSale = mutation({
   handler: async (ctx, args) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "create");
     if (args.lines.length === 0) throw new Error("Add at least one product to the bill.");
 
     const resolved = [];
@@ -450,6 +455,7 @@ export const removeSale = mutation({
   handler: async (ctx, { id }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "delete");
     const sale = await ctx.db.get(id);
     if (sale === null) return;
     if (sale.ownerId !== userId) throw new Error("Not your bill.");

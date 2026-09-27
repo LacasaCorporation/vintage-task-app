@@ -9,7 +9,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
   CheckCircle2,
-  ChevronLeft,
   ClipboardList,
   Eye,
   FileSpreadsheet,
@@ -140,18 +139,19 @@ export default function PurchasePanel({
    * so it counts towards paid rather than billed — the two never double up.
    */
   const savedVendorTotals = useMemo(() => {
-    let billed = 0;
-    let paid = 0;
-    for (const b of bills ?? []) {
-      if (b.supplierId === undefined) continue;
-      if (b.isPaid === true) paid += b.total;
-      else billed += b.total;
-    }
-    return {
-      billed: round2(billed),
-      paid: round2(paid),
-      outstanding: round2(billed),
-    };
+    // billed counts every bill; paid counts the settled ones. Outstanding is
+    // the difference, so a paid bill nets to zero instead of running negative.
+    const sum = (bills ?? []).reduce(
+      (acc, b) => {
+        if (b.supplierId === undefined) return acc;
+        return {
+          billed: round2(acc.billed + b.total),
+          paid: round2(acc.paid + (b.isPaid === true ? b.total : 0)),
+        };
+      },
+      { billed: 0, paid: 0 },
+    );
+    return { ...sum, outstanding: round2(sum.billed - sum.paid) };
   }, [bills]);
 
   /** Searchable options for the per-line material pickers. */
@@ -294,7 +294,7 @@ export default function PurchasePanel({
 
   return (
     <div className="mt-4 space-y-4">
-      {/* ── Header: the tabs stay put; the bill form has no tab of its own ── */}
+      {/* ── Header: the bill form gets a tab of its own, ahead of the list ── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <PageTabs
           label="Purchase sections"
@@ -305,6 +305,12 @@ export default function PurchasePanel({
             if (id === "bill") resetForm();
           }}
           tabs={[
+            {
+              id: "bill",
+              label: "Purchase bill",
+              icon: Receipt,
+              hint: "Record what a supplier has billed you",
+            },
             { id: "list", label: "Bills", icon: List, count: bills?.length ?? 0 },
             {
               id: "lpo",
@@ -332,16 +338,6 @@ export default function PurchasePanel({
         )}
         {canCreate && tab === "bill" && (
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                resetForm();
-                setTab("list");
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <ChevronLeft className="size-3.5" /> All purchases
-            </button>
             <Button
               type="button"
               size="sm"
@@ -798,15 +794,14 @@ export default function PurchasePanel({
                       (b) => b.supplierId === vendor._id,
                     );
                     const billed = round2(
-                      theirBills
-                        .filter((b) => b.isPaid !== true)
-                        .reduce((sum, b) => sum + b.total, 0),
+                      theirBills.reduce((sum, b) => sum + b.total, 0),
                     );
                     const paid = round2(
                       theirBills
                         .filter((b) => b.isPaid === true)
                         .reduce((sum, b) => sum + b.total, 0),
                     );
+                    const owing = round2(billed - paid);
                     return (
                       <tr
                         key={vendor._id}
@@ -851,12 +846,12 @@ export default function PurchasePanel({
                         <td
                           className={cn(
                             "px-3 py-2.5 text-right font-semibold tabular-nums",
-                            billed > 0
+                            owing > 0
                               ? "text-amber-600 dark:text-amber-400"
                               : "text-muted-foreground",
                           )}
                         >
-                          {theirBills.length > 0 ? money(billed) : "—"}
+                          {theirBills.length > 0 ? money(owing) : "—"}
                         </td>
                         <td className="px-2 py-2 text-center">
                           <div

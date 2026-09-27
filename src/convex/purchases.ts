@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import { requireItem } from "./authorize";
 import { scopeUserId } from "./org";
 import { postBill, postBillPayment, reverseEntry } from "./ledger";
 import { defaultTaxPct } from "./accountingDefaults";
@@ -80,6 +81,7 @@ export const create = mutation({    args: {
     const { supplier, supplierId, supplierAddress, purchasedAt, dueAt, note, currency, discountPct, taxPct, lines } = args;
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "purchases", "create");
     if (lines.length === 0) throw new Error("Add at least one material to the bill.");
     // an order that was already received informally has its stock in; billing
     // it too would count the same delivery twice
@@ -211,6 +213,7 @@ export const update = mutation({
   handler: async (ctx, { id, ...args }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "purchases", "edit");
     const bill = await ctx.db.get(id);
     if (bill === null) throw new Error("That bill no longer exists.");
     if (bill.ownerId !== userId) throw new Error("Not your bill.");
@@ -313,6 +316,7 @@ export const setPaid = mutation({
   handler: async (ctx, { id, paid }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "purchases", "edit");
     const bill = await ctx.db.get(id);
     if (bill === null) throw new Error("That bill no longer exists.");
     if (bill.ownerId !== userId) throw new Error("Not your bill.");
@@ -386,6 +390,7 @@ export const remove = mutation({
   handler: async (ctx, { id }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "purchases", "delete");
     const bill = await ctx.db.get(id);
     if (bill === null) return;
     if (bill.ownerId !== userId) throw new Error("Not your bill.");
