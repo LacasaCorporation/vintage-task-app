@@ -7,11 +7,6 @@ import StepDetail from "@/components/StepDetail";
 import AddSubtaskDialog from "@/components/AddSubtaskDialog";
 import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
 import { useAppDialogs } from "@/components/AppDialogs";
-import ProjectsWorkspace from "@/components/ProjectsWorkspace";
-import {
-  DEFAULT_VIEW_BY_FILTER,
-  type WorkspaceView,
-} from "@/components/FlaggedViews";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
 import {
@@ -49,23 +44,11 @@ import { toast } from "@/lib/toast";
 import AssigneeChip from "@/components/AssigneeChip";
 import { cn } from "@/lib/utils";
 import {
-  PROJECT_STATUS_FINISH,
-  PROJECT_STATUS_START,
-  projectStatusesOrDefaults,
-} from "@/lib/project-statuses";
-import {
   PRIORITY_META,
   PRIORITY_RANK,
   daysLeftLabel,
-  type FlagFilter,
-  type FlagStatusFilter,
-  type FlaggedData,
-  type FlaggedSel,
-  type FgDoc,
-  type JobDoc,
   type ListId,
   type SortMode,
-  jobProjectStatus,
 } from "@/components/FlaggedLists";
 
 export default function TasksPanel({
@@ -151,17 +134,6 @@ export default function TasksPanel({
       return next;
     });
 
-  // flagged jobs & products (from the Projects section) for the Flagged view
-  const flaggedJobs = useQuery(api.jobs.listJobs);
-  const flaggedFgs = useQuery(api.costing.listFinishedGoods);
-  const flaggedProjects = useQuery(api.costing.listProjects);
-  const setFgCompletedM = useMutation(api.costing.setFgCompleted);
-  const setJobProjectStatusM = useMutation(api.jobs.setJobProjectStatus);
-  const projectStatusesQuery = useQuery(api.settings.listProjectStatuses);
-  const setProjectStatusesM = useMutation(api.settings.setProjectStatuses);
-  const projectStatuses = projectStatusesOrDefaults(projectStatusesQuery);
-  const [flaggedBusy, setFlaggedBusy] = useState<string | null>(null);
-
   const { promptMulti: openTaskForm } = useAppDialogs();
   const [isAdding, setIsAdding] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<Id<"tasks"> | null>(null);
@@ -170,25 +142,6 @@ export default function TasksPanel({
   /** Today is a narrowing control that rides with the sort, not a view. */
   const [todayOnly, setTodayOnly] = useState(false);
 
-  // Projects view: level filter (projects / jobs / products), status filter
-  // and the products-only list-vs-board presentation.
-  const [flagFilter, setFlagFilter] = useState<FlagFilter>("projects");
-  const [flagSelection, setFlagSelection] = useState<FlaggedSel>(null);
-  const [flagStatus, setFlagStatus] = useState<FlagStatusFilter>("all");
-  // Which presentation the current level filter is showing (list / hierarchy /
-  // board / report). Each filter offers its own set of these.
-  const [flagView, setFlagView] = useState<WorkspaceView>("list");
-  // the print sheet is mounted on demand, then the browser print dialog opens
-  const [printProducts, setPrintProducts] = useState(false);
-  const [statusSettingsOpen, setStatusSettingsOpen] = useState(false);
-  const [statusDraft, setStatusDraft] = useState<string[] | null>(null);
-
-  // Projects should always open as a list when selected from the sidebar.
-  const [lastActiveView, setLastActiveView] = useState(activeView);
-  if (lastActiveView !== activeView) {
-    setLastActiveView(activeView);
-    if (activeView === "flagged") setFlagView("list");
-  }
 
   // ── reminder notifications (in-app while the app is open) ──────────
   useEffect(() => {
@@ -224,11 +177,9 @@ export default function TasksPanel({
       ? "Mine"
       : activeView === "starred"
         ? "Starred"
-        : activeView === "flagged"
-          ? "Projects"
-          : activeView
-            ? (lists.find((l) => l._id === activeView)?.name ?? "List")
-            : "All tasks";
+        : activeView
+          ? (lists.find((l) => l._id === activeView)?.name ?? "List")
+          : "All tasks";
 
   const tasks = useMemo(() => {
     let out: TaskDoc[] = allTasks ?? [];
@@ -283,33 +234,6 @@ export default function TasksPanel({
       starred: open.filter((t) => t.starred).length,
     };
   }, [allTasks]);
-
-  /**
-   * The Flagged view is driven entirely by the flags: a job or product whose
-   * flag was taken off on the Projects page drops out of this page too, and
-   * comes back only when the flag goes on again. The queries return the full
-   * lists, so the filtering happens here.
-   */
-  const onlyFlaggedJobs = useMemo(
-    () => (flaggedJobs ?? []).filter((j) => j.isFlagged),
-    [flaggedJobs],
-  );
-  const onlyFlaggedFgs = useMemo(
-    () => (flaggedFgs ?? []).filter((f) => f.isFlagged),
-    [flaggedFgs],
-  );
-
-  /** Flagged jobs (with their project) and flagged products. */
-  const flaggedItems = useMemo<FlaggedData | null>(() => {
-    const jobs = onlyFlaggedJobs;
-    const fgs = onlyFlaggedFgs;
-    if (jobs.length === 0 && fgs.length === 0) return null;
-    const projectNameOf = (job: JobDoc): string => {
-      const project = (flaggedProjects ?? []).find((p) => p._id === job.projectId);
-      return project?.name ?? "Project";
-    };
-    return { jobs, fgs, projects: flaggedProjects ?? [], projectNameOf };
-  }, [onlyFlaggedJobs, onlyFlaggedFgs, flaggedProjects]);
 
   /** The view filters, in the order they are offered. */
   const viewFilters = useMemo(
@@ -379,11 +303,12 @@ export default function TasksPanel({
       await addTask({
         text,
         tags: tags.length > 0 ? tags : undefined,
+        // "mine"/"starred"/"all" are views over every list, not a list of
+        // their own, so a quick-added task is not filed under them
         listId:
           typeof activeView === "string" &&
           activeView !== "mine" &&
-          activeView !== "starred" &&
-          activeView !== "flagged"
+          activeView !== "starred"
             ? (activeView as ListId)
             : undefined,
         dueAt: values.due ? new Date(`${values.due}T12:00:00`).getTime() : undefined,
@@ -394,18 +319,6 @@ export default function TasksPanel({
       toast.error(error instanceof Error ? error.message : "Couldn't add that task.");
     } finally {
       setIsAdding(false);
-    }
-  };
-
-  const saveProjectStatuses = async () => {
-    if (statusDraft === null) return;
-    try {
-      await setProjectStatusesM({ statuses: statusDraft });
-      setStatusDraft(null);
-      setStatusSettingsOpen(false);
-      toast.success("Projects statuses updated.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update statuses.");
     }
   };
 
@@ -464,58 +377,6 @@ export default function TasksPanel({
     }
   };
 
-  const handlePrintProducts = () => {
-    setPrintProducts(true);
-    window.setTimeout(() => {
-      window.print();
-      setPrintProducts(false);
-    }, 120);
-  };
-
-  const handleToggleFlaggedFg = async (fg: FgDoc) => {
-    setFlaggedBusy(`f:${fg._id}`);
-    try {
-      await setFgCompletedM({ id: fg._id, completed: !fg.isCompleted });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the product.");
-    } finally {
-      setFlaggedBusy(null);
-    }
-  };
-
-  /**
-   * Mark a flagged job as done — only possible when every flagged product
-   * under it is completed. Completing the job flips its status to completed
-   * (its flag shows green in the project list); unchecking reopens it.
-   */
-  const handleToggleFlaggedJob = async (job: JobDoc) => {
-    // only the products that are actually on this page count towards it
-    const products = onlyFlaggedFgs.filter(
-      (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
-    );
-    const allDone = products.length > 0 && products.every((f) => f.isCompleted);
-    if (!allDone) return;
-    setFlaggedBusy(`j:${job._id}`);
-    try {
-      await setJobProjectStatusM({
-        id: job._id,
-        status: jobProjectStatus(job, projectStatuses) === PROJECT_STATUS_FINISH
-          ? PROJECT_STATUS_START
-          : PROJECT_STATUS_FINISH,
-      });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the job.");
-    } finally {
-      setFlaggedBusy(null);
-    }
-  };
-
-  /**
-   * Move a flagged job on the kanban board. "todo" re-opens a completed job,
-   * "in_progress" flips it into the working state, "completed" keeps the same
-   * guard as the list: only when every flagged product under it is done (the
-   * unguarded path is onToggleFlaggedJob, which also flips flag colors).
-   */
   const handleDelete = async (id: Id<"tasks">) => {
     try {
       await removeTask({ id });
@@ -556,14 +417,7 @@ export default function TasksPanel({
             tiles={[
               {
                 label: viewLabel,
-                value:
-                  activeView === "flagged"
-                    ? flagFilter === "projects"
-                      ? (flaggedProjects?.length ?? 0)
-                      : flagFilter === "jobs"
-                        ? (flaggedItems?.jobs.length ?? 0)
-                        : (flaggedItems?.fgs.length ?? 0)
-                    : tasks.length,
+                value: tasks.length,
               },
               { label: "Completed", value: doneCount },
               { label: "Open", value: tasks.length },
@@ -666,45 +520,8 @@ export default function TasksPanel({
         </div>
       </div>
 
-      {/* ── Flagged jobs & products (from Projects) ─────────────────── */}
-      {activeView === "flagged" && (
-        <ProjectsWorkspace
-          canEdit={canEdit}
-          projects={flaggedProjects}
-          jobs={onlyFlaggedJobs}
-          fgs={onlyFlaggedFgs}
-          items={flaggedItems}
-          filter={flagFilter}
-          onFilterChange={(next) => {
-            setFlagFilter(next);
-            setFlagView(DEFAULT_VIEW_BY_FILTER[next] ?? "list");
-          }}
-          status={flagStatus}
-          onStatusChange={setFlagStatus}
-          projectStatuses={projectStatuses}
-          statusDraft={statusDraft}
-          onStatusDraft={setStatusDraft}
-          statusSettingsOpen={statusSettingsOpen}
-          onToggleStatusSettings={() => {
-            setStatusDraft(projectStatuses);
-            setStatusSettingsOpen((open) => !open);
-          }}
-          onSaveStatuses={() => void saveProjectStatuses()}
-          view={flagView}
-          onViewChange={setFlagView}
-          onPrint={handlePrintProducts}
-          printing={printProducts}
-          sortMode={sortMode}
-          selection={flagSelection}
-          onSelect={setFlagSelection}
-          busyKey={flaggedBusy}
-          onToggleFg={(fg) => void handleToggleFlaggedFg(fg)}
-          onToggleJob={(job) => void handleToggleFlaggedJob(job)}
-        />
-      )}
-
       {/* ── Task list ───────────────────────────────────────────────── */}
-      {activeView !== "flagged" && (
+      {(
       <section className="mt-2.5 overflow-hidden rounded-2xl border bg-card shadow-sm">
         {allTasks === undefined ? (
           <div className="flex items-center justify-center gap-2 px-5 py-10 text-sm text-muted-foreground">
@@ -1312,7 +1129,7 @@ export default function TasksPanel({
         }}
       />
 
-      {doneCount > 0 && !showDone && activeView !== "flagged" && (
+      {doneCount > 0 && !showDone && (
         <p className="mt-3 text-center text-xs text-muted-foreground">
           {doneCount} completed {doneCount === 1 ? "task" : "tasks"} hidden — “Show completed” to
           review them.

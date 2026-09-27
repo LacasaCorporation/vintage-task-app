@@ -17,7 +17,7 @@ import SettingsSidebar from "@/components/SettingsSidebar";
 import { format } from "date-fns";
 import { LogOut, Menu, NotebookPen, Settings, X } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -677,37 +677,6 @@ export default function Dashboard() {
   };
 
   /**
-   * Productions is the flagged work — projects, jobs and products. It renders
-   * inside the Tasks workspace, so opening it is a Tasks view rather than a
-   * costing area, and the sidebar entry for it lives under Projects.
-   */
-  const handleOpenProductions = () => {
-    if (!sectionAllowed("tasks")) return;
-    setSection("tasks");
-    setActiveTaskView("flagged");
-    setMobileNavOpen(false);
-  };
-
-  /**
-   * How much is in Productions. A flagged product flags its job and project,
-   * so counting all three would count one piece of work three times — only the
-   * deepest flagged thing is counted.
-   */
-  const productionsCount = useMemo(() => {
-    const flaggedFgs = (finishedGoods ?? []).filter((f) => f.isFlagged);
-    const jobsCoveredByProducts = new Set<string>();
-    for (const f of flaggedFgs) {
-      for (const jid of f.jobIds ?? (f.jobId !== undefined ? [f.jobId] : [])) {
-        jobsCoveredByProducts.add(jid);
-      }
-    }
-    const bareFlaggedJobs = (allJobs ?? []).filter(
-      (j) => j.isFlagged && !jobsCoveredByProducts.has(j._id),
-    ).length;
-    return flaggedFgs.length + bareFlaggedJobs;
-  }, [finishedGoods, allJobs]);
-
-  /**
    * The notebook tree. It used to sit under Notes inside the main side menu,
    * which pushed the working areas down and made the notes hierarchy feel
    * subordinate to the app's navigation. It is now its own column, shown only
@@ -760,11 +729,8 @@ export default function Dashboard() {
             purchaseCount={purchases?.length ?? 0}
             salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
             accountCount={ledgerAccounts?.length ?? 0}
-            productionsCount={productionsCount}
             onSelectSection={handleSelectSection}
             onSelectView={handleSelectCostingView}
-            onOpenProductions={handleOpenProductions}
-            inProductions={activeTaskView === "flagged"}
             canViewMaterials={canDoItem("materials", "view")}
             canViewPurchase={canDoItem("purchases", "view")}
             canViewSales={canDoItem("purchases", "view")}
@@ -887,11 +853,8 @@ export default function Dashboard() {
                 purchaseCount={purchases?.length ?? 0}
                 salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
                 accountCount={ledgerAccounts?.length ?? 0}
-                productionsCount={productionsCount}
                 onSelectSection={handleSelectSection}
                 onSelectView={handleSelectCostingView}
-                onOpenProductions={handleOpenProductions}
-                inProductions={activeTaskView === "flagged"}
                 canViewMaterials={canDoItem("materials", "view")}
                 canViewPurchase={canDoItem("purchases", "view")}
                 canViewSales={canDoItem("purchases", "view")}

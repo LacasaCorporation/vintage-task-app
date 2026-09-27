@@ -33,6 +33,7 @@ import { batchCost, batchQty, costByProduct } from "@/lib/product-cost";
 import MoneyBracket from "@/components/MoneyBracket";
 import PriorityChip from "@/components/PriorityChip";
 import CustomersPanel from "@/components/CustomersPanel";
+import ProductionsBoard from "@/components/ProductionsBoard";
 import {
   JobsList,
   ProductsList,
@@ -195,9 +196,9 @@ export default function ProjectsSheet({
   onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
 }) {
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<"projects" | "jobs" | "products" | "customers">(
-    "projects",
-  );
+  const [tab, setTab] = useState<
+    "projects" | "jobs" | "products" | "customers" | "productions"
+  >("projects");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagFilter, setFlagFilter] = useState<"all" | "flagged">("all");
   const [jobFilter, setJobFilter] = useState<JobFilter>("all");
@@ -217,6 +218,25 @@ export default function ProjectsSheet({
   const allItems = useQuery(api.costing.listAllItems);
   const allJobs = useQuery(api.jobs.listJobs);
   const allCustomers = useQuery(api.contacts.listCustomers);
+
+  /**
+   * How much work is in Productions. A flagged product already flags its job,
+   * so counting all three would count one piece of work three times — only the
+   * deepest flagged thing is counted.
+   */
+  const productionsCount = useMemo(() => {
+    const flaggedFgs = finishedGoods.filter((f) => f.isFlagged);
+    const covered = new Set<string>();
+    for (const f of flaggedFgs) {
+      for (const jid of f.jobIds ?? (f.jobId !== undefined ? [f.jobId] : [])) {
+        covered.add(jid);
+      }
+    }
+    return (
+      flaggedFgs.length +
+      (allJobs ?? []).filter((j) => j.isFlagged && !covered.has(j._id)).length
+    );
+  }, [finishedGoods, allJobs]);
   const { format: money, code: defaultCurrencyCode } = useWorkspaceCurrency();
   const projectStatusesList = projectStatusesOrDefaults(
     useQuery(api.settings.listProjectStatuses),
@@ -451,7 +471,7 @@ export default function ProjectsSheet({
 
   /** The rows the print sheet renders: the current tab, current filters. */
   const printRows: PrintRow[] = useMemo(() => {
-    if (tab === "customers") return [];
+    if (tab === "customers" || tab === "productions") return [];
     if (tab === "projects") {
       const projectDocs = (projects ?? []).filter((p) =>
         filtered.some((row) => row.project?._id === p._id),
@@ -553,6 +573,8 @@ export default function ProjectsSheet({
         : tab === "products"
           ? "products"
           : "customers";
+  /** Productions brings its own filters, so the shared ones step aside. */
+  const usesSharedSearch = tab !== "customers" && tab !== "productions";
 
   /**
    * The filter in the tab bar follows the active tab, so one control covers
@@ -598,7 +620,7 @@ export default function ProjectsSheet({
 
   return (
     <div>
-      {printing && tab !== "customers" && (
+      {printing && usesSharedSearch && (
         <ProjectsPrintSheet
           tab={tab}
           rows={printRows}
@@ -616,6 +638,7 @@ export default function ProjectsSheet({
               ["jobs", "Jobs", Briefcase, allJobs?.length ?? 0],
               ["products", "Products", Package, finishedGoods.length],
               ["customers", "Customers", Users, allCustomers?.length],
+              ["productions", "Productions", Briefcase, productionsCount],
             ] as const
           ).map(([id, label, Icon, count]) => (
             <button
@@ -641,25 +664,27 @@ export default function ProjectsSheet({
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           {/* one search box and one filter for every tab — they read the same
               field, so switching tabs keeps whatever was typed */}
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={`Search ${tabLabel}…`}
-              aria-label={`Search ${tabLabel}`}
-              className="h-7 w-44 rounded-lg border bg-card pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-          {tab === "customers" ? null : (
-            <FilterMenu
-              value={activeFilter}
-              options={activeFilterOptions}
-              onChange={setActiveFilter}
-              label={activeFilterLabel}
-              icon={activeFilterIcon}
-            />
-          )}
+          {usesSharedSearch ? (
+            <>
+              <div className="relative">
+                <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={`Search ${tabLabel}…`}
+                  aria-label={`Search ${tabLabel}`}
+                  className="h-7 w-44 rounded-lg border bg-card pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <FilterMenu
+                value={activeFilter}
+                options={activeFilterOptions}
+                onChange={setActiveFilter}
+                label={activeFilterLabel}
+                icon={activeFilterIcon}
+              />
+            </>
+          ) : null}
           {onNewProject && tab === "projects" && (
             <button
               type="button"
@@ -671,7 +696,7 @@ export default function ProjectsSheet({
               <Plus className="size-3.5" />
             </button>
           )}
-          {tab !== "customers" && (
+          {usesSharedSearch && (
             <Button
               type="button"
               variant="outline"
@@ -718,6 +743,8 @@ export default function ProjectsSheet({
       )}
 
       {tab === "customers" && <CustomersPanel />}
+
+      {tab === "productions" && <ProductionsBoard />}
 
       {/* listing sheet */}
       <section
