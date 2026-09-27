@@ -22,6 +22,8 @@ import {
 import { useMemo, useState } from "react";
 import { useMutation } from "convex/react";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
+import ProductQtyInline from "@/components/ProductQtyInline";
 
 type JobDoc = Doc<"projectJobs">;
 type FgDoc = Doc<"finishedGoods">;
@@ -204,6 +206,7 @@ export function AddProductToJobDialog({
   const attachJobs = useMutation(api.costing.setFgJobs);
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("");
+  const [qty, setQty] = useState("");
   const [saving, setSaving] = useState(false);
   const [cloneBusy, setCloneBusy] = useState<Id<"finishedGoods"> | null>(null);
   const [existingSearch, setExistingSearch] = useState("");
@@ -234,6 +237,7 @@ export function AddProductToJobDialog({
       await addFg({
         jobId: job._id,
         name: clean,
+        qty: Number.isFinite(Number(qty)) && Number(qty) > 0 ? Number(qty) : undefined,
         unit: unit.trim() || undefined,
       });
       toast.success(`“${clean}” added to job “${job.name}”.`);
@@ -300,6 +304,26 @@ export function AddProductToJobDialog({
               className={inputCls}
             />
           </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium">How many to produce</label>
+            <div className="relative">
+              <Input
+                type="number"
+                min={0}
+                step="any"
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                placeholder="e.g. 12"
+                aria-label="How many to produce"
+                className={cn(inputCls, unit.trim() && "pr-14")}
+              />
+              {unit.trim() && (
+                <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground">
+                  {unit.trim()}
+                </span>
+              )}
+            </div>
+          </div>
           <DialogFooter className="pt-1">
             <Button
               type="button"
@@ -352,7 +376,10 @@ export function AddProductToJobDialog({
                   >
                     <Package className="size-3.5 shrink-0 text-muted-foreground/70" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{fg.name}</span>
+                      <span className="flex items-baseline gap-1.5">
+                        <span className="min-w-0 truncate font-medium">{fg.name}</span>
+                        <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
+                      </span>
                       <span className="block truncate text-[10px] text-muted-foreground/80">
                         From: {fg.projectName ?? "Standalone"}
                       </span>
