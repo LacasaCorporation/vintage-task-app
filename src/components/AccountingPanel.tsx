@@ -1,0 +1,786 @@
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  BookOpen,
+  CalendarDays,
+  Landmark,
+  Loader2,
+  Plus,
+  ScrollText,
+  Trash2,
+  Wallet,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
+import { toast } from "@/lib/toast";
+import { useAppDialogs } from "@/components/AppDialogs";
+import type { DialogsApi } from "@/components/AppDialogs";
+import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { cn } from "@/lib/utils";
+
+/** The sub-pages of the accounting module, in the order the sidebar lists them. */
+export type AccountingTab =
+  | "accounts"
+  | "journal"
+  | "receipt"
+  | "cashbook"
+  | "daybook"
+  | "opening";
+
+export const ACCOUNTING_TABS: {
+  id: AccountingTab;
+  label: string;
+  icon: typeof BookOpen;
+  hint: string;
+}[] = [
+  { id: "accounts", label: "Chart of accounts", icon: BookOpen, hint: "Every ledger account and its running balance" },
+  { id: "journal", label: "Journal entry", icon: ScrollText, hint: "A balanced debit and credit posting" },
+  { id: "receipt", label: "Receipt / payment", icon: Wallet, hint: "Money received from a customer, or paid to a supplier" },
+  { id: "cashbook", label: "Cash book", icon: Landmark, hint: "Cash and bank movement only" },
+  { id: "daybook", label: "Day book", icon: CalendarDays, hint: "Every posting, by day" },
+  { id: "opening", label: "Opening balance", icon: BookOpen, hint: "Balances carried in at the start of the books" },
+];
+
+const TYPE_LABEL: Record<string, string> = {
+  asset: "Asset",
+  liability: "Liability",
+  equity: "Equity",
+  income: "Income",
+  expense: "Expense",
+};
+
+const TYPE_CHIP: Record<string, string> = {
+  asset: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
+  liability: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  equity: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
+  income: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  expense: "bg-rose-500/10 text-rose-700 dark:text-rose-400",
+};
+
+/** `yyyy-mm-dd` for <input type="date">, in the browser's own timezone. */
+function toDateInput(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function Panel({
+  title,
+  count,
+  children,
+  actions,
+}: {
+  title: string;
+  count?: string;
+  children: React.ReactNode;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
+        <p className="text-sm font-semibold">
+          {title}
+          {count && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {count}
+            </span>
+          )}
+        </p>
+        {actions && <div className="flex items-center gap-1.5">{actions}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export default function AccountingPanel({
+  tab,
+  onTabChange,
+}: {
+  tab: AccountingTab;
+  onTabChange: (next: AccountingTab) => void;
+}) {
+  const { format: money } = useWorkspaceCurrency();
+  const { confirm, promptMulti } = useAppDialogs();
+
+  const accounts = useQuery(api.accounting.listAccounts);
+  const entries = useQuery(api.accounting.listEntries, { limit: 200 });
+  const ensureDefaults = useMutation(api.accounting.ensureDefaults);
+  const addAccount = useMutation(api.accounting.createAccount);
+  const editAccount = useMutation(api.accounting.updateAccount);
+  const removeAccount = useMutation(api.accounting.removeAccount);
+  const postEntry = useMutation(api.accounting.createEntry);
+  const dropEntry = useMutation(api.accounting.removeEntry);
+
+  const [busy, setBusy] = useState(false);
+
+  // a brand-new firm has no chart, so seed the standard one on first open
+  useEffect(() => {
+    if (accounts !== undefined && accounts.length === 0) {
+      void ensureDefaults().catch(() => undefined);
+    }
+  }, [accounts, ensureDefaults]);
+
+  const posting = useMemo(
+    () => (accounts ?? []).filter((a) => !a.isGroup),
+    [accounts],
+  );
+  const byId = useMemo(
+    () => new Map((accounts ?? []).map((a) => [a._id, a])),
+    [accounts],
+  );
+
+  const newAccount = async () => {
+    const values = await promptMulti({
+      title: "New account",
+      message: "Group rows are headings only — they hold no balance.",
+      confirmLabel: "Add account",
+      columns: 2,
+      fields: [
+        { key: "code", label: "Code", placeholder: "1300", required: true },
+        { key: "name", label: "Name", placeholder: "Raw material inventory", required: true },
+        { key: "type", label: "Type", initial: "asset" },
+        { key: "note", label: "Note (optional)" },
+      ],
+    });
+    if (!values) return;
+    const type = (values.type ?? "asset").trim().toLowerCase();
+    try {
+      await addAccount({
+        code: values.code ?? "",
+        name: values.name ?? "",
+        type: (["asset", "liability", "equity", "income", "expense"] as const)
+          .find((t) => t === type) ?? "asset",
+        note: values.note,
+      });
+      toast.success("Account added.");
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't add that account."));
+    }
+  };
+
+  const editOne = async (id: Id<"accounts">) => {
+    const a = byId.get(id);
+    if (!a) return;
+    const values = await promptMulti({
+      title: `Edit ${a.code}`,
+      confirmLabel: "Save changes",
+      columns: 2,
+      fields: [
+        { key: "name", label: "Name", initial: a.name, required: true },
+        { key: "type", label: "Type", initial: a.type },
+        { key: "note", label: "Note (optional)", initial: a.note ?? "", full: true },
+      ],
+    });
+    if (!values) return;
+    const type = (values.type ?? a.type).trim().toLowerCase();
+    try {
+      await editAccount({
+        id,
+        name: values.name ?? "",
+        type: (["asset", "liability", "equity", "income", "expense"] as const)
+          .find((t) => t === type) ?? a.type,
+        note: values.note,
+      });
+      toast.success("Account updated.");
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't update that account."));
+    }
+  };
+
+  const deleteOne = async (id: Id<"accounts">) => {
+    const a = byId.get(id);
+    if (!a) return;
+    const ok = await confirm({
+      title: `Delete “${a.code} ${a.name}”?`,
+      message: "An account with postings cannot be deleted.",
+      confirmLabel: "Delete account",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await removeAccount({ id });
+      toast.success("Account deleted.");
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't delete that account."));
+    }
+  };
+
+  const deleteEntry = async (id: Id<"journalEntries">) => {
+    const ok = await confirm({
+      title: "Delete this entry?",
+      message: "Its lines go with it and every balance is recalculated.",
+      confirmLabel: "Delete entry",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await dropEntry({ id });
+      toast.success("Entry deleted.");
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't delete that entry."));
+    }
+  };
+
+  /** Opens the debit/credit editor used by journal, receipt, payment and opening. */
+  const compose = async (kind: "journal" | "receipt" | "payment" | "opening") => {
+    if (posting.length < 2) {
+      toast.error("Add at least two posting accounts first.");
+      return;
+    }
+    const titles = {
+      journal: "New journal entry",
+      receipt: "Receipt — money received",
+      payment: "Payment — money paid",
+      opening: "Opening balances",
+    } as const;
+    const cash = posting.find((a) => a.code === "1100") ?? posting[0];
+
+    setBusy(true);
+    try {
+      const amount = await promptMulti({
+        title: titles[kind],
+        message:
+          kind === "receipt" || kind === "payment"
+            ? "Who is this with?"
+            : "Debits and credits must come to the same total.",
+        confirmLabel: "Next",
+        columns: 2,
+        fields: [
+          ...(kind === "receipt" || kind === "payment"
+            ? [
+                {
+                  key: "amount",
+                  label: kind === "payment" ? "Amount paid" : "Amount received",
+                  type: "number" as const,
+                  required: true,
+                },
+              ]
+            : []),
+          {
+            key: "at",
+            label: "Date",
+            type: "date" as const,
+            initial: toDateInput(Date.now()),
+          },
+          kind === "receipt" || kind === "payment"
+            ? { key: "party", label: "Party", full: true as const }
+            : { key: "memo", label: "Memo (optional)", full: true as const },
+        ],
+      });
+      if (!amount) return;
+      const at = amount.at ? new Date(`${amount.at}T12:00:00`).getTime() : Date.now();
+
+      let lines: { accountId: Id<"accounts">; debit: number; credit: number }[];
+      if (kind === "receipt" || kind === "payment") {
+        // A receipt or payment is always a two-line posting: money against a
+        // control account, so the pair cannot be left unbalanced.
+        const value = Number(amount.amount);
+        if (!Number.isFinite(value) || value <= 0) {
+          toast.error("Enter an amount above zero.");
+          return;
+        }
+        const control = posting.find((a) =>
+          (kind === "receipt"
+            ? ["1200", "4100", "4200"]
+            : ["2100", "5200", "5300", "5400"]
+          ).includes(a.code),
+        );
+        if (!control) {
+          toast.error("Add a control account to record this against.");
+          return;
+        }
+        const received = kind === "receipt";
+        lines = [
+          {
+            accountId: cash._id,
+            debit: received ? value : 0,
+            credit: received ? 0 : value,
+          },
+          {
+            accountId: control._id,
+            debit: received ? 0 : value,
+            credit: received ? value : 0,
+          },
+        ];
+      } else {
+        const picked = await editLines(promptMulti, posting, titles[kind]);
+        if (!picked) return;
+        lines = picked;
+      }
+
+      await postEntry({ at, kind, memo: amount.memo, party: amount.party, lines });
+      toast.success(`${titles[kind]} posted.`);
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't post that entry."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const totalDebit = (accounts ?? [])
+    .filter((a) => !a.isGroup)
+    .reduce((s, a) => s + a.debit, 0);
+
+  return (
+    <div className="space-y-3">
+      {/* ── Sub-navigation ─────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
+        {ACCOUNTING_TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              aria-pressed={tab === t.id}
+              title={t.hint}
+              onClick={() => onTabChange(t.id)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+                tab === t.id
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              <Icon className="size-3.5" />
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {accounts === undefined || entries === undefined ? (
+        <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Loading the ledger…
+        </div>
+      ) : tab === "accounts" ? (
+        <Panel
+          title="Chart of accounts"
+          count={`${(accounts ?? []).filter((a) => !a.isGroup).length} accounts`}
+          actions={
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void newAccount()}
+              className="h-7 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
+            >
+              <Plus className="size-3.5" /> Account
+            </Button>
+          }
+        >
+          {accounts.length === 0 ? (
+            <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+              No accounts yet — the standard chart is being prepared.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead>
+                  <tr className="border-b border-border/60 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                    <th className="w-20 px-3 py-2">Code</th>
+                    <th className="px-3 py-2">Account</th>
+                    <th className="w-28 px-3 py-2">Type</th>
+                    <th className="w-28 px-3 py-2 text-right">Debit</th>
+                    <th className="w-28 px-3 py-2 text-right">Credit</th>
+                    <th className="w-32 px-3 py-2 text-right">Balance</th>
+                    <th className="w-10 px-2 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {accounts.map((a) => (
+                    <tr
+                      key={a._id}
+                      className={cn(
+                        "transition-colors hover:bg-accent/40",
+                        a.isGroup && "bg-muted/20",
+                      )}
+                    >
+                      <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                        {a.code}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-3 py-2",
+                          a.isGroup ? "font-semibold" : "font-medium",
+                        )}
+                      >
+                        {a.name}
+                      </td>
+                      <td className="px-3 py-2">
+                        {!a.isGroup && (
+                          <span
+                            className={cn(
+                              "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                              TYPE_CHIP[a.type],
+                            )}
+                          >
+                            {TYPE_LABEL[a.type]}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                        {a.isGroup || a.debit === 0 ? "—" : money(a.debit)}
+                      </td>
+                      <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                        {a.isGroup || a.credit === 0 ? "—" : money(a.credit)}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-3 py-2 text-right text-sm font-medium tabular-nums",
+                          a.isGroup && "text-muted-foreground",
+                        )}
+                      >
+                        {a.isGroup
+                          ? "—"
+                          : money(
+                              a.type === "income" || a.type === "liability" || a.type === "equity"
+                                ? a.signed
+                                : -a.signed,
+                            )}
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        {!a.isGroup && (
+                          <span className="flex justify-end gap-0.5">
+                            <button
+                              type="button"
+                              aria-label={`Edit ${a.name}`}
+                              onClick={() => void editOne(a._id)}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
+                            >
+                              <ScrollText className="size-3" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Delete ${a.name}`}
+                              onClick={() => void deleteOne(a._id)}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-destructive"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border/60 text-sm font-semibold">
+                    <td className="px-3 py-2" colSpan={3}>
+                      Total debits posted
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(totalDebit)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(
+                        (accounts ?? [])
+                          .filter((a) => !a.isGroup)
+                          .reduce((s, a) => s + a.credit, 0),
+                      )}
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </Panel>
+      ) : tab === "journal" || tab === "receipt" || tab === "opening" ? (
+        <Panel
+          title={
+            tab === "journal"
+              ? "Journal entries"
+              : tab === "receipt"
+                ? "Receipts & payments"
+                : "Opening balances"
+          }
+          count={`${(entries ?? []).length} entries`}
+          actions={
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                void compose(
+                  tab === "journal"
+                    ? "journal"
+                    : tab === "receipt"
+                      ? "receipt"
+                      : "opening",
+                )
+              }
+              className="h-7 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
+            >
+              {busy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Plus className="size-3.5" />
+              )}
+              New entry
+            </Button>
+          }
+        >
+          <EntryTable
+            entries={entries ?? []}
+            money={money}
+            kinds={
+              tab === "journal"
+                ? ["journal"]
+                : tab === "receipt"
+                  ? ["receipt", "payment"]
+                  : ["opening"]
+            }
+            onDelete={deleteEntry}
+          />
+        </Panel>
+      ) : (
+        <BookPanel cashOnly={tab === "cashbook"} money={money} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The debit / credit grid: one field pair per posting account. Returns null
+ * when the user cancels; the server refuses anything that does not balance.
+ */
+async function editLines(
+  promptMulti: DialogsApi["promptMulti"],
+  accounts: { _id: Id<"accounts">; code: string; name: string }[],
+  title: string,
+): Promise<{ accountId: Id<"accounts">; debit: number; credit: number }[] | null> {
+  const fields = accounts.flatMap((a) => [
+    { key: `d_${a._id}`, label: `${a.code} Dr`, placeholder: "0" },
+    { key: `c_${a._id}`, label: `${a.code} Cr`, placeholder: "0" },
+  ]);
+  const values = await promptMulti({
+    title,
+    message: "Enter a debit or a credit for each account — leave the rest blank.",
+    confirmLabel: "Next",
+    cancelLabel: "Cancel",
+    columns: 2,
+    fields,
+  });
+  if (!values) return null;
+  const lines: { accountId: Id<"accounts">; debit: number; credit: number }[] = [];
+  for (const a of accounts) {
+    const debit = Number(values[`d_${a._id}`] ?? 0);
+    const credit = Number(values[`c_${a._id}`] ?? 0);
+    if (Number.isFinite(debit) && debit > 0) {
+      lines.push({ accountId: a._id, debit, credit: 0 });
+    }
+    if (Number.isFinite(credit) && credit > 0) {
+      lines.push({ accountId: a._id, debit: 0, credit });
+    }
+  }
+  if (lines.length === 0) {
+    toast.error("Enter at least one amount.");
+    return null;
+  }
+  return lines;
+}
+
+function EntryTable({
+  entries,
+  money,
+  kinds,
+  onDelete,
+}: {
+  entries: {
+    _id: Id<"journalEntries">;
+    number: string;
+    at: number;
+    kind: "journal" | "opening" | "receipt" | "payment";
+    memo?: string;
+    party?: string;
+    debit: number;
+    credit: number;
+    lines: {
+      _id: Id<"journalLines">;
+      accountCode: string;
+      accountName: string;
+      debit: number;
+      credit: number;
+    }[];
+  }[];
+  money: (n: number) => string;
+  kinds: ("journal" | "opening" | "receipt" | "payment")[];
+  onDelete: (id: Id<"journalEntries">) => Promise<void>;
+}) {
+  const shown = entries.filter((e) => kinds.includes(e.kind));
+  if (shown.length === 0) {
+    return (
+      <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+        Nothing posted yet — use <span className="font-medium">New entry</span> to
+        raise the first one.
+      </p>
+    );
+  }
+  return (
+    <ul className="divide-y divide-border/60">
+      {shown.map((e) => (
+        <li key={e._id} className="group/entry px-4 py-2.5 transition-colors hover:bg-accent/40">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[11px] text-muted-foreground">
+              {e.number}
+            </span>
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {toDateInput(e.at)}
+            </span>
+            {e.kind !== "journal" && (
+              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary capitalize">
+                {e.kind}
+              </span>
+            )}
+            {e.party && (
+              <span className="truncate text-xs text-foreground/85">{e.party}</span>
+            )}
+            {e.memo && (
+              <span className="truncate text-xs text-muted-foreground">{e.memo}</span>
+            )}
+            <span className="ml-auto flex shrink-0 items-center gap-2">
+              <span className="text-xs font-medium tabular-nums">
+                {money(e.debit)}
+              </span>
+              <button
+                type="button"
+                aria-label={`Delete entry ${e.number}`}
+                onClick={() => void onDelete(e._id)}
+                className="grid size-6 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/entry:opacity-100"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </span>
+          </div>
+          <ul className="mt-1 space-y-0.5 pl-1">
+            {e.lines.map((l) => (
+              <li key={l._id} className="flex items-center gap-2 text-[11px]">
+                <span className="font-mono text-muted-foreground/70">
+                  {l.accountCode}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                  {l.accountName}
+                </span>
+                {l.debit > 0 && (
+                  <span className="w-24 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                    Dr {money(l.debit)}
+                  </span>
+                )}
+                {l.credit > 0 && (
+                  <span className="w-24 text-right tabular-nums text-rose-600 dark:text-rose-400">
+                    Cr {money(l.credit)}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Cash book / day book: one row per day, with the running net. */
+function BookPanel({
+  cashOnly,
+  money,
+}: {
+  cashOnly: boolean;
+  money: (n: number) => string;
+}) {
+  const today = new Date();
+  const [from, setFrom] = useState(
+    toDateInput(new Date(today.getFullYear(), today.getMonth(), 1).getTime()),
+  );
+  const [to, setTo] = useState(toDateInput(today.getTime()));
+
+  const book = useQuery(api.accounting.dayBook, {
+    from: new Date(`${from}T00:00:00`).getTime(),
+    to: new Date(`${to}T23:59:59`).getTime(),
+    cashOnly,
+  });
+
+  const rows = book ?? [];
+  const totalIn = rows.reduce((s, r) => s + r.debit, 0);
+  const totalOut = rows.reduce((s, r) => s + r.credit, 0);
+
+  return (
+    <Panel
+      title={cashOnly ? "Cash book" : "Day book"}
+      count={cashOnly ? "cash & bank only" : "every account"}
+      actions={
+        <>
+          <Input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            aria-label="From"
+            className="h-7 w-32 rounded-lg text-xs"
+          />
+          <span className="text-[11px] text-muted-foreground">to</span>
+          <Input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            aria-label="To"
+            className="h-7 w-32 rounded-lg text-xs"
+          />
+        </>
+      }
+    >
+      {rows.length === 0 ? (
+        <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+          No movement between {from} and {to}.
+        </p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border/60 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+              <th className="px-4 py-2">Date</th>
+              <th className="px-3 py-2 text-right">Receipts</th>
+              <th className="px-3 py-2 text-right">Payments</th>
+              <th className="px-4 py-2 text-right">Net</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/60">
+            {rows.map((r) => (
+              <tr key={r.day} className="transition-colors hover:bg-accent/40">
+                <td className="px-4 py-2 text-xs tabular-nums">
+                  {toDateInput(r.day)}
+                </td>
+                <td className="px-3 py-2 text-right text-xs tabular-nums text-emerald-600 dark:text-emerald-400">
+                  {r.debit === 0 ? "—" : money(r.debit)}
+                </td>
+                <td className="px-3 py-2 text-right text-xs tabular-nums text-rose-600 dark:text-rose-400">
+                  {r.credit === 0 ? "—" : money(r.credit)}
+                </td>
+                <td className="px-4 py-2 text-right text-sm font-medium tabular-nums">
+                  {money(r.debit - r.credit)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-border/60 text-sm font-semibold">
+              <td className="px-4 py-2">Total</td>
+              <td className="px-3 py-2 text-right tabular-nums">{money(totalIn)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{money(totalOut)}</td>
+              <td className="px-4 py-2 text-right tabular-nums">
+                {money(totalIn - totalOut)}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      )}
+    </Panel>
+  );
+}
+
+function messageFrom(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
+}

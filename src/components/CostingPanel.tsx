@@ -9,6 +9,7 @@ import ProjectsSheet from "@/components/ProjectsSheet";
 import type { CostingView } from "@/components/CostingSidebar";
 import PurchasePanel from "@/components/PurchasePanel";
 import SalesPanel from "@/components/SalesPanel";
+import AccountingPanel from "@/components/AccountingPanel";
 import {
   ChevronDown,
   AlertTriangle,
@@ -30,6 +31,11 @@ import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
@@ -102,6 +108,8 @@ export default function CostingPanel({
   canDeleteProject?: boolean;
 }) {
   const [projectFocus, setProjectFocus] = useState<string | null>(null);
+  /** The product whose costing sheet is open over the current view. */
+  const [sheetId, setSheetId] = useState<Id<"finishedGoods"> | null>(null);
   const addFgItem = useMutation(api.costing.addFgItem);
   const updateItem = useMutation(api.costing.updateItem);
   const removeItem = useMutation(api.costing.removeItem);
@@ -193,10 +201,13 @@ export default function CostingPanel({
     setPendingEdit({ label, run });
   };
 
+  // the sheet opens either as its own page (view.kind === "fg") or as an
+  // overlay on top of whatever list the user was looking at
+  const activeFgId = view?.kind === "fg" ? view.fgId : sheetId;
   const activeFg =
-    view?.kind === "fg"
-      ? (finishedGoods.find((f) => f._id === view.fgId) ?? null)
-      : null;
+    activeFgId === null
+      ? null
+      : (finishedGoods.find((f) => f._id === activeFgId) ?? null);
   const { format, format: money, code: currencyCode } = useWorkspaceCurrency();
   const markupPct = activeFg?.markupPct ?? 0;
 
@@ -595,6 +606,11 @@ export default function CostingPanel({
           canEdit={canEditPurchase}
           canDelete={canDeletePurchase}
         />
+      ) : view?.kind === "accounting" ? (
+        <AccountingPanel
+          tab={view.tab}
+          onTabChange={(tab) => onSelectView({ kind: "accounting", tab })}
+        />
       ) : view?.kind === "materials" && canViewMaterials ? (
         <div className="mt-4">
           <MaterialsSheet
@@ -627,7 +643,19 @@ export default function CostingPanel({
             onOpenProduct={(fgId) => onSelectView({ kind: "fg", fgId })}
           />
         </div>
-      ) : view?.kind === "fg" && activeFg ? (
+      ) : (view?.kind === "fg" || sheetId !== null) && activeFg ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (open) return;
+            setSheetId(null);
+            if (view?.kind === "fg") onSelectView(null);
+          }}
+        >
+          <DialogContent className="max-h-[92vh] gap-0 overflow-y-auto p-0 sm:max-w-[min(100%,1080px)]">
+            <DialogTitle className="sr-only">
+              Costing sheet — {activeFg.name}
+            </DialogTitle>
         <>
           {/* product header */}
           <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-sm">
@@ -1059,6 +1087,8 @@ export default function CostingPanel({
             </div>
           )}
         </>
+          </DialogContent>
+        </Dialog>
       ) : loading ? (
         <div className="mt-8 flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
@@ -1068,8 +1098,9 @@ export default function CostingPanel({
         <div className="mt-4">
           <ProductForm
             finishedGoods={finishedGoods}
-            activeFgId={view?.kind === "fg" ? view.fgId : null}
+            activeFgId={activeFgId}
             onSelectFg={(id) => onSelectView({ kind: "fg", fgId: id })}
+            onOpenSheet={(id) => setSheetId(id)}
             initialProject={view?.kind === "products" ? projectFocus : null}
           />
         </div>

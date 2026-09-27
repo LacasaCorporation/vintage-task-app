@@ -10,9 +10,11 @@ import {
   ChevronDown,
   Download,
   FileSpreadsheet,
+  Layers,
   Loader2,
   Pencil,
   Plus,
+  Scale,
   Search as SearchIcon,
   Sparkles,
   Trash2,
@@ -33,6 +35,146 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
+
+/**
+ * The opening-balance view: what each material carried into the books. Saving
+ * posts the difference as a correction, so it shows up in the ledger's "In"
+ * column and can always be traced back here.
+ */
+function OpeningBalances({
+  rows,
+  stockByMaterial,
+  canEdit,
+}: {
+  rows: MaterialDoc[];
+  stockByMaterial: Map<Id<"rawMaterials">, StockRow>;
+  canEdit: boolean;
+}) {
+  const setOpening = useMutation(api.stock.setOpening);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<Id<"rawMaterials"> | null>(null);
+
+  const save = async (m: MaterialDoc) => {
+    const value = Number((drafts[m._id] ?? "").trim());
+    if (!Number.isFinite(value) || value < 0) {
+      toast.error("Enter an opening quantity of zero or more.");
+      return;
+    }
+    setSaving(m._id);
+    try {
+      await setOpening({ materialId: m._id, qty: value });
+      setDrafts((d) => {
+        const next = { ...d };
+        delete next[m._id];
+        return next;
+      });
+      toast.success(`Opening balance set for ${m.name}.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't set that opening.",
+      );
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <section className="mt-2.5 overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
+        <p className="text-sm font-semibold">
+          Opening balance
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {rows.length} material{rows.length === 1 ? "" : "s"}
+          </span>
+        </p>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+          Nothing matches the current search/filter.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[520px] text-sm">
+            <thead>
+              <tr className="border-b border-border/70 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                <th className="w-24 px-3 py-2">Code</th>
+                <th className="px-3 py-2">Material</th>
+                <th className="w-16 px-3 py-2">Unit</th>
+                <th className="w-28 px-3 py-2 text-right">Current balance</th>
+                <th className="w-40 px-3 py-2 text-right">Opening qty</th>
+                <th className="w-20 px-2 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {rows.map((m) => {
+                const current = stockByMaterial.get(m._id)?.balance ?? 0;
+                const opening = stockByMaterial.get(m._id)?.opening ?? 0;
+                const dirty = drafts[m._id] !== undefined && drafts[m._id] !== "";
+                return (
+                  <tr key={m._id} className="transition-colors hover:bg-accent/40">
+                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                      {m.code ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 font-medium">{m.name}</td>
+                    <td className="px-3 py-2 text-sm text-muted-foreground">
+                      {m.unit}
+                    </td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                      {current.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <input
+                          type="number"
+                          min={0}
+                          step="any"
+                          disabled={!canEdit}
+                          value={drafts[m._id] ?? (opening === 0 ? "" : String(opening))}
+                          onChange={(e) =>
+                            setDrafts((d) => ({ ...d, [m._id]: e.target.value }))
+                          }
+                          placeholder="0"
+                          aria-label={`Opening quantity for ${m.name}`}
+                          className="h-7 w-24 rounded-lg border bg-background px-2 text-right text-xs tabular-nums outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
+                        />
+                        <span className="text-[11px] text-muted-foreground">
+                          {m.unit}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-1 text-right">
+                      {canEdit && dirty && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={saving === m._id}
+                          onClick={() => void save(m)}
+                          className="h-7 rounded-lg px-2 text-xs text-primary"
+                        >
+                          {saving === m._id ? (
+                            <Loader2 className="size-3 animate-spin" />
+                          ) : (
+                            "Set"
+                          )}
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="border-t border-border/60 px-4 py-2.5 text-[11px] text-muted-foreground">
+        The opening figure is what was already on hand before any bill was
+        recorded. Saving it posts the difference so the ledger still explains
+        every unit.
+      </p>
+    </section>
+  );
+}
 
 /** In-page raw-material listing sheet (Excel-style rows, master price list). */
 export default function MaterialsSheet({
@@ -144,6 +286,7 @@ export default function MaterialsSheet({
   const [importOpen, setImportOpen] = useState(false);
   /** the material whose income / outgoing transactions are open */
   const [openStock, setOpenStock] = useState<Id<"rawMaterials"> | null>(null);
+  const [tab, setTab] = useState<"ledger" | "opening">("ledger");
   // the movement report, joined onto the table below by material id
   const stockReport = useQuery(api.stock.report, { limit: 500 });
   const stockByMaterial = useMemo(
@@ -204,58 +347,89 @@ export default function MaterialsSheet({
 
   return (
     <div>
-      {/* adding a material opens a dialog, so the list is not permanently
-          shortened by a row of empty inputs */}
-      {canCreate && (
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            className="h-9 rounded-lg"
-            onClick={() => setCreateOpen(true)}
-          >
-            <Plus className="size-3.5" />
-            Add raw material
-          </Button>
-          <span className="text-[11px] text-muted-foreground">
-            Units and categories are managed in Settings
-          </span>
+      {/* ── Toolbar: + create, the two views, then search & filter ───── */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {canCreate && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setCreateOpen(true)}
+              title="New raw material — name, code, unit, price"
+              className="h-7 shrink-0 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs font-medium text-primary transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-primary"
+            >
+              <Plus className="size-3.5" />
+              Material
+            </Button>
+          )}
+          <div className="flex items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
+            {(
+              [
+                ["ledger", "Stock ledger", Layers],
+                ["opening", "Opening balance", Scale],
+              ] as const
+            ).map(([id, label, Icon]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={tab === id}
+                onClick={() => setTab(id)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
+                  tab === id
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
 
-      {/* listing sheet */}
-      <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="flex shrink-0 items-center gap-1.5">
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search code, name…"
+              aria-label="Search raw materials"
+              className="h-7 w-40 rounded-lg border bg-card pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            aria-label="Filter by category"
+            className="h-7 rounded-lg border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-primary/30"
+          >
+            <option value="all">All categories</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {tab === "opening" ? (
+        <OpeningBalances rows={rows} stockByMaterial={stockByMaterial} canEdit={canEdit} />
+      ) : (
+      /* ── Stock ledger: in, out, balance ─────────────────────────── */
+      <section className="mt-2.5 overflow-hidden rounded-2xl border bg-card shadow-sm">
         <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
           <p className="text-sm font-semibold">
-            Raw materials
+            Stock ledger
             <span className="ml-2 text-xs font-normal text-muted-foreground">
               {rows.length} item{rows.length === 1 ? "" : "s"}
               {categories.length > 0 ? ` · ${categories.length} categories` : ""}
             </span>
           </p>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search code, name…"
-                className="w-40 rounded-lg border bg-background py-1 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              aria-label="Filter by category"
-              className="rounded-lg border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              <option value="all">All categories</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center gap-1.5">
             {canImportExport && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -342,12 +516,10 @@ export default function MaterialsSheet({
                 <th className="w-24 px-3 py-2 font-semibold">Code</th>
                 <th className="px-3 py-2 font-semibold">Name</th>
                 <th className="w-28 px-3 py-2 font-semibold">Category</th>
-                <th className="w-28 px-3 py-2 font-semibold">Sub-cat.</th>
                 <th className="w-16 px-3 py-2 font-semibold">Unit</th>
                 <th className="w-28 px-3 py-2 text-right font-semibold">Unit price</th>
-                <th className="w-24 px-3 py-2 text-right font-semibold">Opening</th>
-                <th className="w-24 px-3 py-2 text-right font-semibold">Income</th>
-                <th className="w-24 px-3 py-2 text-right font-semibold">Outgoing</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">In</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">Out</th>
                 <th className="w-28 px-3 py-2 text-right font-semibold">Balance</th>
                 <th className="w-10 px-2 py-2" />
               </tr>
@@ -355,14 +527,14 @@ export default function MaterialsSheet({
             <tbody className="divide-y divide-border/60">
               {loading ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading materials…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
                     {search || categoryFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No raw materials yet — add your first one above."}
@@ -376,6 +548,10 @@ export default function MaterialsSheet({
                   const income = stock?.income ?? 0;
                   const outgoing = stock?.outgoing ?? 0;
                   const opening = stock?.opening ?? 0;
+                  // The ledger reads in / out / balance: the opening figure is
+                  // folded into what came in, so one number tells the story.
+                  const received = opening + income;
+                  const issued = outgoing;
                   const movementRow: StockRow = stock ?? {
                     materialId: m._id,
                     name: m.name,
@@ -420,26 +596,19 @@ export default function MaterialsSheet({
                     <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{m.code ?? "—"}</td>
                     <td className="px-3 py-2 font-medium">{m.name}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.category ?? "—"}</td>
-                    <td className="px-3 py-2 text-sm text-muted-foreground">{m.subCategory ?? "—"}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.unit}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{money(m.pricePerUnit)}</td>
                     <td
-                      className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground"
-                      title="Opening — stock carried in from before these transactions"
-                    >
-                      {opening === 0 ? "—" : opening.toLocaleString()}
-                    </td>
-                    <td
                       className="px-3 py-2 text-right text-xs tabular-nums text-emerald-600 dark:text-emerald-400"
-                      title="Income — everything bought on a bill"
+                      title="Stock received — purchases, returns and the opening figure"
                     >
-                      +{income.toLocaleString()}
+                      {received === 0 ? "—" : `+${received.toLocaleString()}`}
                     </td>
                     <td
                       className="px-3 py-2 text-right text-xs tabular-nums text-rose-600 dark:text-rose-400"
-                      title="Outgoing — consumed by production"
+                      title="Stock issued — consumed by production"
                     >
-                      {outgoing === 0 ? "—" : `−${outgoing.toLocaleString()}`}
+                      {issued === 0 ? "—" : `−${issued.toLocaleString()}`}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       <span
@@ -493,7 +662,7 @@ export default function MaterialsSheet({
                   </tr>
                   {open && (
                     <tr>
-                      <td colSpan={13} className="p-0">
+                      <td colSpan={12} className="p-0">
                         <StockMovementList row={movementRow} />
                       </td>
                     </tr>
@@ -506,6 +675,7 @@ export default function MaterialsSheet({
           </table>
         </div>
       </section>
+      )}
 
       <p className="mt-3 text-xs text-muted-foreground">
         This list is the master price list — costing sheets pick materials from here, so prices stay

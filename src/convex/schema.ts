@@ -655,6 +655,66 @@ const schema = defineSchema(
       parentId: v.optional(v.id("costCategories")), // set for sub-categories
     }).index("by_owner", ["ownerId"]),
 
+    /**
+     * One row of the chart of accounts — the names every journal line posts
+     * against. `isGroup` rows are headings only: they hold no balance and
+     * cannot be posted to.
+     */
+    accounts: defineTable({
+      ownerId: v.id("users"),
+      code: v.string(), // 1000, 1100, 4000 …
+      name: v.string(),
+      type: v.union(
+        v.literal("asset"),
+        v.literal("liability"),
+        v.literal("equity"),
+        v.literal("income"),
+        v.literal("expense"),
+      ),
+      isGroup: v.optional(v.boolean()),
+      note: v.optional(v.string()),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_code", ["ownerId", "code"]),
+
+    /**
+     * A journal entry — the header of a double-entry posting. `kind` records
+     * how it was raised so the cash book and the receipts list can filter on
+     * it without inspecting the lines.
+     */
+    journalEntries: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // JE0001, JE0002, …
+      at: v.number(), // the entry date, ms
+      kind: v.union(
+        v.literal("journal"),
+        v.literal("opening"),
+        v.literal("receipt"),
+        v.literal("payment"),
+      ),
+      memo: v.optional(v.string()),
+      /** Customer or supplier the receipt / payment came from or went to. */
+      party: v.optional(v.string()),
+      createdAt: v.number(),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_at", ["ownerId", "at"]),
+
+    /** One debit or one credit inside a journal entry. */
+    journalLines: defineTable({
+      ownerId: v.id("users"),
+      entryId: v.id("journalEntries"),
+      accountId: v.id("accounts"),
+      accountCode: v.string(),
+      accountName: v.string(),
+      debit: v.number(),
+      credit: v.number(),
+      memo: v.optional(v.string()),
+    })
+      .index("by_entry", ["entryId"])
+      .index("by_account", ["ownerId", "accountId"])
+      .index("by_owner", ["ownerId"]),
+
     // notebooks: the top level of the notes workspace (OneNote-style)
     notebooks: defineTable({
       ownerId: v.id("users"),

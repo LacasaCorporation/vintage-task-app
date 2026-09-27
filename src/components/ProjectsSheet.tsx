@@ -525,6 +525,44 @@ export default function ProjectsSheet({
   }, [tab, projects, allJobs, finishedGoods, costByFg, filtered, search, jobFilter, productFilter, projectStatusesList, projectNameForJob]);
 
   /** What the print header should say about the active filter. */
+  const tabLabel =
+    tab === "projects"
+      ? "projects"
+      : tab === "jobs"
+        ? "jobs"
+        : tab === "products"
+          ? "products"
+          : "customers";
+
+  /**
+   * The filter in the tab bar follows the active tab, so one control covers
+   * every list without each section having to draw its own.
+   */
+  const activeFilterOptions =
+    tab === "projects"
+      ? PROJECT_FILTERS
+      : tab === "jobs"
+        ? JOB_FILTERS
+        : tab === "products"
+          ? PRODUCT_FILTERS
+          : PROJECT_FILTERS;
+  const activeFilterLabel = `Show ${tab === "projects" ? "projects" : tab}`;
+  const activeFilterIcon =
+    tab === "projects" ? Folder : tab === "jobs" ? Briefcase : Package;
+  const activeFilter =
+    tab === "projects"
+      ? flagFilter
+      : tab === "jobs"
+        ? jobFilter
+        : tab === "products"
+          ? productFilter
+          : flagFilter;
+  const setActiveFilter = (next: string) => {
+    if (tab === "jobs") setJobFilter(next as JobFilter);
+    else if (tab === "products") setProductFilter(next as ProductFilter);
+    else setFlagFilter(next as "all" | "flagged");
+  };
+
   const printFilterLabel =
     tab === "jobs"
       ? jobFilter === "all"
@@ -580,7 +618,28 @@ export default function ProjectsSheet({
             </button>
           ))}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          {/* one search box and one filter for every tab — they read the same
+              field, so switching tabs keeps whatever was typed */}
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={`Search ${tabLabel}…`}
+              aria-label={`Search ${tabLabel}`}
+              className="h-7 w-44 rounded-lg border bg-card pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          {tab === "customers" ? null : (
+            <FilterMenu
+              value={activeFilter}
+              options={activeFilterOptions}
+              onChange={setActiveFilter}
+              label={activeFilterLabel}
+              icon={activeFilterIcon}
+            />
+          )}
           {onNewProject && tab === "projects" && (
             <button
               type="button"
@@ -613,9 +672,7 @@ export default function ProjectsSheet({
           finishedGoods={finishedGoods}
           costByFg={costByFg}
           search={search}
-          onSearch={setSearch}
           filter={jobFilter}
-          onFilterChange={setJobFilter}
           onOpenProject={onOpenProject}
         />
       )}
@@ -625,9 +682,7 @@ export default function ProjectsSheet({
           finishedGoods={finishedGoods}
           costByFg={costByFg}
           search={search}
-          onSearch={setSearch}
           filter={productFilter}
-          onFilterChange={setProductFilter}
           onOpenProduct={onOpenProduct}
         />
       )}
@@ -650,22 +705,6 @@ export default function ProjectsSheet({
             </span>
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
-            <div className="relative">
-              <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search projects…"
-                className="h-7 w-40 rounded-lg border bg-background pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-            <FilterMenu
-              value={flagFilter}
-              options={PROJECT_FILTERS}
-              onChange={setFlagFilter}
-              label="Show projects"
-              icon={Folder}
-            />
             {filtered.length > 0 && (
               <Button
                 type="button"

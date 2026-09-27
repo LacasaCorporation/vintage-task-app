@@ -1,13 +1,18 @@
 import type { Doc } from "@/convex/_generated/dataModel";
 import {
+  ChevronDown,
   Folder,
   Layers,
   Package,
   Receipt,
   ShoppingCart,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
+import {
+  ACCOUNTING_TABS,
+  type AccountingTab,
+} from "@/components/AccountingPanel";
 
 type FgDoc = Doc<"finishedGoods">;
 type MaterialDoc = Doc<"rawMaterials">;
@@ -20,6 +25,7 @@ export type CostingView =
   | { kind: "products" }
   | { kind: "projects" }
   | { kind: "fg"; fgId: FgDoc["_id"] }
+  | { kind: "accounting"; tab: AccountingTab }
   | null;
 
 /** Sidebar: top-level navigation into the costing areas of the workspace. */
@@ -32,8 +38,10 @@ export default function CostingSidebar({
   showMaterials = true,
   showPurchase = true,
   showSales = true,
+  showAccounting = true,
   purchaseCount = 0,
   salesCount = 0,
+  accountCount = 0,
 }: {
   finishedGoods: FgDoc[];
   materials: MaterialDoc[];
@@ -43,9 +51,12 @@ export default function CostingSidebar({
   showMaterials?: boolean;
   showPurchase?: boolean;
   showSales?: boolean;
+  showAccounting?: boolean;
   purchaseCount?: number;
   salesCount?: number;
+  accountCount?: number;
 }) {
+  const [accountingOpen, setAccountingOpen] = useState(true);
   /** How many distinct projects the finished goods are grouped under. */
   const projectCount = useMemo(
     () => new Set(finishedGoods.map((fg) => fg.projectName ?? "Standalone")).size,
@@ -162,6 +173,74 @@ export default function CostingSidebar({
           </button>
         );
       })}
+
+      {/* accounting: a group of ledger sub-pages under one collapsible head */}
+      {showAccounting && (
+        <>
+          <button
+            type="button"
+            onClick={() => setAccountingOpen((v) => !v)}
+            aria-expanded={accountingOpen}
+            className="mt-3 flex w-full items-center gap-2 rounded-lg px-2 pb-1 text-left transition-colors hover:text-foreground"
+          >
+            <ChevronDown
+              className={cn(
+                "size-3 shrink-0 text-muted-foreground/60 transition-transform",
+                !accountingOpen && "-rotate-90",
+              )}
+            />
+            <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+              Accounting
+            </span>
+            <span
+              className="ml-auto shrink-0 rounded-full bg-muted px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+              title={`${accountCount} ledger accounts`}
+            >
+              {accountCount}
+            </span>
+          </button>
+
+          {accountingOpen && (
+            <div className="ml-3 border-l border-border/60 pl-1">
+              {ACCOUNTING_TABS.map((t) => {
+                const Icon = t.icon;
+                const active =
+                  view?.kind === "accounting" && view.tab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    title={t.hint}
+                    aria-current={active ? "true" : undefined}
+                    onClick={() => onSelectView({ kind: "accounting", tab: t.id })}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-lg py-1.5 pr-2 pl-2 text-left transition-colors",
+                      active ? "bg-primary/10" : "hover:bg-accent",
+                    )}
+                  >
+                    <Icon
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        active ? "text-primary" : "text-muted-foreground/70",
+                      )}
+                    />
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-xs",
+                        active
+                          ? "font-medium text-primary"
+                          : "text-foreground/85",
+                      )}
+                    >
+                      {t.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

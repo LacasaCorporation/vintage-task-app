@@ -80,7 +80,7 @@ type Pending =
       resolve: (v: Record<string, string> | null) => void;
     };
 
-type DialogsApi = {
+export type DialogsApi = {
   confirm: (options: ConfirmOptions) => Promise<boolean>;
   prompt: (options: PromptOptions) => Promise<string | null>;
   promptMulti: (options: PromptMultiOptions) => Promise<Record<string, string> | null>;

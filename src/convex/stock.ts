@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -164,5 +164,38 @@ export const report = query({
           a.name.localeCompare(b.name),
       )
       .slice(0, Math.max(1, take));
+  },
+});
+
+/**
+ * Sets the opening figure for a material. The difference against what is
+ * already on hand is posted as a correction, so the movement ledger still
+ * explains every unit and the two never drift apart.
+ */
+export const setOpening = mutation({
+  args: {
+    materialId: v.id("rawMaterials"),
+    qty: v.number(),
+    at: v.optional(v.number()),
+  },
+  handler: async (ctx, { materialId, qty, at }): Promise<void> => {
+    const ownerId = await scopeUserId(ctx);
+    if (ownerId === null) throw new Error("Sign in to manage stock.");
+    const material = await ctx.db.get(materialId);
+    if (material === null || material.ownerId !== ownerId) {
+      throw new Error("That material no longer exists.");
+    }
+    const target = round(Math.max(0, qty));
+    const delta = round(target - (material.stock ?? 0));
+    if (delta === 0) return;
+    // `move` reads the sign, so a lower opening is recorded as going out.
+    await stockIn(ctx, {
+      ownerId,
+      material,
+      qty: delta,
+      source: "adjustment",
+      ref: "Opening balance",
+      at,
+    });
   },
 });

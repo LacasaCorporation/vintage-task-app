@@ -28,9 +28,42 @@ import { batchCost, costByProduct } from "@/lib/product-cost";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
+import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
+import {
+  Factory,
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 type FgDoc = Doc<"finishedGoods">;
+
+/** How the product list is narrowed down by production state. */
+type ProductionFilter = "all" | "not-started" | "in-production" | "finished";
+
+const PRODUCTION_FILTERS: readonly FilterOption<ProductionFilter>[] = [
+  { value: "all", label: "All states", hint: "Every product" },
+  { value: "not-started", label: "Not started", hint: "Production not begun" },
+  { value: "in-production", label: "In production", hint: "Materials are out of stock" },
+  { value: "finished", label: "Finished", hint: "Completed products" },
+];
+
+function keepsProduction(fg: FgDoc, filter: ProductionFilter): boolean {
+  switch (filter) {
+    case "not-started":
+      return fg.productionStartedAt === undefined;
+    case "in-production":
+      return fg.productionStartedAt !== undefined && fg.isCompleted !== true;
+    case "finished":
+      return fg.isCompleted === true;
+    default:
+      return true;
+  }
+}
 
 const inputCls =
   "h-9 w-full rounded-lg border bg-card px-2.5 text-sm outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30";
@@ -83,11 +116,14 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 export default function ProductForm({
   finishedGoods,
   onSelectFg,
+  onOpenSheet,
   activeFgId,
   initialProject,
 }: {
   finishedGoods: FgDoc[];
   onSelectFg: (id: Id<"finishedGoods">) => void;
+  /** Opens the costing sheet over the list — no page change. */
+  onOpenSheet?: (id: Id<"finishedGoods">) => void;
   activeFgId: Id<"finishedGoods"> | null;
   initialProject?: string | null;
 }) {
@@ -123,6 +159,7 @@ export default function ProductForm({
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("all");
+  const [productionFilter, setProductionFilter] = useState<ProductionFilter>("all");
   const [showForm, setShowForm] = useState(false);
 
   // when arriving from the Projects tab, pre-filter and pre-select that project
@@ -175,11 +212,14 @@ export default function ProductForm({
     return finishedGoods
       .filter((f) => {
         if (projectFilter !== "all" && f.projectName !== projectFilter) return false;
+        if (!keepsProduction(f, productionFilter)) return false;
         if (!q) return true;
         return (
           f.name.toLowerCase().includes(q) ||
           (f.projectName ?? "").toLowerCase().includes(q) ||
-          (f.code ?? "").toLowerCase().includes(q)
+          (f.code ?? "").toLowerCase().includes(q) ||
+          (f.category ?? "").toLowerCase().includes(q) ||
+          (f.note ?? "").toLowerCase().includes(q)
         );
       })
       .sort((a, b) =>
@@ -187,7 +227,7 @@ export default function ProductForm({
           ? a.name.localeCompare(b.name)
           : (a.projectName ?? "").localeCompare(b.projectName ?? ""),
       );
-  }, [finishedGoods, search, projectFilter]);
+  }, [finishedGoods, search, projectFilter, productionFilter]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -316,15 +356,6 @@ export default function ProductForm({
 
   return (
     <div>
-      {/* new-product trigger */}
-      <button
-        type="button"
-        onClick={() => setShowForm(true)}
-        className="flex w-full items-center gap-1.5 rounded-xl border border-dashed bg-card/60 px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-      >
-        <Plus className="size-3.5" />
-        New product (FG) — name, code, unit, margin… project is optional
-      </button>
 
       {/* new-product popup — the master-data manager lives INSIDE it, never
           nested in a <form> (nested forms are invalid HTML and would make its
@@ -596,30 +627,51 @@ export default function ProductForm({
       </Dialog>
 
       {/* listing sheet — matches the raw-materials sheet */}
-      <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
-        <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
-          <p className="text-sm font-semibold">
-            Products
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {rows.length} item{rows.length === 1 ? "" : "s"}
-              {projects.length > 0 ? ` · ${projects.length} projects` : ""}
-            </span>
-          </p>
-          <div className="flex items-center gap-2">
+      <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setShowForm(true)}
+              title="New product — name, code, unit, margin. Project is optional."
+              className="h-7 shrink-0 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs font-medium text-primary transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-primary"
+            >
+              <Plus className="size-3.5" />
+              Product
+            </Button>
+            <p className="text-sm font-semibold">
+              Products
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {rows.length} item{rows.length === 1 ? "" : "s"}
+                {projects.length > 0 ? ` · ${projects.length} projects` : ""}
+              </span>
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
             <div className="relative">
               <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search product, code…"
-                className="w-40 rounded-lg border bg-background py-1 pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
+                aria-label="Search products"
+                className="h-7 w-40 rounded-lg border bg-card pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
               />
             </div>
+            <FilterMenu
+              value={productionFilter}
+              options={PRODUCTION_FILTERS}
+              onChange={setProductionFilter}
+              label="Filter production"
+              icon={Factory}
+            />
             <select
               value={projectFilter}
               onChange={(e) => setProjectFilter(e.target.value)}
               aria-label="Filter by project"
-              className="rounded-lg border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-primary/30"
+              className="h-7 rounded-lg border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-primary/30"
             >
               <option value="all">All projects</option>
               {projects.map((p) => (
@@ -695,9 +747,9 @@ export default function ProductForm({
                       <td className="px-3 py-1.5">
                         <button
                           type="button"
-                          onClick={() => onSelectFg(f._id)}
+                          onClick={() => (onOpenSheet ?? onSelectFg)(f._id)}
                           className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-primary/5"
-                          title="Open costing sheet"
+                          title="Open the costing sheet"
                         >
                           <Package
                             className={cn(
@@ -755,24 +807,48 @@ export default function ProductForm({
                       </td>
                       <td className="px-2 py-1 text-center">
                         <span className="hidden gap-1 group-hover/row:inline-flex">
-                          <button
-                            type="button"
-                            aria-label={`Open “${f.name}”`}
-                            title="Open costing sheet"
-                            className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
-                            onClick={() => onSelectFg(f._id)}
-                          >
-                            <Sigma className="size-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Delete “${f.name}”`}
-                            title="Delete product"
-                            className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-destructive"
-                            onClick={() => void handleDelete(f)}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                aria-label={`Actions for “${f.name}”`}
+                                title="Costing sheet & product actions"
+                                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
+                              >
+                                <Sigma className="size-3.5" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-52">
+                              <DropdownMenuItem
+                                onClick={() => (onOpenSheet ?? onSelectFg)(f._id)}
+                              >
+                                <Sigma className="size-3.5" />
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-medium">
+                                    Open costing sheet
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    Edit the BOM right here
+                                  </span>
+                                </div>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => onSelectFg(f._id)}>
+                                <Package className="size-3.5" />
+                                <span className="text-xs font-medium">
+                                  Open as a full page
+                                </span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => void handleDelete(f)}
+                                className="text-destructive focus:text-destructive"
+                              >
+                                <Trash2 className="size-3.5" />
+                                <span className="text-xs font-medium">
+                                  Delete product
+                                </span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </span>
                       </td>
                     </tr>
@@ -785,8 +861,9 @@ export default function ProductForm({
       </section>
 
       <p className="mt-3 text-xs text-muted-foreground">
-        Click a product to open its costing sheet — add raw materials with quantities and custom
-        lines, then read the total with markup. Cost updates live as you edit the sheet.
+        Click a product to open its costing sheet right here — add raw materials with quantities
+        and custom lines, then read the total with markup. Cost updates live as you edit the
+        sheet, and the list stays where you left it.
       </p>
     </div>
   );

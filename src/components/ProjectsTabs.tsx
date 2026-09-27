@@ -1,14 +1,12 @@
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import {
   Briefcase,
-  Flag,
   Package,
-  Search as SearchIcon,
   Sigma,
 } from "lucide-react";
 import { useMemo } from "react";
 import { ProductionButton } from "@/components/FlaggedLists";
-import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
+import type { FilterOption } from "@/components/FilterMenu";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { batchCost } from "@/lib/product-cost";
 
@@ -74,31 +72,17 @@ type FgDoc = Doc<"finishedGoods">;
 type JobDoc = Doc<"projectJobs">;
 type ProjectDoc = Doc<"projects">;
 
-/** Shared filter bar so every tab filters the same way. */
-function ListHeader<T extends string>({
+/** Shared list header. Search and filtering live in the tab bar above. */
+function ListHeader({
   title,
   count,
   countLabel,
   right,
-  search,
-  onSearch,
-  filter,
-  filterOptions,
-  onFilterChange,
-  filterLabel,
-  filterIcon,
 }: {
   title: string;
   count: number;
   countLabel: string;
   right?: React.ReactNode;
-  search: string;
-  onSearch: (next: string) => void;
-  filter: T;
-  filterOptions: readonly FilterOption<T>[];
-  onFilterChange: (next: T) => void;
-  filterLabel: string;
-  filterIcon: typeof Flag;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
@@ -108,26 +92,7 @@ function ListHeader<T extends string>({
           {count} {countLabel}
         </span>
       </p>
-      <div className="flex items-center gap-2">
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground/60" />
-          <input
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            placeholder={`Search ${title.toLowerCase()}…`}
-            aria-label={`Search ${title.toLowerCase()}`}
-            className="w-40 rounded-lg border bg-background py-1 pr-2 pl-7 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
-          />
-        </div>
-        <FilterMenu
-          value={filter}
-          options={filterOptions}
-          onChange={onFilterChange}
-          label={filterLabel}
-          icon={filterIcon}
-        />
-        {right}
-      </div>
+      {right}
     </div>
   );
 }
@@ -143,9 +108,7 @@ export function JobsList({
   finishedGoods,
   costByFg,
   search,
-  onSearch,
   filter,
-  onFilterChange,
   onOpenProject,
 }: {
   jobs: JobDoc[];
@@ -153,9 +116,7 @@ export function JobsList({
   finishedGoods: FgDoc[];
   costByFg: Map<Id<"finishedGoods">, number>;
   search: string;
-  onSearch: (next: string) => void;
   filter: JobFilter;
-  onFilterChange: (next: JobFilter) => void;
   onOpenProject?: (projectName: string) => void;
 }) {
   const { format: money } = useWorkspaceCurrency();
@@ -196,13 +157,6 @@ export function JobsList({
         title="Job list"
         count={filtered.length}
         countLabel={filtered.length === 1 ? "job" : "jobs"}
-        search={search}
-        onSearch={onSearch}
-        filter={filter}
-        filterOptions={JOB_FILTERS}
-        onFilterChange={onFilterChange}
-        filterLabel="Show jobs"
-        filterIcon={Briefcase}
         right={
           <span className="text-xs tabular-nums text-muted-foreground">
             {money(filtered.reduce((s, r) => s + r.total, 0))} production cost
@@ -282,17 +236,13 @@ export function ProductsList({
   finishedGoods,
   costByFg,
   search,
-  onSearch,
   filter,
-  onFilterChange,
   onOpenProduct,
 }: {
   finishedGoods: FgDoc[];
   costByFg: Map<Id<"finishedGoods">, number>;
   search: string;
-  onSearch: (next: string) => void;
   filter: ProductFilter;
-  onFilterChange: (next: ProductFilter) => void;
   onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
 }) {
   const { format: money } = useWorkspaceCurrency();
@@ -328,13 +278,6 @@ export function ProductsList({
         title="Product list"
         count={filtered.length}
         countLabel={filtered.length === 1 ? "product" : "products"}
-        search={search}
-        onSearch={onSearch}
-        filter={filter}
-        filterOptions={PRODUCT_FILTERS}
-        onFilterChange={onFilterChange}
-        filterLabel="Show products"
-        filterIcon={Package}
         right={
           <span className="text-xs tabular-nums text-muted-foreground">
             {money(filtered.reduce((s, r) => s + r.total, 0))} total
