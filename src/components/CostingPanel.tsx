@@ -13,6 +13,7 @@ import AccountingPanel from "@/components/AccountingPanel";
 import {
   ChevronDown,
   AlertTriangle,
+  Copy,
   Download,
   Factory,
   FileSpreadsheet,
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { batchQty } from "@/lib/product-cost";
 
 type FgDoc = Doc<"finishedGoods">;
 type MaterialDoc = Doc<"rawMaterials">;
@@ -46,7 +48,7 @@ type MaterialDoc = Doc<"rawMaterials">;
 const NEW_MATERIAL = "__new__";
 
 const cellCls =
-  "w-full bg-transparent px-2 py-1.5 text-sm outline-none focus:bg-primary/5 focus:ring-2 focus:ring-primary/30 rounded-md";
+  "w-full bg-transparent px-2 py-1 text-xs outline-none focus:bg-primary/5 focus:ring-2 focus:ring-primary/30 rounded-md";
 
 /** Main costing area: raw-materials sheet, product form/list, or FG costing grid. */
 export default function CostingPanel({
@@ -239,8 +241,11 @@ export default function CostingPanel({
   const totals = useMemo(() => {
     const subtotal = rows.reduce((sum, r) => sum + r.qty * r.unitPrice, 0);
     const markup = subtotal * (markupPct / 100);
-    return { subtotal, markup, grand: subtotal + markup };
-  }, [rows, markupPct]);
+    // what one unit costs to make, which is the figure most sheets are after
+    const perUnit = activeFg ? subtotal / batchQty(activeFg) : 0;
+    const salesPerUnit = activeFg ? (subtotal + markup) / batchQty(activeFg) : 0;
+    return { subtotal, markup, grand: subtotal + markup, perUnit, salesPerUnit };
+  }, [rows, markupPct, activeFg]);
 
   // ── Draft (save-button) logic ─────────────────────────────────────
   // Keep a local draft of every visible row; reset it when the sheet's
@@ -658,7 +663,7 @@ export default function CostingPanel({
             </DialogTitle>
         <>
           {/* product header */}
-          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-sm">
+          <div className="mt-3 flex flex-wrap items-center gap-2.5 rounded-xl border bg-card px-3 py-2 shadow-sm">
             {/* product image: thumbnail or add button */}
             {activeFg.imageUrl ? (
               <div className="group/img relative shrink-0">
@@ -666,7 +671,7 @@ export default function CostingPanel({
                   type="button"
                   onClick={() => setLightboxOpen(true)}
                   title="Click to enlarge"
-                  className="block size-14 overflow-hidden rounded-lg border bg-muted"
+                  className="block size-10 overflow-hidden rounded-lg border bg-muted"
                 >
                   <img
                     src={activeFg.imageUrl}
@@ -700,12 +705,12 @@ export default function CostingPanel({
                 type="button"
                 onClick={handlePickImage}
                 title="Add a product image"
-                className="grid size-14 shrink-0 place-items-center rounded-lg border border-dashed bg-muted/40 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+                className="grid size-10 shrink-0 place-items-center rounded-lg border border-dashed bg-muted/40 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
               >
                 {uploadingImage ? (
                   <Loader2 className="size-4 animate-spin" />
                 ) : (
-                  <ImagePlus className="size-5" />
+                  <ImagePlus className="size-4" />
                 )}
               </button>
             )}
@@ -717,25 +722,55 @@ export default function CostingPanel({
               onChange={handleImageFile}
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate font-display text-base font-semibold">{activeFg.name}</p>
-              <p className="truncate text-xs text-muted-foreground">
+              <p className="truncate font-display text-sm font-semibold">{activeFg.name}</p>
+              <p className="truncate text-[11px] text-muted-foreground">
                 {activeFg.projectName}
                 {activeFg.code ? ` · ${activeFg.code}` : ""}
                 {activeFg.unit ? ` · per ${activeFg.unit}` : ""}
+                {activeFg.productionStartedAt !== undefined && " · in production"}
+                {activeFg.isCompleted === true && " · finished"}
               </p>
               {activeFg.note && (
-                <p className="mt-0.5 truncate text-xs text-muted-foreground/80">{activeFg.note}</p>
+                <p className="truncate text-[11px] text-muted-foreground/80">{activeFg.note}</p>
               )}
             </div>
+            {/* at-a-glance figures, so the sheet needs no scrolling to read */}
+            <dl className="flex shrink-0 items-center gap-3 text-right">
+              <div>
+                <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                  Cost / unit
+                </dt>
+                <dd className="text-xs font-semibold tabular-nums">
+                  {money(totals.perUnit)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                  Batch
+                </dt>
+                <dd className="text-xs font-semibold tabular-nums">
+                  {batchQty(activeFg)} {activeFg.unit ?? "pcs"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                  Sales price
+                </dt>
+                <dd className="text-sm font-bold tabular-nums text-primary">
+                  {money(totals.grand)}
+                </dd>
+              </div>
+            </dl>
             {canEdit && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="rounded-lg"
+                className="h-7 shrink-0 rounded-lg text-xs"
                 onClick={() => onEditFg(activeFg)}
               >
-                Edit details
+                <Pencil className="size-3" />
+                Edit
               </Button>
             )}
           </div>
@@ -764,114 +799,122 @@ export default function CostingPanel({
             </div>
           )}
 
-          {/* add-row bars */}
-          <div className={cn("mt-3 grid gap-2 md:grid-cols-2", !canCreate && "hidden")}>
-            <div className="rounded-xl border bg-card p-3 shadow-sm">
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                <Package className="size-3.5" />
-                Add raw material
-              </p>
-              <div className="flex gap-1.5">
-                <select
-                  value={addingMaterialId}
-                  onChange={(e) => {
-                    // the last option opens the create dialog instead of
-                    // selecting a material
-                    if (e.target.value === NEW_MATERIAL) {
-                      setCreateMaterialKey((k) => k + 1);
-                      setCreateMaterialOpen(true);
-                      return;
-                    }
-                    setAddingMaterialId(e.target.value);
-                  }}
-                  className="min-w-0 flex-1 rounded-lg border bg-card px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">Choose material…</option>
-                  {materials.map((m) => (
-                    <option key={m._id} value={m._id}>
-                      {m.code ? `${m.code} · ` : ""}
-                      {m.name}
-                      {m.category ? ` [${m.category}]` : ""} ({money(m.pricePerUnit)}/{m.unit})
-                    </option>
-                  ))}
-                  <option value={NEW_MATERIAL}>+ Create new material…</option>
-                </select>
-                <Input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={materialQty}
-                  onChange={(e) => setMaterialQty(e.target.value)}
-                  className="h-9 w-20 rounded-lg text-sm"
-                  aria-label="Quantity"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-9 rounded-lg"
-                  disabled={!addingMaterialId || items === undefined}
-                  onClick={addMaterialRowGuarded}
-                >
-                  <Plus className="size-3.5" />
-                </Button>
-              </div>
+          {/* add-row bar: both kinds of line on one compact row */}
+          {canCreate && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border bg-card px-2.5 py-2 shadow-sm">
+              <span
+                className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+                title="Add a raw material from the master price list"
+              >
+                <Package className="size-3" />
+                Material
+              </span>
+              <select
+                value={addingMaterialId}
+                onChange={(e) => {
+                  // the last option opens the create dialog instead of
+                  // selecting a material
+                  if (e.target.value === NEW_MATERIAL) {
+                    setCreateMaterialKey((k) => k + 1);
+                    setCreateMaterialOpen(true);
+                    return;
+                  }
+                  setAddingMaterialId(e.target.value);
+                }}
+                aria-label="Choose a raw material"
+                className="h-7 min-w-0 flex-1 rounded-lg border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">Choose material…</option>
+                {materials.map((m) => (
+                  <option key={m._id} value={m._id}>
+                    {m.code ? `${m.code} · ` : ""}
+                    {m.name}
+                    {m.category ? ` [${m.category}]` : ""} ({money(m.pricePerUnit)}/{m.unit})
+                  </option>
+                ))}
+                <option value={NEW_MATERIAL}>+ Create new material…</option>
+              </select>
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={materialQty}
+                onChange={(e) => setMaterialQty(e.target.value)}
+                aria-label="Material quantity"
+                className="h-7 w-16 rounded-lg text-xs"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="size-7 shrink-0 rounded-lg"
+                disabled={!addingMaterialId || items === undefined}
+                onClick={addMaterialRowGuarded}
+                title="Add this material to the sheet"
+              >
+                <Plus className="size-3.5" />
+              </Button>
+
+              <span className="mx-1 h-4 w-px bg-border" />
+
+              <span
+                className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+                title="Add labour, transport, packaging or any other cost"
+              >
+                <Plus className="size-3" />
+                Custom
+              </span>
+              <Input
+                value={customLabel}
+                onChange={(e) => setCustomLabel(e.target.value)}
+                placeholder="e.g. Labor, Transport…"
+                aria-label="Custom line label"
+                className="h-7 w-36 rounded-lg text-xs"
+              />
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={customQty}
+                onChange={(e) => setCustomQty(e.target.value)}
+                aria-label="Custom line quantity"
+                className="h-7 w-14 rounded-lg text-xs"
+              />
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={customPrice}
+                onChange={(e) => setCustomPrice(e.target.value)}
+                aria-label="Custom line unit price"
+                className="h-7 w-16 rounded-lg text-xs"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="size-7 shrink-0 rounded-lg"
+                disabled={items === undefined}
+                onClick={() => guardProduction("Adding a custom line", () => void addCustomRow())}
+                title="Add this custom line to the sheet"
+              >
+                <Plus className="size-3.5" />
+              </Button>
+
               {materials.length === 0 && (
                 <button
                   type="button"
                   onClick={() => onSelectView({ kind: "materials" })}
-                  className="mt-1.5 text-xs text-primary hover:underline"
+                  className="text-[11px] text-primary hover:underline"
                 >
-                  + Add raw materials first (open the Raw materials tab)
+                  + Add raw materials first
                 </button>
               )}
             </div>
-
-            <div className="rounded-xl border bg-card p-3 shadow-sm">
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                <Plus className="size-3.5" />
-                Add custom line
-              </p>
-              <div className="flex gap-1.5">
-                <Input
-                  value={customLabel}
-                  onChange={(e) => setCustomLabel(e.target.value)}
-                  placeholder="e.g. Labor, Transport…"
-                  className="h-9 min-w-0 flex-1 rounded-lg text-sm"
-                />
-                <Input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={customQty}
-                  onChange={(e) => setCustomQty(e.target.value)}
-                  className="h-9 w-16 rounded-lg text-sm"
-                  aria-label="Quantity"
-                />
-                <Input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={customPrice}
-                  onChange={(e) => setCustomPrice(e.target.value)}
-                  className="h-9 w-20 rounded-lg text-sm"
-                  aria-label="Unit price"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-9 rounded-lg"
-                  disabled={items === undefined}
-                  onClick={() => guardProduction("Adding a custom line", () => void addCustomRow())}
-                >
-                  <Plus className="size-3.5" />
-                </Button>
-              </div>
-            </div>
-          </div>
+          )}
 
           {/* the spreadsheet */}
-          <section className="mt-4 overflow-hidden rounded-2xl border bg-card shadow-sm">
+          <section className="mt-2.5 overflow-hidden rounded-2xl border bg-card shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
@@ -905,7 +948,37 @@ export default function CostingPanel({
                         <td className="px-3 py-1 text-xs text-muted-foreground tabular-nums">
                           {i + 1}
                         </td>
-                        <td className="px-3 py-2 font-medium">{row.label}</td>
+                        <td className="px-3 py-1.5">
+                          <span className="font-medium">{row.label}</span>
+                          {row.materialId !== undefined
+                            ? (() => {
+                                const m = materials.find((x) => x._id === row.materialId);
+                                if (m === undefined) return null;
+                                const need =
+                                  (drafts.find((d) => d.id === row._id)?.qty ?? row.qty) *
+                                  batchQty(activeFg);
+                                const short = (m.stock ?? 0) < need;
+                                return (
+                                  <span
+                                    className={cn(
+                                      "ml-1.5 inline-flex items-center gap-0.5 text-[10px] tabular-nums",
+                                      short
+                                        ? "text-amber-600 dark:text-amber-400"
+                                        : "text-muted-foreground/70",
+                                    )}
+                                    title={
+                                      short
+                                        ? `Only ${(m.stock ?? 0).toLocaleString()} ${m.unit} on hand — this batch needs ${need.toLocaleString()}`
+                                        : `${(m.stock ?? 0).toLocaleString()} ${m.unit} on hand`
+                                    }
+                                  >
+                                    {short && <AlertTriangle className="size-2.5" />}
+                                    {(m.stock ?? 0).toLocaleString()} {m.unit} on hand
+                                  </span>
+                                );
+                              })()
+                            : null}
+                        </td>
                         <td className="px-1 py-1">
                           <input
                             type="number"
@@ -919,7 +992,7 @@ export default function CostingPanel({
                             aria-label="Quantity"
                           />
                         </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{row.unit ?? "—"}</td>
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground">{row.unit ?? "—"}</td>
                         <td className="px-1 py-1">
                           <span className="block px-2 py-1.5 text-right tabular-nums">
                             {money(row.unitPrice)}
@@ -931,8 +1004,36 @@ export default function CostingPanel({
                               (drafts.find((d) => d.id === row._id)?.unitPrice ?? row.unitPrice),
                           )}
                         </td>
-                        <td className="px-2 py-1 text-center">
-                          <span className="hidden gap-0.5 group-hover/row:inline-flex">
+                        <td className="px-2 py-1 text-right">
+                          <span
+                            className="hidden items-center gap-0.5 group-hover/row:inline-flex"
+                            aria-label={`Actions for ${row.label}`}
+                          >
+                            {canCreate && (
+                              <button
+                                type="button"
+                                aria-label={`Duplicate ${row.label}`}
+                                title="Duplicate this line"
+                                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
+                                onClick={() =>
+                                  guardProduction("Duplicating a line", () =>
+                                    void addFgItem({
+                                      fgId: activeFg._id,
+                                      label: `${row.label} (copy)`,
+                                      qty: row.qty,
+                                      unitPrice: row.unitPrice,
+                                      ...(row.materialId !== undefined
+                                        ? { materialId: row.materialId }
+                                        : {}),
+                                    }).catch(() =>
+                                      toast.error("Couldn't duplicate the line."),
+                                    ),
+                                  )
+                                }
+                              >
+                                <Copy className="size-3" />
+                              </button>
+                            )}
                             {canEdit && (
                               <button
                                 type="button"
@@ -968,15 +1069,18 @@ export default function CostingPanel({
                 {rows.length > 0 && (
                   <tfoot>
                     <tr className="border-t border-border/70 bg-muted/30">
-                      <td colSpan={4} className="px-3 py-2 text-right text-xs text-muted-foreground">
+                      <td colSpan={4} className="px-3 py-1.5 text-right text-xs text-muted-foreground">
                         Subtotal
+                        <span className="ml-1.5 text-[10px] opacity-70">
+                          ({rows.length} line{rows.length === 1 ? "" : "s"})
+                        </span>
                       </td>
-                      <td colSpan={3} className="px-3 py-2 text-right font-medium tabular-nums">
+                      <td colSpan={3} className="px-3 py-1.5 text-right font-medium tabular-nums">
                         {money(totals.subtotal)}
                       </td>
                     </tr>
                     <tr className="bg-muted/30">
-                      <td colSpan={4} className="px-3 py-2 text-right text-xs text-muted-foreground">
+                      <td colSpan={4} className="px-3 py-1.5 text-right text-xs text-muted-foreground">
                         <span className="inline-flex items-center gap-1">
                           Margin
                           <input
@@ -992,18 +1096,26 @@ export default function CostingPanel({
                                 );
                               }
                             }}
-                            className="w-14 rounded border bg-card px-1.5 py-0.5 text-right text-xs tabular-nums outline-none focus:ring-2 focus:ring-primary/30"
+                            className="h-6 w-12 rounded border bg-card px-1 text-right text-xs tabular-nums outline-none focus:ring-2 focus:ring-primary/30"
                             aria-label="Margin percent"
                           />
                           %
                         </span>
                       </td>
-                      <td colSpan={3} className="px-3 py-2 text-right font-medium tabular-nums">
+                      <td colSpan={3} className="px-3 py-1.5 text-right font-medium tabular-nums">
                         +{money(totals.markup)}
                       </td>
                     </tr>
+                    <tr className="bg-muted/30">
+                      <td colSpan={4} className="px-3 py-1.5 text-right text-xs text-muted-foreground">
+                        Cost per unit
+                      </td>
+                      <td colSpan={3} className="px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground">
+                        {money(totals.perUnit)} / {activeFg.unit ?? "pcs"}
+                      </td>
+                    </tr>
                     <tr className="border-t border-border/70 bg-primary/5">
-                      <td colSpan={4} className="px-3 py-2.5 text-right text-sm font-semibold">
+                      <td colSpan={4} className="px-3 py-2 text-right text-sm font-semibold">
                         <span className="inline-flex items-center gap-1.5">
                           <Sigma className="size-3.5 text-primary" />
                           Sales price
@@ -1011,9 +1123,12 @@ export default function CostingPanel({
                       </td>
                       <td
                         colSpan={3}
-                        className="px-3 py-2.5 text-right font-display text-base font-bold tabular-nums text-primary"
+                        className="px-3 py-2 text-right font-display text-base font-bold tabular-nums text-primary"
                       >
                         {money(totals.grand)}
+                        <span className="ml-1.5 text-[10px] font-medium text-muted-foreground">
+                          ({money(totals.salesPerUnit)} / {activeFg.unit ?? "pcs"})
+                        </span>
                       </td>
                     </tr>
                   </tfoot>
@@ -1023,10 +1138,10 @@ export default function CostingPanel({
           </section>
 
           {rows.length > 0 && (
-            <div className="mt-3 flex items-center justify-end gap-2">
+            <div className="mt-2 flex items-center justify-end gap-1.5">
               <span
                 className={cn(
-                  "text-xs transition-opacity",
+                  "mr-auto pl-1 text-[11px] transition-opacity",
                   isDirty ? "text-amber-600" : "text-muted-foreground/60 opacity-0",
                 )}
               >
@@ -1035,10 +1150,11 @@ export default function CostingPanel({
               <Button
                 type="button"
                 size="sm"
-                className={cn("rounded-lg", isDirty && "animate-pulse")}
+                variant="outline"
                 disabled={!isDirty || savingSheet}
                 onClick={() => void saveSheet()}
                 title="Save all sheet edits (Ctrl/Cmd+S)"
+                className={cn("h-7 gap-1.5 rounded-lg text-xs", isDirty && "animate-pulse")}
               >
                 {savingSheet ? (
                   <Loader2 className="size-3.5 animate-spin" />
@@ -1047,9 +1163,16 @@ export default function CostingPanel({
                 )}
                 {isDirty ? "Save" : "Saved"}
               </Button>
-              <Button type="button" variant="outline" size="sm" className="rounded-lg" onClick={exportCsv}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 rounded-lg text-xs"
+                onClick={exportCsv}
+                title="Export this sheet as CSV"
+              >
                 <Download className="size-3.5" />
-                Export CSV
+                CSV
               </Button>
               {canPrint && (
               <DropdownMenu>
@@ -1058,10 +1181,10 @@ export default function CostingPanel({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="rounded-lg"
+                    className="h-7 gap-1.5 rounded-lg text-xs"
                     title="Print this sheet"
                   >
-                    <Printer className="size-3.5" />
+                    <Printer className="size-3" />
                     Print
                     <ChevronDown className="size-3 opacity-60" />
                   </Button>
