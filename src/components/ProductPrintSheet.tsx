@@ -126,8 +126,8 @@ export default function ProductPrintSheet({
     <table className="w-full border-collapse">
       <thead>
         <tr className="bg-black/[0.06]">
-          <th className={`${cell} w-[70px]`}>Code</th>
           <th className={cell}>Product</th>
+          <th className={`${cell} w-[70px]`}>Code</th>
           <th className={`${cell} w-[110px]`}>Job</th>
           <th className={`${cell} w-[90px]`}>Status</th>
           <th className={`${cell} w-[95px]`}>{finished ? "Finished on" : "Due"}</th>
@@ -142,13 +142,13 @@ export default function ProductPrintSheet({
           const took = finished ? tookDays(row) : null;
           return (
             <tr key={row.fg._id}>
-              <td className={cell}>{row.fg.code ?? "—"}</td>
               <td className={cell}>
                 {row.fg.name}
                 {row.fg.category && (
                   <span className="ml-1 text-[10px] opacity-70">{row.fg.category}</span>
                 )}
               </td>
+              <td className={cell}>{row.fg.code ?? "—"}</td>
               <td className={cell}>{row.jobName}</td>
               <td className={cell}>{row.status}</td>
               <td className={cell}>

@@ -696,20 +696,6 @@ export default function ProductForm({
                         </span>
                       </td>
                       <td className="px-3 py-1.5">
-                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          {f.jobId !== undefined ? (
-                            <>
-                              <Briefcase className="size-3 shrink-0 text-sky-500/80" />
-                              <span className="truncate">
-                                {jobNameOf(f.jobId) ?? "—"}
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-muted-foreground/50">—</span>
-                          )}
-                        </span>
-                      </td>
-                      <td className="px-3 py-1.5">
                         <button
                           type="button"
                           onClick={() => onSelectFg(f._id)}
@@ -738,6 +724,20 @@ export default function ProductForm({
                             )}
                           </span>
                         </button>
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          {f.jobId !== undefined ? (
+                            <>
+                              <Briefcase className="size-3 shrink-0 text-sky-500/80" />
+                              <span className="truncate">
+                                {jobNameOf(f.jobId) ?? "—"}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground/50">—</span>
+                          )}
+                        </span>
                       </td>
                       <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
                         {f.code || "—"}
