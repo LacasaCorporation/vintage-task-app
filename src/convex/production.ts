@@ -11,12 +11,16 @@ import {
   middleProjectStatus,
   projectStatusesOrDefaults,
 } from "../lib/project-statuses";
+import { batchQty } from "../lib/product-cost";
 
 /**
  * Re-read a product's costing sheet and move the raw-material stock to match.
  * Used whenever a sheet line is added, edited or deleted while the product is
  * in production, so the running run always reflects the sheet. Stock is
  * allowed to go negative: a shortage is a real state the user needs to see.
+ *
+ * The sheet prices ONE product, so a batch of three needs three times the
+ * material: the quantities are multiplied by the product's own quantity.
  */
 export async function syncProductionConsumption(
   ctx: MutationCtx,
@@ -27,10 +31,14 @@ export async function syncProductionConsumption(
     .query("costingItems")
     .withIndex("by_fg", (q) => q.eq("fgId", fg._id))
     .collect();
+  const make = batchQty(fg);
   const next = new Map<Id<"rawMaterials">, number>();
   for (const line of lines) {
     if (line.materialId === undefined) continue;
-    next.set(line.materialId, (next.get(line.materialId) ?? 0) + (line.qty || 0));
+    next.set(
+      line.materialId,
+      (next.get(line.materialId) ?? 0) + (line.qty || 0) * make,
+    );
   }
 
   // put back everything the previous run took out
@@ -92,11 +100,13 @@ export const start = mutation({
       .collect();
 
     const needed = new Map<Id<"rawMaterials">, number>();
+    // the sheet covers one product, so the whole batch is produced from it
+    const make = batchQty(fg);
     for (const line of lines) {
       if (line.materialId === undefined) continue;
       needed.set(
         line.materialId,
-        (needed.get(line.materialId) ?? 0) + (line.qty || 0),
+        (needed.get(line.materialId) ?? 0) + (line.qty || 0) * make,
       );
     }
 

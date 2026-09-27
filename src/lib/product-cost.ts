@@ -1,4 +1,5 @@
-import type { Doc, Id } from "@/convex/_generated/dataModel";
+// a relative path so Convex can import this module too
+import type { Doc, Id } from "../convex/_generated/dataModel";
 
 /**
  * How many of a product a costing sheet covers. A product with no quantity
