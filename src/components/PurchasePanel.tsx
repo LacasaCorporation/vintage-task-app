@@ -248,7 +248,7 @@ export default function PurchasePanel({
       {/* ── Header: the tabs stay put; the bill form has no tab of its own ── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
-          {tabBtn("list", `Purchase list (${bills?.length ?? 0})`, List)}
+          {tabBtn("list", `Bills (${bills?.length ?? 0})`, List)}
           {tabBtn("lpo", `LPO (${lpos?.filter((l) => l.status !== "cancelled").length ?? 0})`, ClipboardList)}
           {tabBtn("expenses", `Expenses (${expenses?.length ?? 0})`, Wallet)}
           {tabBtn("vendors", `Vendors (${vendors?.length ?? 0})`, Store)}
@@ -320,7 +320,7 @@ export default function PurchasePanel({
         />
       )}
 
-      {/* ── Purchase list ───────────────────────────────────────────── */}
+      {/* ── Bills ────────────────────────────────────────────────────── */}
       {tab === "list" && viewed !== null && (
         <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 bg-muted/30 px-5 py-4">
@@ -479,7 +479,7 @@ export default function PurchasePanel({
       {tab === "list" && viewed === null && (
         <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
           <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
-            <h2 className="text-sm font-semibold">Purchase list</h2>
+            <h2 className="text-sm font-semibold">Bills</h2>
             <span className="text-xs text-muted-foreground tabular-nums">
               {money((bills ?? []).reduce((sum, b) => sum + b.total, 0))} total
             </span>
