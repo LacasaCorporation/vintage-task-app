@@ -217,7 +217,11 @@ export function FlaggedItemsList({
   statusFilter?: FlagStatusFilter;
   projectStatuses?: string[];
   productsOnly?: boolean;
-  /** Jobs filter: only the job rows, without the trailing standalone products. */
+  /**
+   * Jobs filter: each job line with its product lines under it, with no
+   * project header — the project tree belongs to the Projects filter. A job
+   * with no products has no line to work from, so it is left out.
+   */
   jobsOnly?: boolean;
   onToggleFg: (fg: FgDoc) => void;
   onToggleJob: (job: JobDoc) => void;
@@ -246,13 +250,22 @@ export function FlaggedItemsList({
     });
   const visibleJobs = productsOnly
     ? []
-    : sortJobs(data.jobs, sortMode).filter((job) =>
-        matchesStatusFilter(
-          statusFilter ?? "all",
-          jobProjectStatus(job, projectStatuses),
-          job.status === "completed",
-        ),
-      );
+    : sortJobs(data.jobs, sortMode).filter((job) => {
+        if (
+          !matchesStatusFilter(
+            statusFilter ?? "all",
+            jobProjectStatus(job, projectStatuses),
+            job.status === "completed",
+          )
+        )
+          return false;
+        if (!jobsOnly) return true;
+        // the Jobs filter is a production checklist: a job with nothing to
+        // make has no line to show
+        return allFgs.some(
+          (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
+        );
+      });
 
   return (
     <ul className="divide-y divide-border/70">
@@ -260,6 +273,7 @@ export function FlaggedItemsList({
       {visibleJobs.map((job, jobIndex) => {
         const project = data.projects.find((item) => item._id === job.projectId);
         const isFirstJobForProject =
+          !jobsOnly &&
           visibleJobs.findIndex((item) => item.projectId === job.projectId) === jobIndex;
         const jobProducts = allFgs
           .filter((f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id))
@@ -309,7 +323,9 @@ export function FlaggedItemsList({
             )}
             <div
               className={cn(
-                "ml-4 flex flex-wrap items-center gap-2 border-l border-border/60 pl-3",
+                "flex flex-wrap items-center gap-2",
+                // indented under the project header; flush when there is none
+                !jobsOnly && "ml-4 border-l border-border/60 pl-3",
                 projectCollapsed && "hidden",
               )}
             >
@@ -456,6 +472,16 @@ export function FlaggedItemsList({
           </li>
         );
       })}
+      {visibleJobs.length === 0 && jobsOnly && (
+        <li className="px-6 py-10 text-center">
+          <Briefcase className="mx-auto size-7 text-muted-foreground/40" />
+          <p className="mt-2 text-sm font-medium">No jobs with products</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            This filter lists each job together with the products it has to
+            make. Add a product to a job and it shows up here.
+          </p>
+        </li>
+      )}
       {/* flagged products whose job is not flagged: job shown as main, product as the completable subtask */}
       {!jobsOnly && sortFgs(
         data.fgs

@@ -59,7 +59,9 @@ export const VIEWS_BY_FILTER: Record<string, { view: WorkspaceView; label: strin
 
 /** Which view a level filter falls back to when the current one isn't offered. */
 export const DEFAULT_VIEW_BY_FILTER: Record<string, WorkspaceView> = {
-  projects: "list",
+  // the project → job → product tree is the Projects view; the Jobs filter
+  // shows each job with its own product lines, so the tree lives here
+  projects: "hierarchy",
   jobs: "hierarchy",
   products: "list",
 };
@@ -496,12 +498,16 @@ export function JobFlatList({
     configuredProjectStatuses ?? configuredStatusesQuery,
   );
 
-  const rows = sortJobs(allJobs, sortMode).filter((job) =>
-    matchesStatusFilter(
-      statusFilter ?? "all",
-      jobProjectStatus(job, projectStatuses),
-      job.status === "completed",
-    ),
+  const rows = sortJobs(allJobs, sortMode).filter(
+    (job) =>
+      matchesStatusFilter(
+        statusFilter ?? "all",
+        jobProjectStatus(job, projectStatuses),
+        job.status === "completed",
+      ) &&
+      // the Jobs filter lists what has to be made, so a job with no products
+      // has no line to show
+      productsOfJob(allFgs, job._id).length > 0,
   );
 
   if (rows.length === 0) {
@@ -509,11 +515,13 @@ export function JobFlatList({
       <div className="px-6 py-10 text-center">
         <Briefcase className="mx-auto size-7 text-muted-foreground/40" />
         <p className="mt-2 text-sm font-medium">
-          {statusFilter === "all" ? "No jobs yet" : "No jobs in this status"}
+          {statusFilter === "all"
+            ? "No jobs with products"
+            : "No jobs in this status"}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           {statusFilter === "all"
-            ? "Flag a job in the Projects page and it will show up here."
+            ? "This filter lists each job together with the products it has to make. Add a product to a job and it shows up here."
             : "Choose another status filter to see more jobs."}
         </p>
       </div>
