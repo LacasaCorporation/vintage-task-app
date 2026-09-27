@@ -262,17 +262,32 @@ export default function TasksPanel({
 
   const activeList = lists.find((l) => l._id === activeView) ?? null;
 
+  /**
+   * The Flagged view is driven entirely by the flags: a job or product whose
+   * flag was taken off on the Projects page drops out of this page too, and
+   * comes back only when the flag goes on again. The queries return the full
+   * lists, so the filtering happens here.
+   */
+  const onlyFlaggedJobs = useMemo(
+    () => (flaggedJobs ?? []).filter((j) => j.isFlagged),
+    [flaggedJobs],
+  );
+  const onlyFlaggedFgs = useMemo(
+    () => (flaggedFgs ?? []).filter((f) => f.isFlagged),
+    [flaggedFgs],
+  );
+
   /** Flagged jobs (with their project) and flagged products. */
   const flaggedItems = useMemo<FlaggedData | null>(() => {
-    const jobs = (flaggedJobs ?? []).filter((j) => j.isFlagged);
-    const fgs = (flaggedFgs ?? []).filter((f) => f.isFlagged);
+    const jobs = onlyFlaggedJobs;
+    const fgs = onlyFlaggedFgs;
     if (jobs.length === 0 && fgs.length === 0) return null;
     const projectNameOf = (job: JobDoc): string => {
       const project = (flaggedProjects ?? []).find((p) => p._id === job.projectId);
       return project?.name ?? "Project";
     };
     return { jobs, fgs, projects: flaggedProjects ?? [], projectNameOf };
-  }, [flaggedJobs, flaggedFgs, flaggedProjects]);
+  }, [onlyFlaggedJobs, onlyFlaggedFgs, flaggedProjects]);
 
   const handleAdd = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -393,7 +408,8 @@ export default function TasksPanel({
    * (its flag shows green in the project list); unchecking reopens it.
    */
   const handleToggleFlaggedJob = async (job: JobDoc) => {
-    const products = (flaggedFgs ?? []).filter(
+    // only the products that are actually on this page count towards it
+    const products = onlyFlaggedFgs.filter(
       (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
     );
     const allDone = products.length > 0 && products.every((f) => f.isCompleted);
@@ -549,8 +565,8 @@ export default function TasksPanel({
         <ProjectsWorkspace
           canEdit={canEdit}
           projects={flaggedProjects}
-          jobs={flaggedJobs}
-          fgs={flaggedFgs}
+          jobs={onlyFlaggedJobs}
+          fgs={onlyFlaggedFgs}
           items={flaggedItems}
           filter={flagFilter}
           onFilterChange={(next) => {
