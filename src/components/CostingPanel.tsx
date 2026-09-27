@@ -11,6 +11,7 @@ import type { CostingView } from "@/components/CostingSidebar";
 import PurchasePanel from "@/components/PurchasePanel";
 import SalesPanel from "@/components/SalesPanel";
 import AccountingPanel from "@/components/AccountingPanel";
+import ReportsPanel from "@/components/ReportsPanel";
 import {
   ChevronDown,
   ChevronRight,
@@ -701,6 +702,8 @@ export default function CostingPanel({
           tab={view.tab}
           onTabChange={(tab) => onSelectView({ kind: "accounting", tab })}
         />
+      ) : view?.kind === "reports" && canViewAccounting ? (
+        <ReportsPanel />
       ) : view?.kind === "materials" && canViewMaterials ? (
         <div className="mt-4">
           <MaterialsSheet

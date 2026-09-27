@@ -4,6 +4,7 @@ import {
   Boxes,
   CheckSquare,
   ChevronDown,
+  FileBarChart,
   Folder,
   Layers,
   NotebookPen,
@@ -258,6 +259,16 @@ export default function PrimaryNav({
             </div>
           )}
         </div>
+      )}
+
+      {/* reports: what the whole set of books says, read four ways */}
+      {canViewAccounting && (
+        <NavRow
+          label="Reports"
+          Icon={FileBarChart}
+          active={inCosting && view?.kind === "reports"}
+          onClick={() => onSelectView({ kind: "reports" })}
+        />
       )}
 
       {/* inventory: what you stock and what you sell, as one collapsible group */}
