@@ -448,6 +448,7 @@ const schema = defineSchema(
       jobIds: v.optional(v.array(v.id("projectJobs"))),
       name: v.string(), // FG product name, e.g. "Wooden chair"
       code: v.optional(v.string()), // product code / SKU, auto e.g. FG0001
+      qty: v.optional(v.number()), // how many are being made, e.g. 12
       unit: v.optional(v.string()), // sold per: pcs, box, set…
       category: v.optional(v.string()), // managed master value
       subCategory: v.optional(v.string()), // managed master value

@@ -6,6 +6,7 @@ import {
   Check,
   FileText,
   Flag,
+  Hash,
   ListTodo,
   Loader2,
   Package,
@@ -416,6 +417,25 @@ export default function ProductDetailPanel({
                   </option>
                 ))}
               </select>
+            </Row>
+
+            {/* qty, shown next to the name in every product row */}
+            <Row icon={Hash} label="Qty" locked={!mayEdit}>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={fg.qty ?? ""}
+                disabled={!mayEdit}
+                onChange={(e) =>
+                  patch({
+                    qty:
+                      e.target.value.trim() === "" ? undefined : Number(e.target.value),
+                  })
+                }
+                placeholder="e.g. 12"
+                className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
             </Row>
 
             {/* unit */}

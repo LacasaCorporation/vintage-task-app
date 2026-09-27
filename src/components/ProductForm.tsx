@@ -114,6 +114,7 @@ export default function ProductForm({
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [unit, setUnit] = useState("");
+  const [qty, setQty] = useState("");
   const [category, setCategory] = useState("");
   const [subCategory, setSubCategory] = useState("");
   const [note, setNote] = useState("");
@@ -224,6 +225,7 @@ export default function ProductForm({
         jobId: jobId !== "" ? (jobId as Id<"projectJobs">) : undefined,
         name: cleanName,
         code: code.trim() || undefined,
+        qty: Number.isFinite(Number(qty)) && Number(qty) > 0 ? Number(qty) : undefined,
         unit: unit.trim() || undefined,
         category: category.trim() || undefined,
         subCategory: subCategory.trim() || undefined,
@@ -414,6 +416,18 @@ export default function ProductForm({
                           </option>
                         ))}
                       </select>
+                    </Field>
+                    <Field label="Qty" hint="Shown next to the name in every product row">
+                      <Input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={qty}
+                        onChange={(e) => setQty(e.target.value)}
+                        placeholder="e.g. 12"
+                        aria-label="Product quantity"
+                        className={inputCls}
+                      />
                     </Field>
                   </div>
                   {project === NEW_PROJECT && (

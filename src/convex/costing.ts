@@ -730,6 +730,7 @@ export const addFinishedGood = mutation({
     jobIds: v.optional(v.array(v.id("projectJobs"))), // several jobs at once
     name: v.string(),
     code: v.optional(v.string()),
+    qty: v.optional(v.number()),
     unit: v.optional(v.string()),
     category: v.optional(v.string()),
     subCategory: v.optional(v.string()),
@@ -790,6 +791,7 @@ export const addFinishedGood = mutation({
       jobIds: jobList.length > 0 ? jobList : undefined,
       name: cleanName.slice(0, MAX_NAME_LENGTH),
       code: opts.code?.trim() || fgCode,
+      qty: opts.qty !== undefined && opts.qty > 0 ? opts.qty : undefined,
       unit: opts.unit?.trim() || undefined,
       category: opts.category?.trim() || undefined,
       subCategory: opts.subCategory?.trim() || undefined,
@@ -812,6 +814,7 @@ export const updateFinishedGood = mutation({
     jobIds: v.optional(v.array(v.id("projectJobs"))),
     name: v.optional(v.string()),
     code: v.optional(v.string()),
+    qty: v.optional(v.number()),
     unit: v.optional(v.string()),
     category: v.optional(v.string()),
     subCategory: v.optional(v.string()),
@@ -871,6 +874,10 @@ export const updateFinishedGood = mutation({
       patch.jobId = unique[0];
     }
     if (patch.code !== undefined) patch.code = patch.code.trim() || undefined;
+    if (patch.qty !== undefined) {
+      if (patch.qty < 0) throw new Error("Quantity can't be negative.");
+      patch.qty = patch.qty > 0 ? patch.qty : undefined;
+    }
     if (patch.unit !== undefined) patch.unit = patch.unit.trim() || undefined;
     if (patch.category !== undefined)
       patch.category = patch.category.trim() || undefined;

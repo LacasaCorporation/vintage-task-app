@@ -1,6 +1,7 @@
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
+import ProductQtyInline from "@/components/ProductQtyInline";
 import StatusSelect from "@/components/StatusSelect";
 import AssigneeChip from "@/components/AssigneeChip";
 import { assigneesOfTask } from "@/lib/task-people";
@@ -399,11 +400,12 @@ export function FlaggedItemsList({
                       type="button"
                       onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
                       className={cn(
-                        "min-w-0 flex-1 cursor-pointer truncate text-left",
+                        "flex min-w-0 flex-1 cursor-pointer items-baseline gap-1.5 text-left",
                         fg.isCompleted && "text-muted-foreground line-through",
                       )}
                     >
-                      {fg.name}
+                      <span className="min-w-0 truncate">{fg.name}</span>
+                      <ProductQtyInline qty={fg.qty} unit={fg.unit} />
                     </button>
                     <Package className="size-3 shrink-0 text-sky-500/70" />
                     {fg.code && (
@@ -766,11 +768,12 @@ export function FlaggedProductsList({
             type="button"
             onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
             className={cn(
-              "min-w-0 flex-1 cursor-pointer truncate text-left font-medium",
+              "flex min-w-0 flex-1 cursor-pointer items-baseline gap-1.5 text-left font-medium",
               fg.isCompleted && "text-muted-foreground line-through",
             )}
           >
-            {fg.name}
+            <span className="min-w-0 truncate">{fg.name}</span>
+            <ProductQtyInline qty={fg.qty} unit={fg.unit} />
           </button>
           <Flag
             className={cn(
@@ -992,11 +995,16 @@ function BoardCardView({
         >
           <p
             className={cn(
-              "truncate text-sm font-medium leading-snug",
+              "flex items-baseline gap-1.5 overflow-hidden text-sm font-medium leading-snug",
               done && "text-muted-foreground line-through",
             )}
           >
-            {card.fg.name}
+            <span className="min-w-0 truncate">{card.fg.name}</span>
+            <ProductQtyInline
+              qty={card.fg.qty}
+              unit={card.fg.unit}
+              className="text-[10px]"
+            />
           </p>
           <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-muted-foreground">
             <Package className="size-2.5 text-violet-500/80" />

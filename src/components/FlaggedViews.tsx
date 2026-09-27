@@ -1,5 +1,6 @@
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
+import ProductQtyInline from "@/components/ProductQtyInline";
 import StatusSelect from "@/components/StatusSelect";
 import {
   Briefcase,
@@ -408,11 +409,12 @@ function JobRow({
                 type="button"
                 onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
                 className={cn(
-                  "min-w-0 flex-1 cursor-pointer truncate text-left",
+                  "flex min-w-0 flex-1 cursor-pointer items-baseline gap-1.5 text-left",
                   fg.isCompleted && "text-muted-foreground line-through",
                 )}
               >
-                {fg.name}
+                <span className="min-w-0 truncate">{fg.name}</span>
+                <ProductQtyInline qty={fg.qty} unit={fg.unit} />
               </button>
               <Package className="size-3 shrink-0 text-sky-500/70" />
               {fg.code && (
