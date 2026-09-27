@@ -41,6 +41,7 @@ import {
   Repeat,
   Star,
   Trash2,
+  User,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -578,9 +579,28 @@ export default function TasksPanel({
         </button>
       </div>
 
-      {/* ── View / scope / sort / filter controls ───────────────────── */}
+      {/* ── Scope / view / sort controls ────────────────────────────── */}
       <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1.5">
         <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+          <button
+            type="button"
+            title={
+              taskScope === "mine"
+                ? "Only the tasks you own"
+                : "Switch back to your own tasks — currently showing everyone who reports to you"
+            }
+            onClick={() => onScopeChange("mine")}
+            className={cn(
+              "flex h-7 items-center gap-1.5 rounded-lg border px-2 font-medium transition-colors",
+              taskScope === "mine"
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border bg-card hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <User className="size-3.5 shrink-0" />
+            Mine
+          </button>
+          <span className="mx-1 h-4 w-px bg-border" />
           <span className="mr-1">View</span>
           {viewFilters.map(({ view, label, Icon, count, hint }) => {
             const active = activeView === view;
@@ -615,33 +635,6 @@ export default function TasksPanel({
               {activeList.name}
             </span>
           )}
-          <span className="mx-1 h-4 w-px bg-border" />
-          <span className="mr-1">Show</span>
-          {(
-            [
-              ["mine", "Mine", "Only the tasks you own"],
-              [
-                "all",
-                "ALL",
-                "Your tasks plus those of everyone who reports to you",
-              ],
-            ] as ["mine" | "all", string, string][]
-          ).map(([mode, label, hint]) => (
-            <button
-              key={mode}
-              type="button"
-              title={hint}
-              onClick={() => onScopeChange(mode)}
-              className={cn(
-                "h-7 rounded-lg border px-2 font-medium transition-colors",
-                taskScope === mode
-                  ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border bg-card hover:bg-accent hover:text-foreground",
-              )}
-            >
-              {label}
-            </button>
-          ))}
           <span className="mx-1 h-4 w-px bg-border" />
           <span className="mr-1">Sort</span>
           {(
