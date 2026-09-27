@@ -1212,11 +1212,18 @@ export default function ProjectsSheet({
                                     onClick={() => onOpenProduct?.(fg._id)}
                                   >
                                     <Package className="size-3 shrink-0 text-sky-500/80" />
-                                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-                                      <span className="min-w-0 truncate font-medium">
-                                        {fg.name}
+                                    <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                                      <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
+                                        <span className="min-w-0 truncate font-medium">
+                                          {fg.name}
+                                        </span>
+                                        <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                                       </span>
-                                      <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
+                                      {fg.note && (
+                                        <span className="w-full truncate text-[10px] text-muted-foreground/80">
+                                          {fg.note}
+                                        </span>
+                                      )}
                                     </span>
                                     {fg.code && (
                                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
@@ -1315,11 +1322,18 @@ export default function ProjectsSheet({
                             onClick={() => onOpenProduct?.(fg._id)}
                           >
                             <Package className="size-3 shrink-0 text-sky-500/80" />
-                            <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-                              <span className="min-w-0 truncate font-medium">
-                                {fg.name}
+                            <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                              <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
+                                <span className="min-w-0 truncate font-medium">
+                                  {fg.name}
+                                </span>
+                                <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                               </span>
-                              <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
+                              {fg.note && (
+                                <span className="w-full truncate text-[10px] text-muted-foreground/80">
+                                  {fg.note}
+                                </span>
+                              )}
                             </span>
                             {fg.code && (
                               <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">

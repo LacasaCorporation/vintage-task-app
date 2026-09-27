@@ -416,12 +416,19 @@ export function FlaggedItemsList({
                       type="button"
                       onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
                       className={cn(
-                        "flex min-w-0 flex-1 cursor-pointer items-baseline gap-1.5 text-left",
+                        "flex min-w-0 flex-1 cursor-pointer flex-col items-start gap-0.5 text-left",
                         fg.isCompleted && "text-muted-foreground line-through",
                       )}
                     >
-                      <span className="min-w-0 truncate">{fg.name}</span>
-                      <ProductQtyInline qty={fg.qty} unit={fg.unit} />
+                      <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
+                        <span className="min-w-0 truncate">{fg.name}</span>
+                        <ProductQtyInline qty={fg.qty} unit={fg.unit} />
+                      </span>
+                      {fg.note && (
+                        <span className="w-full truncate text-[10px] text-muted-foreground/80 line-through-0">
+                          {fg.note}
+                        </span>
+                      )}
                     </button>
                     {fg.code && (
                       <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
@@ -790,12 +797,19 @@ export function FlaggedProductsList({
             type="button"
             onClick={() => onSelect?.({ kind: "fg", id: fg._id })}
             className={cn(
-              "flex min-w-0 flex-1 cursor-pointer items-baseline gap-1.5 text-left font-medium",
+              "flex min-w-0 flex-1 cursor-pointer flex-col items-start gap-0.5 text-left font-medium",
               fg.isCompleted && "text-muted-foreground line-through",
             )}
           >
-            <span className="min-w-0 truncate">{fg.name}</span>
-            <ProductQtyInline qty={fg.qty} unit={fg.unit} />
+            <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
+              <span className="min-w-0 truncate">{fg.name}</span>
+              <ProductQtyInline qty={fg.qty} unit={fg.unit} />
+            </span>
+            {fg.note && (
+              <span className="w-full truncate text-[10px] font-normal text-muted-foreground/80 line-through-0">
+                {fg.note}
+              </span>
+            )}
           </button>
           <AssigneeChip
             userIds={assigneesOfTask(fg, rowPeopleById)}
