@@ -103,6 +103,8 @@ async function ledgerTotals(
     .collect();
   for (const m of moves) {
     if (m.materialId !== materialId) continue;
+    // a received purchase order is stock bought, same as a bill line
+    if (m.source === "lpo" && m.direction === "in") income += m.qty;
     // production is the only real consumer; a stop hands the same units back
     if (m.source === "production" && m.direction === "out") outgoing += m.qty;
     if (m.source === "production-return" && m.direction === "in") outgoing -= m.qty;
@@ -186,23 +188,24 @@ export const report = query({
     const byMaterial = new Map<
       Id<"rawMaterials">,
       {
+        lpoIncome: number;
         outgoing: number;
         movements: StockRow["movements"];
       }
     >();
     for (const m of allMovements) {
       const entry = byMaterial.get(m.materialId) ?? {
+        lpoIncome: 0,
         outgoing: 0,
         movements: [],
       };
+      // a received purchase order is stock bought, same as a bill line
+      if (m.source === "lpo" && m.direction === "in") entry.lpoIncome += m.qty;
       // only production consumes stock; corrections adjust the opening, and a
       // stopped run hands its units back, so neither belongs in "issued"
       if (m.source === "production" && m.direction === "out") {
         entry.outgoing += m.qty;
-      } else if (
-        m.source === "production-return" &&
-        m.direction === "in"
-      ) {
+      } else if (m.source === "production-return" && m.direction === "in") {
         entry.outgoing -= m.qty;
       }
       entry.movements.push({
@@ -220,7 +223,9 @@ export const report = query({
     const take = limit ?? 12;
     const rows: StockRow[] = materials.map((material) => {
       const entry = byMaterial.get(material._id);
-      const incomeQty = round(income.get(material._id) ?? 0);
+      const incomeQty = round(
+        (income.get(material._id) ?? 0) + (entry?.lpoIncome ?? 0),
+      );
       const outgoing = round(entry?.outgoing ?? 0);
       const balance = round(material.stock ?? 0);
       return {

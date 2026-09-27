@@ -396,6 +396,7 @@ const schema = defineSchema(
       direction: v.union(v.literal("in"), v.literal("out")),
       source: v.union(
         v.literal("purchase"),
+        v.literal("lpo"),
         v.literal("production"),
         v.literal("production-return"),
         v.literal("adjustment"),
@@ -405,6 +406,88 @@ const schema = defineSchema(
     })
       .index("by_owner", ["ownerId"])
       .index("by_material", ["materialId"]),
+
+    /**
+     * The same ledger for finished products: what production put on the shelf,
+     * what invoicing took off it, and what is left. `qty` is always positive;
+     * `direction` says which way it moved.
+     */
+    productMovements: defineTable({
+      ownerId: v.id("users"),
+      productId: v.id("finishedGoods"),
+      name: v.string(), // product name at the time of the movement
+      unit: v.string(),
+      qty: v.number(),
+      direction: v.union(v.literal("in"), v.literal("out")),
+      source: v.union(
+        v.literal("production"),
+        v.literal("sale"),
+        v.literal("sale-return"),
+        v.literal("adjustment"),
+      ),
+      ref: v.optional(v.string()), // invoice number or job name
+      at: v.number(), // ms
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_product", ["productId"]),
+
+    /**
+     * A local purchase order: what was asked of a vendor, before the bill
+     * arrives. Receiving one puts the quantities into stock, so an order is a
+     * real commitment rather than a note.
+     */
+    lpos: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // auto LPO0001, LPO0002, …
+      vendorId: v.optional(v.id("vendors")),
+      vendor: v.optional(v.string()),
+      orderedAt: v.number(), // ms
+      expectedAt: v.optional(v.number()), // ms
+      /** draft = not sent yet, ordered = with the vendor, received = in stock */
+      status: v.union(
+        v.literal("draft"),
+        v.literal("ordered"),
+        v.literal("received"),
+        v.literal("cancelled"),
+      ),
+      note: v.optional(v.string()),
+      lines: v.array(
+        v.object({
+          materialId: v.id("rawMaterials"),
+          name: v.string(),
+          unit: v.string(),
+          qty: v.number(),
+          unitCost: v.number(),
+        }),
+      ),
+      total: v.number(),
+      receivedAt: v.optional(v.number()),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_status", ["status"]),
+
+    /**
+     * Money spent that is not stock: transport, rent, wages, utilities. Each
+     * one is written to the ledger as a balanced journal entry, so the expense
+     * list and the accounts can never disagree.
+     */
+    expenses: defineTable({
+      ownerId: v.id("users"),
+      at: v.number(), // ms, when the money left
+      category: v.string(), // expense account name, e.g. "Rent"
+      description: v.optional(v.string()),
+      amount: v.number(), // always positive
+      paidFrom: v.optional(v.id("accounts")), // cash / bank account credited
+      vendorId: v.optional(v.id("vendors")),
+      vendor: v.optional(v.string()),
+      reference: v.optional(v.string()), // receipt or voucher number
+      note: v.optional(v.string()),
+      /** The journal entry this expense posted, so it can be traced back. */
+      entryId: v.optional(v.id("journalEntries")),
+      createdAt: v.number(), // ms
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_at", ["at"]),
 
     /** Suppliers / vendors that purchase bills can be raised against. */
     vendors: defineTable({
@@ -529,6 +612,11 @@ const schema = defineSchema(
        */
       /** Finished units on hand, ready to sell. */
       stock: v.optional(v.number()),
+      /**
+       * Units already on hand before any production or invoice was recorded —
+       * set from the Opening balance tab and kept as the authoritative figure.
+       */
+      opening: v.optional(v.number()),
       /** Units part-made right now: a run has started but not finished. */
       inProduction: v.optional(v.number()),
       /** Units in the run currently in progress; cleared when it ends. */

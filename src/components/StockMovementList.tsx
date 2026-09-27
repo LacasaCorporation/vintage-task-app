@@ -1,14 +1,7 @@
 import { ArrowDownLeft, ArrowUpRight } from "lucide-react";
-import type { StockRow } from "@/lib/stock-types";
+import type { LedgerRow } from "@/lib/stock-types";
+import { MATERIAL_SOURCE_LABEL } from "@/lib/stock-labels";
 import { cn } from "@/lib/utils";
-
-/** What each kind of movement is called in the list. */
-const SOURCE_LABEL = {
-  purchase: "Bought",
-  production: "Used in production",
-  "production-return": "Returned from production",
-  adjustment: "Stock correction",
-} as const;
 
 const qty = (n: number) =>
   Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, "");
@@ -23,14 +16,20 @@ const when = (at: number) => {
 };
 
 /**
- * Every income and outgoing transaction for one material, newest first, with
- * the arithmetic that ties them to the balance. This is the detail a raw
- * material row opens: what came in, what went out, and what is left.
+ * Every transaction for one row of a stock ledger, newest first, with the
+ * arithmetic that ties them to the balance. Raw materials and finished
+ * products share this panel; only the wording of each source differs.
  */
 export default function StockMovementList({
   row,
+  labels = MATERIAL_SOURCE_LABEL,
+  emptyLabel = "No movements recorded for this material yet.",
+  noun = "material",
 }: {
-  row: StockRow;
+  row: LedgerRow;
+  labels?: Record<string, string>;
+  emptyLabel?: string;
+  noun?: string;
 }) {
   return (
     <div className="border-t border-border/60 bg-muted/25 px-4 py-2.5">
@@ -48,9 +47,7 @@ export default function StockMovementList({
       </div>
 
       {row.movements.length === 0 ? (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
-          No movements recorded for this material yet.
-        </p>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">{emptyLabel}</p>
       ) : (
         <ul className="mt-1.5 space-y-1">
           {row.movements.map((m) => (
@@ -64,7 +61,7 @@ export default function StockMovementList({
                 {when(m.at)}
               </span>
               <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                {SOURCE_LABEL[m.source]}
+                {labels[m.source] ?? m.source}
                 {m.ref ? ` · ${m.ref}` : ""}
               </span>
               <span
@@ -90,6 +87,11 @@ export default function StockMovementList({
             : `${qty(-row.opening)} ${row.unit} is unaccounted for: more has gone out than the bills and the movements add up to.`}
         </p>
       )}
+
+      <p className="sr-only">
+        Ledger for this {noun}: {qty(row.income)} received, {qty(row.outgoing)}{" "}
+        issued, {qty(row.balance)} {row.unit} on hand.
+      </p>
     </div>
   );
 }

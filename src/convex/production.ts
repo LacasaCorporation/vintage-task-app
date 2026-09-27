@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { getSettings } from "./settings";
 import { stockIn, stockOut } from "./stock";
+import { produceStock } from "./productStock";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -289,6 +290,8 @@ export const finish = mutation({
       // the run ends, so whatever is still part-made starts a new one
       productionQty: (fg.productionQty ?? 0) - made || undefined,
     });
+    // the finished-goods ledger records what actually came off the line
+    await produceStock(ctx, { ownerId: userId, product: fg, qty: made });
   },
 });
 

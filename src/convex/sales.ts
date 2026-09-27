@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { getSettings } from "./settings";
 import { currencySymbol } from "../lib/currency";
+import { returnStock as unsellStock, sellStock as logSale } from "./productStock";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -16,14 +17,13 @@ async function sellStock(
   ctx: MutationCtx,
   ownerId: Id<"users">,
   lines: readonly { productId: Id<"finishedGoods">; qty: number }[],
+  ref: string,
 ): Promise<void> {
   for (const line of lines) {
     if (!(line.qty > 0)) continue;
     const product = await ctx.db.get(line.productId);
     if (product === null || product.ownerId !== ownerId) continue;
-    await ctx.db.patch(product._id, {
-      stock: (product.stock ?? 0) - line.qty,
-    });
+    await logSale(ctx, { ownerId, product, qty: line.qty, ref });
   }
 }
 
@@ -254,7 +254,7 @@ export const convertToSale = mutation({
       total,
       quotationId: quote._id,
     });
-    await sellStock(ctx, userId, quote.lines);
+    await sellStock(ctx, userId, quote.lines, String(saleId));
     await ctx.db.patch(quote._id, {
       status: "accepted",
       invoicedAs: saleId,
@@ -332,7 +332,7 @@ export const createSale = mutation({
       lines: resolved,
       total: grand,
     });
-    await sellStock(ctx, userId, resolved);
+    await sellStock(ctx, userId, resolved, String(saleId));
     return saleId;
   },
 });
@@ -371,7 +371,12 @@ export const removeSale = mutation({
       if (!(line.qty > 0)) continue;
       const product = await ctx.db.get(line.productId);
       if (product === null || product.ownerId !== userId) continue;
-      await ctx.db.patch(product._id, { stock: (product.stock ?? 0) + line.qty });
+      await unsellStock(ctx, {
+        ownerId: userId,
+        product,
+        qty: line.qty,
+        ref: sale.number,
+      });
     }
     await ctx.db.delete(id);
   },

@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  ChevronDown,
   Download,
   Loader2,
   Package,
@@ -20,7 +21,10 @@ import {
   Sigma,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import StockMovementList from "@/components/StockMovementList";
+import { PRODUCT_SOURCE_LABEL } from "@/lib/stock-labels";
+import type { ProductStockRow } from "@/lib/stock-types";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { costByProduct } from "@/lib/product-cost";
 import { useMutation, useQuery } from "convex/react";
@@ -163,6 +167,17 @@ export default function ProductForm({
   const [search, setSearch] = useState("");
   const [productionFilter, setProductionFilter] = useState<ProductionFilter>("all");
   const [showForm, setShowForm] = useState(false);
+  /** The product whose transactions are open, if any. */
+  const [openStock, setOpenStock] = useState<Id<"finishedGoods"> | null>(null);
+
+  // the finished-goods ledger, the same in / out / balance the raw material
+  // list shows, opened from the chevron on the left of each row
+  const productStock = useQuery(api.productStock.report);
+  const stockByProduct = useMemo(() => {
+    const map = new Map<Id<"finishedGoods">, ProductStockRow>();
+    for (const row of productStock ?? []) map.set(row.productId, row);
+    return map;
+  }, [productStock]);
 
   // when arriving from the Projects tab, pre-filter and pre-select that project
   const [lastInitialProject, setLastInitialProject] = useState<string | null>(
@@ -321,7 +336,9 @@ export default function ProductForm({
         "Code",
         `Cost / unit (${currencyCode})`,
         `Price / unit (${currencyCode})`,
-        "Qty",
+        "In",
+        "Out",
+        "Balance",
         `Stock value (${currencyCode})`,
         "In production",
       ].join(","),
@@ -331,11 +348,14 @@ export default function ProductForm({
         const cost = costByFg.get(f._id) ?? 0;
         const total = cost * (1 + (f.markupPct ?? 0) / 100);
         const stock = f.stock ?? 0;
+        const ledger = stockByProduct.get(f._id);
         return [
           `"${f.name.replace(/"/g, '""')}"`,
           `"${(f.code ?? "").replace(/"/g, '""')}"`,
           cost.toFixed(2),
           total.toFixed(2),
+          String(ledger?.income ?? 0),
+          String(ledger?.outgoing ?? 0),
           String(stock),
           (total * stock).toFixed(2),
           String(f.inProduction ?? 0),
@@ -676,12 +696,15 @@ export default function ProductForm({
           <table className="w-full min-w-[680px] text-sm">
             <thead>
               <tr className="border-b border-border/70 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                <th className="w-8 px-2 py-2" />
                 <th className="w-10 px-3 py-2 font-semibold">#</th>
                 <th className="px-3 py-2 font-semibold">Product</th>
                 <th className="w-28 px-3 py-2 font-semibold">Code</th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">Cost / unit</th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">Price / unit</th>
-                <th className="w-20 px-3 py-2 text-right font-semibold">Qty</th>
+                <th className="w-20 px-3 py-2 text-right font-semibold">In</th>
+                <th className="w-20 px-3 py-2 text-right font-semibold">Out</th>
+                <th className="w-20 px-3 py-2 text-right font-semibold">Balance</th>
                 <th className="w-28 px-3 py-2 text-right font-semibold">Stock value</th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">In production</th>
                 <th className="w-16 px-2 py-2" />
@@ -690,14 +713,14 @@ export default function ProductForm({
             <tbody className="divide-y divide-border/60">
               {allItems === undefined || finishedGoods === undefined ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading products…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
                     {search || productionFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No products yet — create your first FG above."}
@@ -711,14 +734,32 @@ export default function ProductForm({
                   const total = cost * (1 + (f.markupPct ?? 0) / 100);
                   const stock = f.stock ?? 0;
                   const active = activeFgId === f._id;
+                  const ledger = stockByProduct.get(f._id);
                   return (
+                    <Fragment key={f._id}>
                     <tr
-                      key={f._id}
                       className={cn(
                         "group/row transition-colors hover:bg-accent/40",
                         active && "bg-primary/[0.06]",
                       )}
                     >
+                      <td className="px-2 py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setOpenStock(openStock === f._id ? null : f._id)}
+                          aria-expanded={openStock === f._id}
+                          aria-label={`${openStock === f._id ? "Hide" : "Show"} transactions for ${f.name}`}
+                          title="Show what came in and what went out"
+                          className="grid size-5 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          <ChevronDown
+                            className={cn(
+                              "size-3.5 transition-transform",
+                              openStock === f._id && "rotate-180",
+                            )}
+                          />
+                        </button>
+                      </td>
                       <td className="px-3 py-1 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
                       <td className="px-3 py-1.5">
                         <button
@@ -759,6 +800,18 @@ export default function ProductForm({
                       <td className="px-3 py-1.5 text-right font-medium tabular-nums text-primary">
                         {money(total)}
                       </td>
+                      <td
+                        className="px-3 py-1.5 text-right text-xs tabular-nums text-emerald-600 dark:text-emerald-400"
+                        title="Units production put on the shelf"
+                      >
+                        {ledger && ledger.income !== 0 ? `+${ledger.income.toLocaleString()}` : "—"}
+                      </td>
+                      <td
+                        className="px-3 py-1.5 text-right text-xs tabular-nums text-rose-600 dark:text-rose-400"
+                        title="Units invoicing has taken off the shelf"
+                      >
+                        {ledger && ledger.outgoing !== 0 ? `−${Math.abs(ledger.outgoing).toLocaleString()}` : "—"}
+                      </td>
                       <td className="px-3 py-1.5 text-right text-xs tabular-nums">
                         <span
                           className={cn(
@@ -795,7 +848,7 @@ export default function ProductForm({
                         )}
                       </td>
                       <td className="px-2 py-1 text-center">
-                        <span className="hidden gap-1 group-hover/row:inline-flex">
+                        <span className="inline-flex gap-1 group-hover/row:inline-flex">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
@@ -860,7 +913,27 @@ export default function ProductForm({
                         </span>
                       </td>
                     </tr>
-                  );
+                    {openStock === f._id && (
+                      <tr>
+                        <td colSpan={12} className="p-0">
+                          <StockMovementList
+                            row={ledger ?? {
+                              unit: f.unit ?? "pcs",
+                              opening: 0,
+                              income: 0,
+                              outgoing: 0,
+                              balance: stock,
+                              movements: [],
+                            }}
+                            labels={PRODUCT_SOURCE_LABEL}
+                            emptyLabel="Nothing has been produced or invoiced for this product yet."
+                            noun="product"
+                          />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    );
                 })
               )}
             </tbody>

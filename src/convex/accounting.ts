@@ -337,8 +337,83 @@ const lineValidator = v.array(
 /**
  * Posts one balanced entry. Debits must equal credits — an unbalanced entry
  * would quietly corrupt every balance built on top of it, so it is refused
- * here rather than reconciled later.
+ * here rather than reconciled later. Exported so the expense register can
+ * write straight to the ledger instead of keeping a second set of books.
  */
+export async function postEntry(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  args: {
+    at: number;
+    kind: Doc<"journalEntries">["kind"];
+    memo?: string;
+    party?: string;
+    lines: {
+      accountId: Id<"accounts">;
+      debit: number;
+      credit: number;
+      memo?: string;
+    }[];
+  },
+): Promise<Id<"journalEntries">> {
+  const usable = args.lines
+    .map((l) => ({
+      accountId: l.accountId,
+      debit: round(Math.max(0, l.debit)),
+      credit: round(Math.max(0, l.credit)),
+      memo: l.memo?.trim() || undefined,
+    }))
+    .filter((l) => l.debit > 0 || l.credit > 0);
+  if (usable.length < 2) {
+    throw new Error("An entry needs at least two lines.");
+  }
+  for (const line of usable) {
+    if (line.debit > 0 && line.credit > 0) {
+      throw new Error("A line is either a debit or a credit, not both.");
+    }
+    const account = await ctx.db.get(line.accountId);
+    if (account === null || account.ownerId !== userId) {
+      throw new Error("One of those accounts no longer exists.");
+    }
+    if (account.isGroup === true) {
+      throw new Error(`${account.name} is a heading — pick a real account.`);
+    }
+  }
+
+  const debit = round(usable.reduce((s, l) => s + l.debit, 0));
+  const credit = round(usable.reduce((s, l) => s + l.credit, 0));
+  if (debit !== credit) {
+    throw new Error(
+      `Debits (${debit.toFixed(2)}) and credits (${credit.toFixed(2)}) must match.`,
+    );
+  }
+
+  const entryId = await ctx.db.insert("journalEntries", {
+    ownerId: userId,
+    number: await nextEntryNumber(ctx, userId),
+    at: args.at,
+    kind: args.kind,
+    memo: args.memo?.trim() || undefined,
+    party: args.party?.trim() || undefined,
+    createdAt: Date.now(),
+  });
+  for (const line of usable) {
+    const account = await ctx.db.get(line.accountId);
+    if (account === null) continue;
+    await ctx.db.insert("journalLines", {
+      ownerId: userId,
+      entryId,
+      accountId: line.accountId,
+      accountCode: account.code,
+      accountName: account.name,
+      debit: line.debit,
+      credit: line.credit,
+      memo: line.memo,
+    });
+  }
+  return entryId;
+}
+
 export const createEntry = mutation({
   args: {
     at: v.number(),
@@ -355,63 +430,7 @@ export const createEntry = mutation({
   handler: async (ctx, args): Promise<Id<"journalEntries">> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in to post to the ledger.");
-
-    const usable = args.lines
-      .map((l) => ({
-        accountId: l.accountId,
-        debit: round(Math.max(0, l.debit)),
-        credit: round(Math.max(0, l.credit)),
-        memo: l.memo?.trim() || undefined,
-      }))
-      .filter((l) => l.debit > 0 || l.credit > 0);
-    if (usable.length < 2) {
-      throw new Error("An entry needs at least two lines.");
-    }
-    for (const line of usable) {
-      if (line.debit > 0 && line.credit > 0) {
-        throw new Error("A line is either a debit or a credit, not both.");
-      }
-      const account = await ctx.db.get(line.accountId);
-      if (account === null || account.ownerId !== userId) {
-        throw new Error("One of those accounts no longer exists.");
-      }
-      if (account.isGroup === true) {
-        throw new Error(`${account.name} is a heading — pick a real account.`);
-      }
-    }
-
-    const debit = round(usable.reduce((s, l) => s + l.debit, 0));
-    const credit = round(usable.reduce((s, l) => s + l.credit, 0));
-    if (debit !== credit) {
-      throw new Error(
-        `Debits (${debit.toFixed(2)}) and credits (${credit.toFixed(2)}) must match.`,
-      );
-    }
-
-    const entryId = await ctx.db.insert("journalEntries", {
-      ownerId: userId,
-      number: await nextEntryNumber(ctx, userId),
-      at: args.at,
-      kind: args.kind,
-      memo: args.memo?.trim() || undefined,
-      party: args.party?.trim() || undefined,
-      createdAt: Date.now(),
-    });
-    for (const line of usable) {
-      const account = await ctx.db.get(line.accountId);
-      if (account === null) continue;
-      await ctx.db.insert("journalLines", {
-        ownerId: userId,
-        entryId,
-        accountId: line.accountId,
-        accountCode: account.code,
-        accountName: account.name,
-        debit: line.debit,
-        credit: line.credit,
-        memo: line.memo,
-      });
-    }
-    return entryId;
+    return postEntry(ctx, userId, args);
   },
 });
 

@@ -937,6 +937,12 @@ export const removeFinishedGood = mutation({
       .withIndex("by_fg", (q) => q.eq("fgId", id))
       .collect();
     for (const grant of grants) await ctx.db.delete(grant._id);
+    // the stock ledger belongs to the product, so it goes with it
+    const movements = await ctx.db
+      .query("productMovements")
+      .withIndex("by_product", (q) => q.eq("productId", id))
+      .collect();
+    for (const movement of movements) await ctx.db.delete(movement._id);
     await ctx.db.delete(id);
   },
 });

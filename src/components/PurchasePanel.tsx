@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   CheckCircle2,
+  ClipboardList,
   Eye,
   FileText,
   Link2,
@@ -19,12 +20,15 @@ import {
   Save,
   Store,
   Trash2,
+  Wallet,
   X,
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import ContactDialog from "@/components/ContactDialog";
+import LpoPanel from "@/components/LpoPanel";
+import ExpensesPanel from "@/components/ExpensesPanel";
 import VendorField from "@/components/VendorField";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
@@ -61,11 +65,15 @@ export default function PurchasePanel({
   const setPaid = useMutation(api.purchases.setPaid);
   const removeBill = useMutation(api.purchases.remove);
   const vendors = useQuery(api.contacts.listVendors);
+  const lpos = useQuery(api.lpo.list);
+  const expenses = useQuery(api.expenses.list);
   const addVendor = useMutation(api.contacts.createVendor);
   const editVendor = useMutation(api.contacts.updateVendor);
   const dropVendor = useMutation(api.contacts.removeVendor);
 
-  const [tab, setTab] = useState<"list" | "bill" | "vendors">("list");
+  const [tab, setTab] = useState<"list" | "bill" | "lpo" | "expenses" | "vendors">("list");
+  const [lpoFormOpen, setLpoFormOpen] = useState(false);
+  const [expenseFormOpen, setExpenseFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<Id<"purchases"> | null>(null);
   const [viewingId, setViewingId] = useState<Id<"purchases"> | null>(null);
   const [vendorPickerOpen, setVendorPickerOpen] = useState(false);
@@ -177,7 +185,11 @@ export default function PurchasePanel({
     }
   };
 
-  const tabBtn = (id: "list" | "bill" | "vendors", label: string, Icon: typeof List) => (
+  const tabBtn = (
+    id: "list" | "bill" | "lpo" | "expenses" | "vendors",
+    label: string,
+    Icon: typeof List,
+  ) => (
     <button
       key={id}
       type="button"
@@ -205,6 +217,8 @@ export default function PurchasePanel({
         <div className="flex items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
           {tabBtn("list", `Purchase list (${bills?.length ?? 0})`, List)}
           {tabBtn("bill", "Bill entry", FileText)}
+          {tabBtn("lpo", `LPO (${lpos?.filter((l) => l.status !== "cancelled").length ?? 0})`, ClipboardList)}
+          {tabBtn("expenses", `Expenses (${expenses?.length ?? 0})`, Wallet)}
           {tabBtn("vendors", `Vendors (${vendors?.length ?? 0})`, Store)}
         </div>
         {canCreate && (
@@ -219,7 +233,29 @@ export default function PurchasePanel({
                 <Plus className="size-4" /> New vendor
               </Button>
             )}
-            {tab !== "vendors" && (
+            {tab === "lpo" && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  setLpoFormOpen(true);
+                }}
+                className="h-9 rounded-xl px-3 text-sm"
+              >
+                <Plus className="size-4" /> New LPO
+              </Button>
+            )}
+            {tab === "expenses" && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => setExpenseFormOpen(true)}
+                className="h-9 rounded-xl px-3 text-sm"
+              >
+                <Plus className="size-4" /> Record expense
+              </Button>
+            )}
+            {(tab === "list" || tab === "bill") && (
               <Button
                 type="button"
                 size="sm"
@@ -240,6 +276,27 @@ export default function PurchasePanel({
         <p className="rounded-xl border border-dashed bg-card px-4 py-3 text-center text-sm text-muted-foreground">
           Add raw materials first — then you can buy stock for them here.
         </p>
+      )}
+
+      {/* ── Purchase orders and expenses ───────────────────────────── */}
+      {tab === "lpo" && (
+        <LpoPanel
+          materials={materials}
+          canCreate={canCreate}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          formOpen={lpoFormOpen}
+          onFormOpenChange={setLpoFormOpen}
+        />
+      )}
+
+      {tab === "expenses" && (
+        <ExpensesPanel
+          canCreate={canCreate}
+          canDelete={canDelete}
+          formOpen={expenseFormOpen}
+          onFormOpenChange={setExpenseFormOpen}
+        />
       )}
 
       {/* ── Purchase list ───────────────────────────────────────────── */}
