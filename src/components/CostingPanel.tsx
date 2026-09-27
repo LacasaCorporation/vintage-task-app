@@ -3,6 +3,7 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import MaterialsSheet from "@/components/MaterialsSheet";
+import CreateMaterialDialog from "@/components/CreateMaterialDialog";
 import ProductForm from "@/components/ProductForm";
 import ProjectsSheet from "@/components/ProjectsSheet";
 import type { CostingView } from "@/components/CostingSidebar";
@@ -33,6 +34,9 @@ import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type FgDoc = Doc<"finishedGoods">;
 type MaterialDoc = Doc<"rawMaterials">;
+
+/** Sentinel option value: pick it to create a material instead of choosing one. */
+const NEW_MATERIAL = "__new__";
 
 const cellCls =
   "w-full bg-transparent px-2 py-1.5 text-sm outline-none focus:bg-primary/5 focus:ring-2 focus:ring-primary/30 rounded-md";
@@ -160,6 +164,9 @@ export default function CostingPanel({
 
   // ── FG costing grid state ──────────────────────────────────────────
   const [addingMaterialId, setAddingMaterialId] = useState("");
+  const [createMaterialOpen, setCreateMaterialOpen] = useState(false);
+  // bumped on every open so the dialog starts with blank fields
+  const [createMaterialKey, setCreateMaterialKey] = useState(0);
   const [materialQty, setMaterialQty] = useState("1");
   const [customLabel, setCustomLabel] = useState("");
   const [customQty, setCustomQty] = useState("1");
@@ -731,7 +738,16 @@ export default function CostingPanel({
               <div className="flex gap-1.5">
                 <select
                   value={addingMaterialId}
-                  onChange={(e) => setAddingMaterialId(e.target.value)}
+                  onChange={(e) => {
+                    // the last option opens the create dialog instead of
+                    // selecting a material
+                    if (e.target.value === NEW_MATERIAL) {
+                      setCreateMaterialKey((k) => k + 1);
+                      setCreateMaterialOpen(true);
+                      return;
+                    }
+                    setAddingMaterialId(e.target.value);
+                  }}
                   className="min-w-0 flex-1 rounded-lg border bg-card px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                 >
                   <option value="">Choose material…</option>
@@ -742,6 +758,7 @@ export default function CostingPanel({
                       {m.category ? ` [${m.category}]` : ""} ({money(m.pricePerUnit)}/{m.unit})
                     </option>
                   ))}
+                  <option value={NEW_MATERIAL}>+ Create new material…</option>
                 </select>
                 <Input
                   type="number"
@@ -1049,6 +1066,13 @@ export default function CostingPanel({
           />
         </div>
       )}
+
+      <CreateMaterialDialog
+        key={createMaterialKey}
+        open={createMaterialOpen}
+        onClose={() => setCreateMaterialOpen(false)}
+        onCreated={(id) => setAddingMaterialId(id)}
+      />
     </div>
   );
 }
