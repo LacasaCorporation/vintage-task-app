@@ -27,7 +27,6 @@ import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
-import ProductQtyInline from "@/components/ProductQtyInline";
 import ProductCodeInline from "@/components/ProductCodeInline";
 import ProductTagsInline from "@/components/ProductTagsInline";
 import { batchCost, batchQty, costByProduct } from "@/lib/product-cost";
@@ -66,9 +65,10 @@ import { cn } from "@/lib/utils";
 type FgDoc = Doc<"finishedGoods">;
 
 /**
- * What a product's cost bracket reads: "3 × $500.00 = $1,500.00", so the
- * multiplication is visible rather than just the answer. A product with no
- * quantity set is one of itself, and the breakdown would only be noise.
+ * What a product's cost bracket reads: "3 PCS × $500.00 = $1,500.00". The
+ * quantity lives in here rather than beside the name, so the whole arithmetic
+ * is one readable chip. A product with no quantity set is one of itself, and
+ * the breakdown would only be noise.
  */
 function productCostLabel(
   fg: FgDoc,
@@ -77,7 +77,9 @@ function productCostLabel(
 ): string {
   const qty = batchQty(fg);
   const total = unitCost * qty;
-  return qty > 1 ? `${qty} × ${money(unitCost)} = ${money(total)}` : money(total);
+  if (qty <= 1) return money(total);
+  const count = fg.unit ? `${qty} ${fg.unit}` : String(qty);
+  return `${count} × ${money(unitCost)} = ${money(total)}`;
 }
 type ProjectDoc = Doc<"projects">;
 type JobDoc = Doc<"projectJobs">;
@@ -1247,7 +1249,6 @@ export default function ProjectsSheet({
                                           {fg.name}
                                         </span>
                                         <ProductCodeInline code={fg.code} />
-                                        <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                                         <MoneyBracket
                                           amount={productCostLabel(fg, costByFg.get(fg._id) ?? 0, money)}
                                           tone="cost"
@@ -1357,7 +1358,6 @@ export default function ProjectsSheet({
                                   {fg.name}
                                 </span>
                                 <ProductCodeInline code={fg.code} />
-                                <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                                 <MoneyBracket
                                   amount={productCostLabel(fg, costByFg.get(fg._id) ?? 0, money)}
                                   tone="cost"
