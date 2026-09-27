@@ -12,9 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Briefcase,
   Download,
-  Folder,
   Loader2,
   Package,
   Plus,
@@ -163,7 +161,6 @@ export default function ProductForm({
   const [markup, setMarkup] = useState("0");
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
-  const [projectFilter, setProjectFilter] = useState("all");
   const [productionFilter, setProductionFilter] = useState<ProductionFilter>("all");
   const [showForm, setShowForm] = useState(false);
 
@@ -173,7 +170,6 @@ export default function ProductForm({
   );
   if (initialProject && initialProject !== lastInitialProject) {
     setLastInitialProject(initialProject);
-    setProjectFilter(initialProject);
     setProject(initialProject);
   }
 
@@ -212,32 +208,22 @@ export default function ProductForm({
         : (allJobs ?? []).filter((j) => j.projectId === selectedProjectId),
     [allJobs, selectedProjectId],
   );
-  const jobNameOf = (id: Id<"projectJobs"> | undefined) => {
-    if (id === undefined) return undefined;
-    return (allJobs ?? []).find((j) => j._id === id)?.name;
-  };
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return finishedGoods
       .filter((f) => {
-        if (projectFilter !== "all" && f.projectName !== projectFilter) return false;
         if (!keepsProduction(f, productionFilter)) return false;
         if (!q) return true;
         return (
           f.name.toLowerCase().includes(q) ||
-          (f.projectName ?? "").toLowerCase().includes(q) ||
           (f.code ?? "").toLowerCase().includes(q) ||
           (f.category ?? "").toLowerCase().includes(q) ||
           (f.note ?? "").toLowerCase().includes(q)
         );
       })
-      .sort((a, b) =>
-        a.projectName === b.projectName
-          ? a.name.localeCompare(b.name)
-          : (a.projectName ?? "").localeCompare(b.projectName ?? ""),
-      );
-  }, [finishedGoods, search, projectFilter, productionFilter]);
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [finishedGoods, search, productionFilter]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -331,29 +317,28 @@ export default function ProductForm({
   const exportCsv = () => {
     const lines = [
       [
-        "Project Code",
-        "Project",
-        "Product Code",
         "Product",
-        "Unit",
-        "Margin %",
-        `Cost (${currencyCode})`,
-        `Sales Price (${currencyCode})`,
+        "Code",
+        `Cost / unit (${currencyCode})`,
+        `Price / unit (${currencyCode})`,
+        "Qty",
+        `Stock value (${currencyCode})`,
+        "In production",
       ].join(","),
       ...rows.map((f) => {
         // per unit, exactly like a raw material row — the batch lives on the
         // job link, not on this price
         const cost = costByFg.get(f._id) ?? 0;
         const total = cost * (1 + (f.markupPct ?? 0) / 100);
+        const stock = f.stock ?? 0;
         return [
-          `"${(f.projectCode ?? "").replace(/"/g, '""')}"`,
-          `"${(f.projectName ?? "Standalone").replace(/"/g, '""')}"`,
-          `"${(f.code ?? "").replace(/"/g, '""')}"`,
           `"${f.name.replace(/"/g, '""')}"`,
-          f.unit ?? "",
-          String(f.markupPct ?? 0),
+          `"${(f.code ?? "").replace(/"/g, '""')}"`,
           cost.toFixed(2),
           total.toFixed(2),
+          String(stock),
+          (total * stock).toFixed(2),
+          String(f.inProduction ?? 0),
         ].join(",");
       }),
     ];
@@ -656,8 +641,7 @@ export default function ProductForm({
             <p className="text-sm font-semibold">
               Products
               <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {rows.length} item{rows.length === 1 ? "" : "s"}
-                {projects.length > 0 ? ` · ${projects.length} projects` : ""}
+                {rows.length} product{rows.length === 1 ? "" : "s"}
               </span>
             </p>
           </div>
@@ -679,19 +663,6 @@ export default function ProductForm({
               label="Filter production"
               icon={Factory}
             />
-            <select
-              value={projectFilter}
-              onChange={(e) => setProjectFilter(e.target.value)}
-              aria-label="Filter by project"
-              className="h-7 rounded-lg border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              <option value="all">All projects</option>
-              {projects.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
             {rows.length > 0 && (
               <Button type="button" variant="outline" size="sm" className="h-7 rounded-lg text-xs" onClick={exportCsv}>
                 <Download className="size-3" />
@@ -706,33 +677,28 @@ export default function ProductForm({
             <thead>
               <tr className="border-b border-border/70 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
                 <th className="w-10 px-3 py-2 font-semibold">#</th>
-                <th className="w-40 px-3 py-2 font-semibold">Project</th>
                 <th className="px-3 py-2 font-semibold">Product</th>
-                <th className="w-32 px-3 py-2 font-semibold">Job</th>
-                <th className="w-24 px-3 py-2 font-semibold">Code</th>
-                <th className="w-16 px-3 py-2 font-semibold">Unit</th>
-                <th className="w-28 px-3 py-2 font-semibold">Category</th>
-                <th className="w-16 px-3 py-2 text-right font-semibold">Margin %</th>
+                <th className="w-28 px-3 py-2 font-semibold">Code</th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">Cost / unit</th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">Price / unit</th>
-                <th className="w-20 px-3 py-2 text-right font-semibold">Stock</th>
-                <th className="w-24 px-3 py-2 text-right font-semibold">Stock value</th>
-                <th className="w-20 px-3 py-2 text-right font-semibold">In production</th>
+                <th className="w-20 px-3 py-2 text-right font-semibold">Qty</th>
+                <th className="w-28 px-3 py-2 text-right font-semibold">Stock value</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">In production</th>
                 <th className="w-16 px-2 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {allItems === undefined || finishedGoods === undefined ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading products…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">
-                    {search || projectFilter !== "all"
+                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                    {search || productionFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No products yet — create your first FG above."}
                   </td>
@@ -754,14 +720,6 @@ export default function ProductForm({
                       )}
                     >
                       <td className="px-3 py-1 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
-                      <td className="px-3 py-1.5">
-                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Folder className="size-3 shrink-0 text-sky-500/80" />
-                          <span className="truncate">
-                            {f.projectName ?? "Standalone"}
-                          </span>
-                        </span>
-                      </td>
                       <td className="px-3 py-1.5">
                         <button
                           type="button"
@@ -792,30 +750,8 @@ export default function ProductForm({
                           </span>
                         </button>
                       </td>
-                      <td className="px-3 py-1.5">
-                        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          {f.jobId !== undefined ? (
-                            <>
-                              <Briefcase className="size-3 shrink-0 text-sky-500/80" />
-                              <span className="truncate">
-                                {jobNameOf(f.jobId) ?? "—"}
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-muted-foreground/50">—</span>
-                          )}
-                        </span>
-                      </td>
                       <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
                         {f.code || "—"}
-                      </td>
-                      <td className="px-3 py-1.5 text-xs text-muted-foreground">{f.unit ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-xs text-muted-foreground">
-                        {f.category ? f.category : "—"}
-                        {f.subCategory ? ` › ${f.subCategory}` : ""}
-                      </td>
-                      <td className="px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground">
-                        {(f.markupPct ?? 0) > 0 ? `+${f.markupPct}%` : "—"}
                       </td>
                       <td className="px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground">
                         {money(cost)}
