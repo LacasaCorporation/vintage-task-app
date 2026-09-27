@@ -1,15 +1,14 @@
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import MaterialImportDialog from "@/components/MaterialImportDialog";
+import CreateMaterialDialog from "@/components/CreateMaterialDialog";
 import {
   AlertTriangle,
   ChevronDown,
   Download,
   FileSpreadsheet,
   Loader2,
-  Package,
   Pencil,
   Plus,
   Search as SearchIcon,
@@ -53,7 +52,6 @@ export default function MaterialsSheet({
   /** Actually import rows from a spreadsheet. */
   canImport?: boolean;
 }) {
-  const addMaterial = useMutation(api.costing.addMaterial);
   const { format: money, code: currencyCode } = useWorkspaceCurrency();
   const updateMaterial = useMutation(api.costing.updateMaterial);
   const removeMaterial = useMutation(api.costing.removeMaterial);
@@ -62,13 +60,7 @@ export default function MaterialsSheet({
   const masterUnits = useQuery(api.costing.listUnits);
   const masterCategories = useQuery(api.costing.listCategories);
   const units = masterUnits ?? [];
-  const parentCategories = (masterCategories ?? []).filter((c) => c.parentId === undefined);
   const allCategories = masterCategories ?? [];
-  const subsOf = (name: string) => {
-    const parent = parentCategories.find((c) => c.name === name);
-    if (!parent) return [];
-    return allCategories.filter((c) => c.parentId === parent._id);
-  };
   const { promptMulti, confirm } = useAppDialogs();
 
   /** Open the styled edit dialog for one material row. */
@@ -144,13 +136,7 @@ export default function MaterialsSheet({
     }
   };
 
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState("");
-  const [subCategory, setSubCategory] = useState("");
-  const [unit, setUnit] = useState("");
-  const [price, setPrice] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [importOpen, setImportOpen] = useState(false);
@@ -174,44 +160,6 @@ export default function MaterialsSheet({
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [materials, search, categoryFilter]);
-
-  const handleAdd = async (e: React.FormEvent) => {
-    if (!canCreate) {
-      e.preventDefault();
-      toast.error("Adding raw materials is restricted for your role.");
-      return;
-    }
-    e.preventDefault();
-    const clean = name.trim();
-    const priceNum = Number(price);
-    if (!clean) {
-      toast.error("Give the material a name.");
-      return;
-    }
-    if (!Number.isFinite(priceNum) || priceNum < 0) {
-      toast.error("Enter a valid price per unit.");
-      return;
-    }
-    setSaving(true);
-    try {
-      await addMaterial({
-        code: code.trim() || undefined,
-        name: clean,
-        category: category.trim() || undefined,
-        subCategory: subCategory.trim() || undefined,
-        unit: unit.trim() || "pcs",
-        pricePerUnit: priceNum,
-      });
-      setCode("");
-      setName("");
-      setSubCategory("");
-      setPrice("");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't add the material.");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const exportCsv = () => {
     const lines = [
@@ -245,92 +193,23 @@ export default function MaterialsSheet({
 
   return (
     <div>
-      {/* add material bar — units & categories are managed in Settings */}
+      {/* adding a material opens a dialog, so the list is not permanently
+          shortened by a row of empty inputs */}
       {canCreate && (
-      <form
-        onSubmit={handleAdd}
-        className="rounded-xl border bg-card p-3 shadow-sm"
-      >
-        <div className="mb-2">
-          <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-            <Package className="size-3.5" />
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            className="h-9 rounded-lg"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="size-3.5" />
             Add raw material
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <Input
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="Auto code (RM0001)"
-            aria-label="Material code — leave blank to auto-generate"
-            title="Leave blank to auto-generate the next RM code"
-            className="h-9 w-32 rounded-lg text-sm"
-          />
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Material name, e.g. Teak wood"
-            className="h-9 min-w-[150px] flex-1 rounded-lg text-sm"
-          />
-          <select
-            value={category}
-            onChange={(e) => {
-              setCategory(e.target.value);
-              setSubCategory("");
-            }}
-            aria-label="Category"
-            className="h-9 w-32 rounded-lg border bg-card px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-          >
-            <option value="">Category…</option>
-            {parentCategories.map((c) => (
-              <option key={c._id} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={subCategory}
-            onChange={(e) => setSubCategory(e.target.value)}
-            aria-label="Sub-category"
-            disabled={!category || subsOf(category).length === 0}
-            className="h-9 w-32 rounded-lg border bg-card px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-          >
-            <option value="">Sub-category…</option>
-            {subsOf(category).map((c) => (
-              <option key={c._id} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-            aria-label="Unit"
-            className="h-9 w-20 rounded-lg border bg-card px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-          >
-            <option value="">Unit…</option>
-            {units.map((u) => (
-              <option key={u._id} value={u.name}>
-                {u.name}
-              </option>
-            ))}
-          </select>
-          <Input
-            type="number"
-            min="0"
-            step="any"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
-            placeholder="Unit price"
-            aria-label="Price per unit"
-            className="h-9 w-24 rounded-lg text-sm"
-          />
-          <Button type="submit" size="sm" className="h-9 rounded-lg" disabled={saving}>
-            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-            Add
           </Button>
+          <span className="text-[11px] text-muted-foreground">
+            Units and categories are managed in Settings
+          </span>
         </div>
-      </form>
       )}
 
       {/* listing sheet */}
@@ -545,6 +424,13 @@ export default function MaterialsSheet({
         This list is the master price list — costing sheets pick materials from here, so prices stay
         consistent across products.
       </p>
+
+      <CreateMaterialDialog
+        key={createOpen ? "open" : "closed"}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {}}
+      />
 
       <MaterialImportDialog
         open={importOpen}
