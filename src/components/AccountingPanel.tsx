@@ -38,7 +38,7 @@ export const ACCOUNTING_TABS: {
   hint: string;
 }[] = [
   { id: "accounts", label: "Chart of accounts", icon: BookOpen, hint: "Every ledger account and its running balance" },
-  { id: "balance", label: "Balance sheet", icon: Scale, hint: "Opening balances — assets against liabilities and equity" },
+  { id: "balance", label: "Opening balance", icon: Scale, hint: "Opening balances — assets against liabilities and equity" },
   { id: "journal", label: "Journal entry", icon: ScrollText, hint: "A balanced debit and credit posting" },
   { id: "receipt", label: "Receipt / payment", icon: Wallet, hint: "Money received from a customer, or paid to a supplier" },
   { id: "cashbook", label: "Cash book", icon: Landmark, hint: "Cash and bank movement only" },
@@ -639,7 +639,7 @@ function BalanceSheet({
   return (
     <div className="space-y-3">
       <Panel
-        title="Balance sheet"
+        title="Opening balance"
         count="opening balances"
         actions={
           <>
@@ -648,7 +648,7 @@ function BalanceSheet({
               type="date"
               value={at}
               onChange={(e) => setAt(e.target.value)}
-              aria-label="Balance sheet date"
+              aria-label="Opening balance date"
               className="h-7 w-32 rounded-lg text-xs"
             />
           </>
