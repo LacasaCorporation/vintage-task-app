@@ -29,8 +29,11 @@ import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
+import ConnectJobDialog from "@/components/ConnectJobDialog";
 import {
+  AlertTriangle,
   Factory,
+  Link2,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -191,6 +194,9 @@ export default function ProductForm({
 
   // jobs under the currently selected project (for the job dropdown)
   const allJobs = useQuery(api.jobs.listJobs);
+  const attachToJobM = useMutation(api.costing.attachToJob);
+  /** The product being connected to a job, if the dialog is open. */
+  const [linkTarget, setLinkTarget] = useState<FgDoc | null>(null);
   const selectedProjectId = useMemo(
     () => (projectDocs ?? []).find((p) => p.name === project)?._id,
     [projectDocs, project],
@@ -703,20 +709,22 @@ export default function ProductForm({
                 <th className="w-16 px-3 py-2 text-right font-semibold">Margin %</th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">Cost</th>
                 <th className="w-28 px-3 py-2 text-right font-semibold">Sales price</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">Stock</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">In production</th>
                 <th className="w-16 px-2 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {allItems === undefined || finishedGoods === undefined ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading products…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
                     {search || projectFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No products yet — create your first FG above."}
@@ -805,6 +813,37 @@ export default function ProductForm({
                       <td className="px-3 py-1.5 text-right font-medium tabular-nums text-primary">
                         {money(total)}
                       </td>
+                      <td className="px-3 py-1.5 text-right text-xs tabular-nums">
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1",
+                            (f.stock ?? 0) < 0
+                              ? "text-destructive"
+                              : (f.stock ?? 0) > 0
+                                ? "text-foreground"
+                                : "text-muted-foreground/60",
+                          )}
+                          title={
+                            (f.stock ?? 0) < 0
+                              ? `Short ${Math.abs(f.stock ?? 0)} ${f.unit ?? "pcs"} — produce or adjust`
+                              : `${(f.stock ?? 0)} ${f.unit ?? "pcs"} ready to sell`
+                          }
+                        >
+                          {(f.stock ?? 0) < 0 && (
+                            <AlertTriangle className="size-3 shrink-0" />
+                          )}
+                          {(f.stock ?? 0).toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-xs tabular-nums">
+                        {f.inProduction ? (
+                          <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary tabular-nums">
+                            {f.inProduction.toLocaleString()}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/50">—</span>
+                        )}
+                      </td>
                       <td className="px-2 py-1 text-center">
                         <span className="hidden gap-1 group-hover/row:inline-flex">
                           <DropdownMenu>
@@ -829,6 +868,19 @@ export default function ProductForm({
                                   </span>
                                   <span className="text-[10px] text-muted-foreground">
                                     Edit the BOM right here
+                                  </span>
+                                </div>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setLinkTarget(f)}
+                              >
+                                <Link2 className="size-3.5" />
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-medium">
+                                    Connect to a job
+                                  </span>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    Asks how many this job needs
                                   </span>
                                 </div>
                               </DropdownMenuItem>
@@ -859,6 +911,22 @@ export default function ProductForm({
           </table>
         </div>
       </section>
+
+      {linkTarget && (
+        <ConnectJobDialog
+          open
+          productName={linkTarget.name}
+          productUnit={linkTarget.unit ?? "pcs"}
+          defaultQty={linkTarget.qty ?? 1}
+          jobs={allJobs ?? []}
+          currentJobId={linkTarget.jobId}
+          onClose={() => setLinkTarget(null)}
+          onSubmit={async (jobId, qty) => {
+            await attachToJobM({ fgId: linkTarget._id, jobId, qty });
+            toast.success(`“${linkTarget.name}” connected — ${qty} needed.`);
+          }}
+        />
+      )}
 
       <p className="mt-3 text-xs text-muted-foreground">
         Click a product to open its costing sheet right here — add raw materials with quantities

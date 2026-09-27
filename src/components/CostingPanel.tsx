@@ -40,7 +40,6 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
-import { batchQty } from "@/lib/product-cost";
 
 type FgDoc = Doc<"finishedGoods">;
 type MaterialDoc = Doc<"rawMaterials">;
@@ -777,15 +776,39 @@ export default function CostingPanel({
             {/* at-a-glance figures, so the sheet needs no scrolling to read */}
             <dl className="flex shrink-0 items-center gap-3 text-right">
               <div
-                title="This sheet prices one product — the batch quantity is applied on the project line"
+                title="Finished units on hand, ready to sell. A sales bill takes stock off this."
               >
                 <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                  Batch
+                  Stock
                 </dt>
-                <dd className="text-xs font-semibold tabular-nums text-muted-foreground">
-                  {batchQty(activeFg)} {activeFg.unit ?? "pcs"}
+                <dd
+                  className={cn(
+                    "text-xs font-semibold tabular-nums",
+                    (activeFg.stock ?? 0) < 0
+                      ? "text-destructive"
+                      : (activeFg.stock ?? 0) > 0
+                        ? "text-foreground"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {(activeFg.stock ?? 0).toLocaleString()}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    {activeFg.unit ?? "pcs"}
+                  </span>
                 </dd>
               </div>
+              {(activeFg.inProduction ?? 0) > 0 && (
+                <div
+                  title="Part-made right now — a run has started but not finished"
+                >
+                  <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                    In production
+                  </dt>
+                  <dd className="text-xs font-semibold tabular-nums text-primary">
+                    {activeFg.inProduction?.toLocaleString()}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
                   Sales price

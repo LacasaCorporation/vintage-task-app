@@ -31,7 +31,9 @@ export async function syncProductionConsumption(
     .query("costingItems")
     .withIndex("by_fg", (q) => q.eq("fgId", fg._id))
     .collect();
-  const make = batchQty(fg);
+  // a run in progress has its own committed quantity; editing the sheet
+  // mid-run must re-price against that, not the product's default batch
+  const make = fg.productionQty ?? batchQty(fg);
   const next = new Map<Id<"rawMaterials">, number>();
   for (const line of lines) {
     if (line.materialId === undefined) continue;
@@ -81,8 +83,8 @@ export async function syncProductionConsumption(
  * stock. A product leaves "Listed" for a middle status once work begins.
  */
 export const start = mutation({
-  args: { fgId: v.id("finishedGoods") },
-  handler: async (ctx, { fgId }) => {
+  args: { fgId: v.id("finishedGoods"), qty: v.optional(v.number()) },
+  handler: async (ctx, { fgId, qty }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(fgId);
@@ -94,6 +96,20 @@ export const start = mutation({
       (await getSettings(ctx, userId))?.projectStatuses,
     );
 
+    // how many this run makes: the caller's answer, else the batch this
+    // product is linked to on a job, else its own default
+    let make = qty;
+    if (make === undefined) {
+      const link = (await ctx.db
+        .query("jobProducts")
+        .withIndex("by_fg", (q) => q.eq("fgId", fgId))
+        .first()) ?? null;
+      make = link?.qty ?? batchQty(fg);
+    }
+    if (!Number.isFinite(make) || make <= 0)
+      throw new Error("Enter how many to produce.");
+    make = Math.round(make * 1e6) / 1e6;
+
     const lines = await ctx.db
       .query("costingItems")
       .withIndex("by_fg", (q) => q.eq("fgId", fgId))
@@ -101,7 +117,6 @@ export const start = mutation({
 
     const needed = new Map<Id<"rawMaterials">, number>();
     // the sheet covers one product, so the whole batch is produced from it
-    const make = batchQty(fg);
     for (const line of lines) {
       if (line.materialId === undefined) continue;
       needed.set(
@@ -133,6 +148,9 @@ export const start = mutation({
       isCompleted: undefined,
       completedAt: undefined,
       productionStartedAt: Date.now(),
+      // the units are part-made now; they only reach `stock` when it finishes
+      productionQty: make,
+      inProduction: (fg.inProduction ?? 0) + make,
       productionConsumed: [...needed.entries()].map(([materialId, qty]) => ({
         materialId,
         qty,
@@ -229,6 +247,9 @@ export const stop = mutation({
     await ctx.db.patch(fgId, {
       productionStartedAt: undefined,
       productionConsumed: undefined,
+      productionQty: undefined,
+      // the abandoned units go back off the books
+      inProduction: (fg.inProduction ?? 0) - (fg.productionQty ?? 0),
       isCompleted: undefined,
       completedAt: undefined,
       // the work is no longer under way, so it goes back to "Listed"
@@ -237,10 +258,13 @@ export const stop = mutation({
   },
 });
 
-/** Finish a running production: stock stays consumed, product is completed. */
+/**
+ * Finish a running production: the raw materials stay consumed, the part-made
+ * units become finished stock, and the product is completed.
+ */
 export const finish = mutation({
-  args: { fgId: v.id("finishedGoods") },
-  handler: async (ctx, { fgId }) => {
+  args: { fgId: v.id("finishedGoods"), qty: v.optional(v.number()) },
+  handler: async (ctx, { fgId, qty }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(fgId);
@@ -248,12 +272,22 @@ export const finish = mutation({
       throw new Error("That product no longer exists.");
     if (fg.productionStartedAt === undefined)
       throw new Error("Start production before finishing it.");
+    // by default the whole run lands in stock; a partial finish is allowed
+    const made = qty ?? fg.productionQty ?? 0;
+    if (!Number.isFinite(made) || made <= 0)
+      throw new Error("Enter how many came off the line.");
+    if (made > (fg.inProduction ?? 0))
+      throw new Error("You can only finish what is in production.");
     await ctx.db.patch(fgId, {
       projectStatus: PROJECT_STATUS_FINISH,
       isCompleted: true,
       completedAt: fg.completedAt ?? Date.now(),
       productionStartedAt: undefined,
       productionConsumed: undefined,
+      stock: (fg.stock ?? 0) + made,
+      inProduction: (fg.inProduction ?? 0) - made,
+      // the run ends, so whatever is still part-made starts a new one
+      productionQty: (fg.productionQty ?? 0) - made || undefined,
     });
   },
 });

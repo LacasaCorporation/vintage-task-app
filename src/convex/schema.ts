@@ -520,7 +520,18 @@ const schema = defineSchema(
       jobIds: v.optional(v.array(v.id("projectJobs"))),
       name: v.string(), // FG product name, e.g. "Wooden chair"
       code: v.optional(v.string()), // product code / SKU, auto e.g. FG0001
-      qty: v.optional(v.number()), // how many are being made, e.g. 12
+      /**
+       * A product is a stocked entity, independent of any job or project —
+       * these are its ledger, exactly as `rawMaterials.stock` is for material.
+       */
+      /** Finished units on hand, ready to sell. */
+      stock: v.optional(v.number()),
+      /** Units part-made right now: a run has started but not finished. */
+      inProduction: v.optional(v.number()),
+      /** Units in the run currently in progress; cleared when it ends. */
+      productionQty: v.optional(v.number()),
+      /** Default batch qty offered when attaching this product to a job. */
+      qty: v.optional(v.number()),
       unit: v.optional(v.string()), // sold per: pcs, box, set…
       category: v.optional(v.string()), // managed master value
       subCategory: v.optional(v.string()), // managed master value
@@ -565,6 +576,22 @@ const schema = defineSchema(
         ),
       ),
     }).index("by_owner", ["ownerId"]),
+
+    /**
+     * How many of a product one job needs. The batch is asked for at the
+     * moment the link is made, so a product attached to two jobs can carry a
+     * different quantity against each.
+     */
+    jobProducts: defineTable({
+      ownerId: v.id("users"),
+      jobId: v.id("projectJobs"),
+      fgId: v.id("finishedGoods"),
+      qty: v.number(), // the batch this job needs
+      createdAt: v.number(),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_job", ["jobId"])
+      .index("by_fg", ["fgId"]),
 
     // jobs (also called tasks) that live under a project; FG products
     // belong to a job, so the real hierarchy is Project → Job → Product

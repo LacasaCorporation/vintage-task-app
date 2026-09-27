@@ -981,6 +981,110 @@ export const setFgJobs = mutation({
 });
 
 /**
+ * Attach a product to a job. The batch is asked for at the moment the link is
+ * made, so one product can carry a different quantity against each job.
+ */
+export const attachToJob = mutation({
+  args: {
+    fgId: v.id("finishedGoods"),
+    jobId: v.id("projectJobs"),
+    qty: v.number(),
+  },
+  handler: async (ctx, { fgId, jobId, qty }): Promise<void> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(fgId);
+    if (fg === null || fg.ownerId !== userId)
+      throw new Error("That product no longer exists.");
+    const job = await ctx.db.get(jobId);
+    if (job === null || job.ownerId !== userId)
+      throw new Error("That job no longer exists.");
+    if (fg.productionStartedAt !== undefined)
+      throw new Error("Stop production before re-linking this product.");
+    if (!Number.isFinite(qty) || qty <= 0)
+      throw new Error("Enter how many this job needs.");
+
+    const existing = (await ctx.db
+      .query("jobProducts")
+      .withIndex("by_fg", (q) => q.eq("fgId", fgId))
+      .collect()
+    ).find((r) => r.jobId === jobId);
+
+    if (existing) {
+      await ctx.db.patch(existing._id, { qty });
+    } else {
+      await ctx.db.insert("jobProducts", {
+        ownerId: userId,
+        jobId,
+        fgId,
+        qty,
+        createdAt: Date.now(),
+      });
+    }
+
+    const jobIds = Array.from(new Set([...(fg.jobIds ?? []), jobId]));
+    const project = await ctx.db.get(job.projectId);
+    await ctx.db.patch(fgId, {
+      jobIds,
+      jobId: fg.jobId ?? jobId,
+      projectName: project?.name.slice(0, MAX_NAME_LENGTH) ?? fg.projectName,
+      projectCode: project?.code ?? fg.projectCode,
+      // the product's own default follows the job it was first linked to
+      qty: fg.qty ?? qty,
+    });
+  },
+});
+
+/** Detach a product from one job, keeping any other links. */
+export const detachFromJob = mutation({
+  args: { fgId: v.id("finishedGoods"), jobId: v.id("projectJobs") },
+  handler: async (ctx, { fgId, jobId }): Promise<void> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(fgId);
+    if (fg === null || fg.ownerId !== userId)
+      throw new Error("That product no longer exists.");
+    if (fg.productionStartedAt !== undefined)
+      throw new Error("Stop production before re-linking this product.");
+
+    const rows = await ctx.db
+      .query("jobProducts")
+      .withIndex("by_fg", (q) => q.eq("fgId", fgId))
+      .collect();
+    for (const row of rows) {
+      if (row.jobId === jobId) await ctx.db.delete(row._id);
+    }
+
+    const jobIds = (fg.jobIds ?? []).filter((id) => id !== jobId);
+    if (jobIds.length === 0) {
+      // nothing left to link to, so it becomes standalone again
+      await ctx.db.patch(fgId, {
+        jobIds: undefined,
+        jobId: undefined,
+        projectName: undefined,
+        projectCode: undefined,
+      });
+      return;
+    }
+    await ctx.db.patch(fgId, { jobIds, jobId: jobIds[0] });
+  },
+});
+
+/** The batch each job needs, keyed `jobId|fgId`, for the project totals. */
+export const listJobProducts = query({
+  args: {},
+  handler: async (ctx): Promise<{ jobId: string; fgId: string; qty: number }[]> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return [];
+    const rows = await ctx.db
+      .query("jobProducts")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    return rows.map((r) => ({ jobId: r.jobId, fgId: r.fgId, qty: r.qty }));
+  },
+});
+
+/**
  * Flag (or unflag) a product. A flagged product surfaces as a subtask under
  * its job; flagging a product also turns the job's flag on so the job shows
  * as the main task in the todo list. Unflagging only clears the product.

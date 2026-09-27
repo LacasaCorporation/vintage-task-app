@@ -6,6 +6,27 @@ import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 
+/**
+ * Invoicing a product is what takes it out of stock. Called for every posted
+ * bill so a sale and a converted quotation move the same ledger. Going short
+ * is allowed — the stock simply goes negative, which is what makes the
+ * shortfall visible instead of silently refusing the sale.
+ */
+async function sellStock(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+  lines: readonly { productId: Id<"finishedGoods">; qty: number }[],
+): Promise<void> {
+  for (const line of lines) {
+    if (!(line.qty > 0)) continue;
+    const product = await ctx.db.get(line.productId);
+    if (product === null || product.ownerId !== ownerId) continue;
+    await ctx.db.patch(product._id, {
+      stock: (product.stock ?? 0) - line.qty,
+    });
+  }
+}
+
 /** Next sequential number in a series: QT0001, SAL0002, … */
 async function nextNumber(
   ctx: MutationCtx,
@@ -233,11 +254,11 @@ export const convertToSale = mutation({
       total,
       quotationId: quote._id,
     });
+    await sellStock(ctx, userId, quote.lines);
     await ctx.db.patch(quote._id, {
       status: "accepted",
       invoicedAs: saleId,
-      invoicedAt: Date.now(),
-    });
+      invoicedAt: Date.now(),    });
     return saleId;
   },
 });
@@ -294,7 +315,7 @@ export const createSale = mutation({
       });
     }
     const { grand } = priceLines(resolved, args.discountPct, args.taxPct);
-    return await ctx.db.insert("sales", {
+    const saleId = await ctx.db.insert("sales", {
       ownerId: userId,
       number: await nextNumber(ctx, "sales", userId, "SAL"),
       customerId: args.customerId,
@@ -311,6 +332,8 @@ export const createSale = mutation({
       lines: resolved,
       total: grand,
     });
+    await sellStock(ctx, userId, resolved);
+    return saleId;
   },
 });
 
@@ -342,6 +365,13 @@ export const removeSale = mutation({
         invoicedAt: undefined,
         status: "accepted",
       });
+    }
+    // the bill never happened, so the goods it took go back on the shelf
+    for (const line of sale.lines) {
+      if (!(line.qty > 0)) continue;
+      const product = await ctx.db.get(line.productId);
+      if (product === null || product.ownerId !== userId) continue;
+      await ctx.db.patch(product._id, { stock: (product.stock ?? 0) + line.qty });
     }
     await ctx.db.delete(id);
   },
