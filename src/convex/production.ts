@@ -260,12 +260,47 @@ export const stop = mutation({
 });
 
 /**
+ * Lands a run's units on the shelf. Whatever is part-made becomes finished
+ * stock and is written to the product ledger, so a product that reads
+ * "finished" always has the units to show for it. Shared by every way of
+ * finishing a product, so the two can never disagree.
+ */
+export async function landRun(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+  fg: Doc<"finishedGoods">,
+  made: number,
+): Promise<number> {
+  const qty = Math.round(made * 1e6) / 1e6;
+  if (!(qty > 0)) return 0;
+  const open = Math.round((fg.inProduction ?? 0) * 1e6) / 1e6;
+  if (qty > open) {
+    throw new Error("You can only finish what is in production.");
+  }
+  await ctx.db.patch(fg._id, {
+    stock: Math.round(((fg.stock ?? 0) + qty) * 1e6) / 1e6,
+    inProduction: Math.round((open - qty) * 1e6) / 1e6 || undefined,
+    // the run ends, so whatever is still part-made starts a new one
+    productionQty:
+      Math.round(((fg.productionQty ?? 0) - qty) * 1e6) / 1e6 || undefined,
+  });
+  // the finished-goods ledger records what actually came off the line
+  await produceStock(ctx, { ownerId: ownerId, product: fg, qty });
+  return qty;
+}
+
+/** How many units finishing a product right now would put into stock. */
+export function landableQty(fg: Doc<"finishedGoods">): number {
+  return fg.inProduction ?? fg.productionQty ?? 0;
+}
+
+/**
  * Finish a running production: the raw materials stay consumed, the part-made
  * units become finished stock, and the product is completed.
  */
 export const finish = mutation({
   args: { fgId: v.id("finishedGoods"), qty: v.optional(v.number()) },
-  handler: async (ctx, { fgId, qty }) => {
+  handler: async (ctx, { fgId, qty }): Promise<void> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(fgId);
@@ -277,21 +312,41 @@ export const finish = mutation({
     const made = qty ?? fg.productionQty ?? 0;
     if (!Number.isFinite(made) || made <= 0)
       throw new Error("Enter how many came off the line.");
-    if (made > (fg.inProduction ?? 0))
-      throw new Error("You can only finish what is in production.");
+    await landRun(ctx, userId, fg, made);
     await ctx.db.patch(fgId, {
       projectStatus: PROJECT_STATUS_FINISH,
       isCompleted: true,
       completedAt: fg.completedAt ?? Date.now(),
       productionStartedAt: undefined,
       productionConsumed: undefined,
-      stock: (fg.stock ?? 0) + made,
-      inProduction: (fg.inProduction ?? 0) - made,
-      // the run ends, so whatever is still part-made starts a new one
-      productionQty: (fg.productionQty ?? 0) - made || undefined,
     });
-    // the finished-goods ledger records what actually came off the line
-    await produceStock(ctx, { ownerId: userId, product: fg, qty: made });
+  },
+});
+
+/**
+ * Puts units that are still part-made into stock for a product that was
+ * already marked finished. A product finished without its run being closed
+ * out promised units it never booked, and this is what settles that: the
+ * "in production" figure becomes real stock.
+ */
+export const landPending = mutation({
+  args: { fgId: v.id("finishedGoods") },
+  handler: async (ctx, { fgId }): Promise<number> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(fgId);
+    if (fg === null || fg.ownerId !== userId)
+      throw new Error("That product no longer exists.");
+    const made = landableQty(fg);
+    if (!(made > 0))
+      throw new Error("Nothing is waiting to go into stock for this product.");
+    const moved = await landRun(ctx, userId, fg, made);
+    await ctx.db.patch(fgId, {
+      projectStatus: fg.projectStatus ?? PROJECT_STATUS_FINISH,
+      isCompleted: true,
+      completedAt: fg.completedAt ?? Date.now(),
+    });
+    return moved;
   },
 });
 

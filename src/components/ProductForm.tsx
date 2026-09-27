@@ -16,6 +16,7 @@ import {
   Download,
   Loader2,
   Package,
+  PackageCheck,
   Plus,
   Search as SearchIcon,
   Sigma,
@@ -147,6 +148,29 @@ export default function ProductForm({
   const removeFg = useMutation(api.costing.removeFinishedGood);
   const { confirm } = useAppDialogs();
   const canDoItem = useItemPermission();
+  const landPending = useMutation(api.production.landPending);
+
+  /**
+   * A product can be finished while units are still part-made. Put them on the
+   * shelf so the balance matches the "in production" figure it was showing.
+   */
+  const handleLandStock = async (fg: FgDoc) => {
+    const made = fg.inProduction ?? fg.productionQty ?? 0;
+    const ok = await confirm({
+      title: `Move ${made.toLocaleString()} ${fg.unit ?? "pcs"} into stock?`,
+      message: `“${fg.name}” is finished but still shows ${made.toLocaleString()} in production. This books them as finished stock and clears the in-production figure.`,
+      confirmLabel: "Move to stock",
+    });
+    if (!ok) return;
+    try {
+      const moved = await landPending({ fgId: fg._id });
+      toast.success(`${moved} moved into stock.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't move them into stock.",
+      );
+    }
+  };
   const addFg = useMutation(api.costing.addFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
   const { format: money, code: currencyCode, symbol } = useWorkspaceCurrency();
@@ -936,6 +960,22 @@ export default function ProductForm({
                                   Open as a full page
                                 </span>
                               </DropdownMenuItem>
+                              {isLocked(f) && (f.inProduction ?? 0) > 0 && (
+                                <DropdownMenuItem
+                                  onClick={() => void handleLandStock(f)}
+                                  className="text-emerald-600 focus:text-emerald-600"
+                                >
+                                  <PackageCheck className="size-3.5" />
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-medium">
+                                      Move {(f.inProduction ?? 0).toLocaleString()} into stock
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                      Finished, but not booked in yet
+                                    </span>
+                                  </div>
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 onClick={() => void handleDelete(f)}
                                 className="text-destructive focus:text-destructive"

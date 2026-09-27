@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { scopeUserId } from "./org";
-import { syncProductionConsumption } from "./production";
+import { syncProductionConsumption, landRun, landableQty } from "./production";
 import { getSettings } from "./settings";
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -1197,6 +1197,11 @@ export const setFgProjectStatus = mutation({
     const clean = status.trim().replace(/\s+/g, " ");
     if (!clean) throw new Error("Choose a status.");
     const isFinish = clean === PROJECT_STATUS_FINISH;
+    if (isFinish) {
+      // finishing a product is what puts its units on the shelf, so the
+      // project status and the stock ledger can never disagree
+      await landRun(ctx, userId, fg, landableQty(fg));
+    }
     await ctx.db.patch(id, {
       projectStatus: clean,
       isCompleted: isFinish || undefined,
@@ -1238,6 +1243,10 @@ export const setFgCompleted = mutation({
     const fg = await ctx.db.get(id);
     if (fg === null || fg.ownerId !== userId)
       throw new Error("That product no longer exists.");
+    if (completed) {
+      // ticking a product off is finishing it: its units land in stock
+      await landRun(ctx, userId, fg, landableQty(fg));
+    }
     await ctx.db.patch(id, {
       isCompleted: completed || undefined,
       projectStatus: completed ? PROJECT_STATUS_FINISH : PROJECT_STATUS_START,

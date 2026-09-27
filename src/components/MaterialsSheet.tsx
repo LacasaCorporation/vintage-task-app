@@ -51,8 +51,22 @@ function OpeningBalances({
   canEdit: boolean;
 }) {
   const setOpening = useMutation(api.stock.setOpening);
+  const { format: money } = useWorkspaceCurrency();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Id<"rawMaterials"> | null>(null);
+
+  /** The figure a row shows: what has been typed, or what is already saved. */
+  const shownQty = (m: MaterialDoc) => {
+    const typed = drafts[m._id];
+    if (typed !== undefined) return Number(typed) || 0;
+    return stockByMaterial.get(m._id)?.opening ?? 0;
+  };
+  // the opening is stock you already own, so it is worth money at the same
+  // per-unit price every costing sheet uses
+  const total = rows.reduce(
+    (sum, m) => sum + shownQty(m) * m.pricePerUnit,
+    0,
+  );
 
   const save = async (m: MaterialDoc) => {
     const value = Number((drafts[m._id] ?? "").trim());
@@ -94,14 +108,16 @@ function OpeningBalances({
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[620px] text-sm">
+          <table className="w-full min-w-[760px] text-sm">
             <thead>
               <tr className="border-b border-border/70 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
                 <th className="w-24 px-3 py-2">Code</th>
                 <th className="px-3 py-2">Material</th>
                 <th className="w-16 px-3 py-2">Unit</th>
+                <th className="w-28 px-3 py-2 text-right">Price / unit</th>
                 <th className="w-32 px-3 py-2 text-right">Current balance</th>
                 <th className="w-48 px-3 py-2 text-right">Opening qty</th>
+                <th className="w-28 px-3 py-2 text-right">Value</th>
                 <th className="w-20 px-2 py-2" />
               </tr>
             </thead>
@@ -118,6 +134,9 @@ function OpeningBalances({
                     <td className="px-3 py-2 font-medium">{m.name}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">
                       {m.unit}
+                    </td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                      {money(m.pricePerUnit)}
                     </td>
                     <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
                       {current.toLocaleString()}
@@ -142,6 +161,13 @@ function OpeningBalances({
                         </span>
                       </div>
                     </td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums">
+                      {shownQty(m) === 0 ? (
+                        <span className="text-muted-foreground/50">—</span>
+                      ) : (
+                        money(shownQty(m) * m.pricePerUnit)
+                      )}
+                    </td>
                     <td className="px-2 py-1 text-right">
                       {canEdit && dirty && (
                         <Button
@@ -163,6 +189,15 @@ function OpeningBalances({
                   </tr>
                 );
               })}
+              <tr className="border-t border-border/70 bg-muted/40">
+                <td className="px-3 py-2 text-xs font-semibold" colSpan={6}>
+                  Total opening stock
+                </td>
+                <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums">
+                  {money(total)}
+                </td>
+                <td className="px-2 py-1" />
+              </tr>
             </tbody>
           </table>
         </div>
