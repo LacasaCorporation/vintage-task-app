@@ -31,6 +31,7 @@ import ProductQtyInline from "@/components/ProductQtyInline";
 import ProductCodeInline from "@/components/ProductCodeInline";
 import ProductTagsInline from "@/components/ProductTagsInline";
 import { batchCost, costByProduct } from "@/lib/product-cost";
+import MoneyBracket from "@/components/MoneyBracket";
 import PriorityChip from "@/components/PriorityChip";
 import CustomersPanel from "@/components/CustomersPanel";
 import {
@@ -394,6 +395,7 @@ export default function ProjectsSheet({
   const totals = useMemo(
     () => ({
       products: filtered.reduce((s, p) => s + p.products, 0),
+      jobs: filtered.reduce((s, p) => s + p.jobs.length, 0),
       cost: filtered.reduce((s, p) => s + p.cost, 0),
       total: filtered.reduce((s, p) => s + p.total, 0),
     }),
@@ -828,12 +830,11 @@ export default function ProjectsSheet({
                             Budget {money(detail.budget)}
                           </span>
                         )}
-                        <span
-                          className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium"
-                          title="Actual sales total"
-                        >
-                          {money(p.total)}
-                        </span>
+                        <MoneyBracket
+                          amount={money(p.total)}
+                          tone="primary"
+                          title={`Sales value of this project's products: cost ${money(p.cost)} + margin`}
+                        />
                       </span>
                       {onEditProject && detail && (
                         <button
@@ -1006,6 +1007,19 @@ export default function ProjectsSheet({
                               <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                                 {products} product{products === 1 ? "" : "s"}
                               </span>
+                              {allJobProducts.length > 0 && (
+                                <MoneyBracket
+                                  amount={money(
+                                    allJobProducts.reduce(
+                                      (sum, f) =>
+                                        sum + batchCost(costByFg.get(f._id) ?? 0, f),
+                                      0,
+                                    ),
+                                  )}
+                                  tone="cost"
+                                  title="Total production cost of this job's products"
+                                />
+                              )}
                               <button
                                 type="button"
                                 title={
@@ -1221,12 +1235,11 @@ export default function ProjectsSheet({
                                         </span>
                                         <ProductCodeInline code={fg.code} />
                                         <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
-                                        <span
-                                          className="shrink-0 text-[10px] tabular-nums text-muted-foreground"
-                                          title="Cost for the whole batch"
-                                        >
-                                          {money(batchCost(costByFg.get(fg._id) ?? 0, fg))}
-                                        </span>
+                                        <MoneyBracket
+                                          amount={money(batchCost(costByFg.get(fg._id) ?? 0, fg))}
+                                          tone="cost"
+                                          title="Production cost for the whole batch"
+                                        />
                                         <ProductTagsInline tags={fg.tags} />
                                       </span>
                                       {fg.note && (
@@ -1332,12 +1345,11 @@ export default function ProjectsSheet({
                                 </span>
                                 <ProductCodeInline code={fg.code} />
                                 <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
-                                <span
-                                  className="shrink-0 text-[10px] tabular-nums text-muted-foreground"
-                                  title="Cost for the whole batch"
-                                >
-                                  {money(batchCost(costByFg.get(fg._id) ?? 0, fg))}
-                                </span>
+                                <MoneyBracket
+                                  amount={money(batchCost(costByFg.get(fg._id) ?? 0, fg))}
+                                  tone="cost"
+                                  title="Production cost for the whole batch"
+                                />
                                 <ProductTagsInline tags={fg.tags} />
                               </span>
                               {fg.note && (
@@ -1430,13 +1442,22 @@ export default function ProjectsSheet({
         )}
 
         {filtered.length > 0 && (
-          <div className="flex items-center justify-end gap-4 border-t border-border/70 bg-primary/5 px-4 py-2">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/70 bg-primary/5 px-4 py-2">
             <span className="text-xs font-medium text-muted-foreground">
-              Products: {totals.products} · Cost {money(totals.cost)}
+              Products: {totals.products} · Jobs: {totals.jobs}
             </span>
-            <span className="font-display text-sm font-bold tabular-nums text-primary">
-              Sales {money(totals.total)}
-            </span>
+            <MoneyBracket
+              amount={money(totals.cost)}
+              tone="cost"
+              title="Total production cost across every product, quantities included"
+              className="text-[11px]"
+            />
+            <MoneyBracket
+              amount={money(totals.total)}
+              tone="primary"
+              title="Total project value: production cost plus margin"
+              className="text-[11px]"
+            />
           </div>
         )}
       </section>
