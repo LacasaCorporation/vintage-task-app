@@ -1,6 +1,7 @@
 import type { Doc } from "@/convex/_generated/dataModel";
 import {
   BookOpen,
+  Boxes,
   Briefcase,
   CheckSquare,
   ChevronDown,
@@ -117,7 +118,9 @@ export default function PrimaryNav({
   /** True when the Tasks workspace is showing the Productions board. */
   inProductions: boolean;
 }) {
-  const [inventoryOpen, setInventoryOpen] = useState(true);
+  // collapsed by default: the two stock lists are a second step, not the
+  // place the sidebar starts
+  const [inventoryOpen, setInventoryOpen] = useState(false);
   const inCosting = section === "costing";
   const projectCount = useMemo(
     () => new Set(finishedGoods.map((fg) => fg.projectName ?? "Standalone")).size,
@@ -212,7 +215,7 @@ export default function PrimaryNav({
             <div className="ml-3 border-l border-border/60 pl-1">
               <NavRow
                 label="Raw materials"
-                Icon={Layers}
+                Icon={Package}
                 active={inCosting && onMaterials}
                 n={materials.length}
                 sub
@@ -220,7 +223,7 @@ export default function PrimaryNav({
               />
               <NavRow
                 label="Products"
-                Icon={Package}
+                Icon={Boxes}
                 active={inCosting && onProducts}
                 n={finishedGoods.length}
                 sub
