@@ -1,6 +1,5 @@
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import TaskDetail from "@/components/TaskDetail";
@@ -876,6 +875,27 @@ export default function TasksPanel({
                                   )}
                                 />
                               </span>
+                              {canCreateSteps && (
+                                <button
+                                  type="button"
+                                  aria-label="Add a subtask"
+                                  title="Add a subtask — with its own date, priority and tags"
+                                  className={cn(
+                                    "grid size-5 shrink-0 place-items-center rounded-full border transition-colors",
+                                    stepsOpen
+                                      ? "border-primary/40 text-primary hover:bg-primary/10"
+                                      : "border-dashed border-muted-foreground/40 text-muted-foreground opacity-0 hover:border-primary/50 hover:bg-primary/10 hover:text-primary focus-visible:opacity-100 group-hover/task:opacity-100",
+                                  )}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // only open — adding must never close the panel
+                                    if (!openStepRows.has(task._id)) toggleStepRow(task._id);
+                                    setStepDialogTask(task._id);
+                                  }}
+                                >
+                                  <Plus className="size-3" />
+                                </button>
+                              )}
                               {task.sourcePageId && (
                                 <Badge
                                   variant="secondary"
@@ -1147,22 +1167,11 @@ export default function TasksPanel({
                                   ))}
                                 </ul>
                               )}
-                              {canCreateSteps && (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  title="Add a subtask — with its own date, priority and tags"
-                                  className="mt-1 h-7 shrink-0 gap-1.5 rounded-lg border-dashed border-primary/40 px-2 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 hover:text-primary"
-                                  onClick={() => {
-                                    // only open — clicking must never close the panel
-                                    if (!openStepRows.has(task._id)) toggleStepRow(task._id);
-                                    setStepDialogTask(task._id);
-                                  }}
-                                >
-                                  <Plus className="size-3" />
-                                  Subtask
-                                </Button>
+                              {canCreateSteps && stepsOpen && (
+                                <p className="pt-1 text-[11px] text-muted-foreground/70">
+                                  Use the <span className="font-medium">+</span> next to
+                                  Subtasks to add another one.
+                                </p>
                               )}
                             </div>
                           </motion.div>
