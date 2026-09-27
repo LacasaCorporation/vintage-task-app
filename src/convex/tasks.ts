@@ -4,6 +4,11 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { activeFirmSettings, firmAncestors, firmTeam, scopeUserId } from "./org";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
+import {
+  canItem,
+  type ActionKey,
+  type GranularPerms,
+} from "../lib/permissions";
 
 const MAX_TASK_LENGTH = 280;
 const MAX_DESCRIPTION_LENGTH = 4000;
@@ -217,6 +222,47 @@ function peopleOf(
  * A task with no known owner is shared: it appears in both, because we cannot
  * know who wrote it and hiding it would make a task disappear.
  */
+/**
+ * May the caller see and work with tasks that belong to somebody else?
+ *
+ * Without the grant, a task assigned to one of your managers is not yours to
+ * read: the team chain is still followed downwards, so you keep seeing your
+ * own reports' work, but a manager's own task stays with them.
+ */
+async function canTouchOthersTasks(
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  action: ActionKey,
+): Promise<boolean> {
+  const firm = await activeFirmSettings(ctx, userId);
+  if (firm === null) return true; // no workspace yet — nothing to enforce
+  if (firm.ownerId === userId) return true; // the top user sees the firm
+  const me = firm.members.find((m) => m.userId === userId);
+  if (me === undefined) return false;
+
+  const member = me.permissions as GranularPerms | undefined;
+  let perms: GranularPerms | undefined = member;
+  if (me.customRoleId !== undefined) {
+    const role = await ctx.db.get(me.customRoleId);
+    if (role !== null) {
+      const base = role.permissions as GranularPerms | undefined;
+      perms = {
+        ...base,
+        ...member,
+        items: {
+          ...base?.items,
+          ...member?.items,
+          othersTasks: {
+            ...base?.items?.othersTasks,
+            ...member?.items?.othersTasks,
+          },
+        },
+      };
+    }
+  }
+  return canItem(perms, "othersTasks", action);
+}
+
 export const list = query({
   args: { scope: v.optional(v.union(v.literal("mine"), v.literal("all"))) },
   handler: async (ctx, { scope }) => {
@@ -246,7 +292,10 @@ export const list = query({
         firmTeam(ctx, userId),
         firmAncestors(ctx, userId),
       ]);
-      const reachable = new Set([...down, ...up]);
+      // Reaching up is what would expose a manager's own tasks, so it is only
+      // done for someone allowed to see other people's work.
+      const maySeeOthers = await canTouchOthersTasks(ctx, userId, "view");
+      const reachable = new Set(maySeeOthers ? [...down, ...up] : down);
       // the top user has the whole firm in view
       const isTopUser = userId === orgId;
       return all

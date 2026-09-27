@@ -25,6 +25,12 @@ export const ITEMS = [
   { key: "taskLists", section: "tasks", label: "Task lists", actions: ["create", "edit", "delete"] },
   { key: "taskFolders", section: "tasks", label: "List folders", actions: ["create", "delete"] },
   { key: "taskSteps", section: "tasks", label: "Subtasks & attachments", actions: ["create", "edit", "delete"] },
+  {
+    key: "othersTasks",
+    section: "tasks",
+    label: "Tasks belonging to other people",
+    actions: ["view", "edit", "delete"],
+  },
   { key: "notebooks", section: "notes", label: "Notebooks", actions: ["create", "edit", "delete"] },
   { key: "notePages", section: "notes", label: "Pages & sub-pages", actions: ["create", "edit", "delete"] },
   { key: "flagToTask", section: "notes", label: "Flag text → task", actions: ["create"] },

@@ -34,6 +34,7 @@ export const itemPermissionsValidator = v.object({
   taskLists: v.optional(sectionPermissionsValidator),
   taskFolders: v.optional(sectionPermissionsValidator),
   taskSteps: v.optional(sectionPermissionsValidator),
+  othersTasks: v.optional(sectionPermissionsValidator),
   notebooks: v.optional(sectionPermissionsValidator),
   notePages: v.optional(sectionPermissionsValidator),
   flagToTask: v.optional(sectionPermissionsValidator),

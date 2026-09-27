@@ -19,12 +19,14 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
-import type { DialogsApi } from "@/components/AppDialogs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
 import PageTabs from "@/components/PageTabs";
 import AccountLedgerDialog from "@/components/AccountLedgerDialog";
 import AccountFormDialog from "@/components/AccountFormDialog";
+import JournalEntryForm, {
+  type EntryFormKind,
+} from "@/components/JournalEntryForm";
 import type { AccountType } from "@/convex/accounting";
 
 /** The sub-pages of the accounting module, in the order the sidebar lists them. */
@@ -140,7 +142,7 @@ export default function AccountingPanel({
   onTabChange: (next: AccountingTab) => void;
 }) {
   const { format: money } = useWorkspaceCurrency();
-  const { confirm, promptMulti } = useAppDialogs();
+  const { confirm } = useAppDialogs();
 
   const accounts = useQuery(api.accounting.listAccounts);
   const entries = useQuery(api.accounting.listEntries, { limit: 200 });
@@ -162,7 +164,8 @@ export default function AccountingPanel({
   const postEntry = useMutation(api.accounting.createEntry);
   const dropEntry = useMutation(api.accounting.removeEntry);
 
-  const [busy, setBusy] = useState(false);
+  /** The kind of entry being composed, if the form is open. */
+  const [entryForm, setEntryForm] = useState<EntryFormKind | null>(null);
   /** The account whose ledger is open, if any. */
   const [ledgerAccountId, setLedgerAccountId] = useState<Id<"accounts"> | null>(
     null,
@@ -230,101 +233,6 @@ export default function AccountingPanel({
   };
 
   /** Opens the debit/credit editor used by journal, receipt, payment and opening. */
-  const compose = async (kind: "journal" | "receipt" | "payment" | "opening") => {
-    if (posting.length < 2) {
-      toast.error("Add at least two posting accounts first.");
-      return;
-    }
-    const titles = {
-      journal: "New journal entry",
-      receipt: "Receipt — money received",
-      payment: "Payment — money paid",
-      opening: "Opening balances",
-    } as const;
-    const cash = posting.find((a) => a.code === "1100") ?? posting[0];
-
-    setBusy(true);
-    try {
-      const amount = await promptMulti({
-        title: titles[kind],
-        message:
-          kind === "receipt" || kind === "payment"
-            ? "Who is this with?"
-            : "Debits and credits must come to the same total.",
-        confirmLabel: "Next",
-        columns: 2,
-        fields: [
-          ...(kind === "receipt" || kind === "payment"
-            ? [
-                {
-                  key: "amount",
-                  label: kind === "payment" ? "Amount paid" : "Amount received",
-                  type: "number" as const,
-                  required: true,
-                },
-              ]
-            : []),
-          {
-            key: "at",
-            label: "Date",
-            type: "date" as const,
-            initial: TODAY,
-          },
-          kind === "receipt" || kind === "payment"
-            ? { key: "party", label: "Party", full: true as const }
-            : { key: "memo", label: "Memo (optional)", full: true as const },
-        ],
-      });
-      if (!amount) return;
-      const at = amount.at ? new Date(`${amount.at}T12:00:00`).getTime() : Date.now();
-
-      let lines: { accountId: Id<"accounts">; debit: number; credit: number }[];
-      if (kind === "receipt" || kind === "payment") {
-        // A receipt or payment is always a two-line posting: money against a
-        // control account, so the pair cannot be left unbalanced.
-        const value = Number(amount.amount);
-        if (!Number.isFinite(value) || value <= 0) {
-          toast.error("Enter an amount above zero.");
-          return;
-        }
-        const control = posting.find((a) =>
-          (kind === "receipt"
-            ? ["1200", "4100", "4200"]
-            : ["2100", "5200", "5300", "5400"]
-          ).includes(a.code),
-        );
-        if (!control) {
-          toast.error("Add a control account to record this against.");
-          return;
-        }
-        const received = kind === "receipt";
-        lines = [
-          {
-            accountId: cash._id,
-            debit: received ? value : 0,
-            credit: received ? 0 : value,
-          },
-          {
-            accountId: control._id,
-            debit: received ? 0 : value,
-            credit: received ? value : 0,
-          },
-        ];
-      } else {
-        const picked = await editLines(promptMulti, posting, titles[kind]);
-        if (!picked) return;
-        lines = picked;
-      }
-
-      await postEntry({ at, kind, memo: amount.memo, party: amount.party, lines });
-      toast.success(`${titles[kind]} posted.`);
-    } catch (error) {
-      toast.error(messageFrom(error, "Couldn't post that entry."));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const totalDebit = (accounts ?? [])
     .filter((a) => !a.isGroup)
     .reduce((s, a) => s + a.debit, 0);
@@ -571,15 +479,10 @@ export default function AccountingPanel({
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy}
-              onClick={() => void compose(tab === "journal" ? "journal" : "receipt")}
+              onClick={() => setEntryForm(tab === "journal" ? "journal" : "receipt")}
               className="h-7 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
             >
-              {busy ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Plus className="size-3.5" />
-              )}
+              <Plus className="size-3.5" />
               New entry
             </Button>
           }
@@ -594,6 +497,15 @@ export default function AccountingPanel({
         </Panel>
       ) : (
         <BookPanel cashOnly={tab === "cashbook"} money={money} />
+      )}
+
+      {entryForm !== null && (
+        <JournalEntryForm
+          kind={entryForm}
+          accounts={posting}
+          money={money}
+          onClose={() => setEntryForm(null)}
+        />
       )}
 
       {accountForm !== null && formAccount !== undefined && (
@@ -624,9 +536,7 @@ export default function AccountingPanel({
           }}
           onNewEntry={() => {
             setLedgerAccountId(null);
-            // the entry editor is a portal-based prompt; let the dialog fully
-            // unmount first so its pointer-events lock is released
-            window.setTimeout(() => void compose("journal"), 0);
+            window.setTimeout(() => setEntryForm("journal"), 0);
           }}
         />
       )}
@@ -888,42 +798,6 @@ function BalanceSheet({
  * The debit / credit grid: one field pair per posting account. Returns null
  * when the user cancels; the server refuses anything that does not balance.
  */
-async function editLines(
-  promptMulti: DialogsApi["promptMulti"],
-  accounts: { _id: Id<"accounts">; code: string; name: string }[],
-  title: string,
-): Promise<{ accountId: Id<"accounts">; debit: number; credit: number }[] | null> {
-  const fields = accounts.flatMap((a) => [
-    { key: `d_${a._id}`, label: `${a.code} Dr`, placeholder: "0" },
-    { key: `c_${a._id}`, label: `${a.code} Cr`, placeholder: "0" },
-  ]);
-  const values = await promptMulti({
-    title,
-    message: "Enter a debit or a credit for each account — leave the rest blank.",
-    confirmLabel: "Next",
-    cancelLabel: "Cancel",
-    columns: 2,
-    fields,
-  });
-  if (!values) return null;
-  const lines: { accountId: Id<"accounts">; debit: number; credit: number }[] = [];
-  for (const a of accounts) {
-    const debit = Number(values[`d_${a._id}`] ?? 0);
-    const credit = Number(values[`c_${a._id}`] ?? 0);
-    if (Number.isFinite(debit) && debit > 0) {
-      lines.push({ accountId: a._id, debit, credit: 0 });
-    }
-    if (Number.isFinite(credit) && credit > 0) {
-      lines.push({ accountId: a._id, debit: 0, credit });
-    }
-  }
-  if (lines.length === 0) {
-    toast.error("Enter at least one amount.");
-    return null;
-  }
-  return lines;
-}
-
 function EntryTable({
   entries,
   money,
