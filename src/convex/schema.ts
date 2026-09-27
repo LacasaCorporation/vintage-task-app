@@ -40,6 +40,7 @@ export const itemPermissionsValidator = v.object({
   materials: v.optional(sectionPermissionsValidator),
   dataImport: v.optional(sectionPermissionsValidator),
   products: v.optional(sectionPermissionsValidator),
+  completedProducts: v.optional(sectionPermissionsValidator),
   projects: v.optional(sectionPermissionsValidator),
   printing: v.optional(sectionPermissionsValidator),
   purchases: v.optional(sectionPermissionsValidator),

@@ -254,54 +254,18 @@ export default function PurchasePanel({
           {tabBtn("expenses", `Expenses (${expenses?.length ?? 0})`, Wallet)}
           {tabBtn("vendors", `Vendors (${vendors?.length ?? 0})`, Store)}
         </div>
-        {canCreate && (
-          <div className="flex items-center gap-2">
-            {tab === "vendors" && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => setVendorPickerOpen(true)}
-                className="h-9 rounded-xl px-3 text-sm"
-              >
-                <Plus className="size-4" /> New vendor
-              </Button>
-            )}
-            {tab === "lpo" && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => {
-                  setLpoFormOpen(true);
-                }}
-                className="h-9 rounded-xl px-3 text-sm"
-              >
-                <Plus className="size-4" /> New LPO
-              </Button>
-            )}
-            {tab === "expenses" && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => setExpenseFormOpen(true)}
-                className="h-9 rounded-xl px-3 text-sm"
-              >
-                <Plus className="size-4" /> Record expense
-              </Button>
-            )}
-            {(tab === "list" || tab === "bill") && (
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => {
-                  resetForm();
-                  setTab("bill");
-                }}
-                className="h-9 rounded-xl px-3 text-sm"
-              >
-                <Plus className="size-4" /> Add bill
-              </Button>
-            )}
-          </div>
+        {canCreate && (tab === "list" || tab === "bill") && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              resetForm();
+              setTab("bill");
+            }}
+            className="h-9 rounded-xl px-3 text-sm"
+          >
+            <Plus className="size-4" /> Add bill
+          </Button>
         )}
       </div>
 
@@ -653,14 +617,15 @@ export default function PurchasePanel({
                 billed to saved vendors
               </span>
             </h2>
-            <Button
+            <button
               type="button"
-              size="sm"
               onClick={() => setVendorPickerOpen(true)}
-              className="h-8 rounded-lg px-2.5 text-xs"
+              aria-label="New vendor"
+              title="New vendor"
+              className="grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-primary"
             >
-              <Plus className="size-3.5" /> New vendor
-            </Button>
+              <Plus className="size-4" />
+            </button>
           </div>
 
           {vendors === undefined ? (

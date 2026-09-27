@@ -48,7 +48,6 @@ import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import {
   JobDialog,
   AddProductToJobDialog,
-  EditProductDialog,
 } from "@/components/ProjectDialogs";
 import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
 
@@ -214,7 +213,6 @@ export default function ProjectsSheet({
     job: JobDoc;
     projectLabel: string;
   } | null>(null);
-  const [editProduct, setEditProduct] = useState<FgDoc | null>(null);
   const projects = useQuery(api.costing.listProjects);
   const allItems = useQuery(api.costing.listAllItems);
   const allJobs = useQuery(api.jobs.listJobs);
@@ -237,82 +235,9 @@ export default function ProjectsSheet({
   const updateJob = useMutation(api.jobs.updateJob);
   const setJobFlag = useMutation(api.jobs.setJobFlag);
   const setFgFlag = useMutation(api.costing.setFgFlag);
-  const detachFromJobM = useMutation(api.costing.detachFromJob);
-  const detachFromProjectM = useMutation(api.costing.detachFromProject);
   const addProjectM = useMutation(api.costing.addProject);
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const { confirm } = useAppDialogs();
-
-  /**
-   * Delete a product from its row. Products go first in the delete order, and
-   * production has to be stopped before one can be removed, so a running
-   * product is stopped at with an explanation instead of a confirm.
-   */
-  /**
-   * Removing a product from a job. The product itself is untouched — it keeps
-   * its stock, its recipe and its place in the main products list; only the
-   * link to this job goes.
-   */
-  const handleDetachFromJob = async (fg: FgDoc, jobId: Id<"projectJobs">) => {
-    if (fg.productionStartedAt !== undefined) {
-      await confirm({
-        title: `“${fg.name}” is in production`,
-        message:
-          "Stop production before removing it from this job. Stopping puts the raw materials it is using back into stock.",
-        confirmLabel: "Got it",
-        danger: true,
-      });
-      return;
-    }
-    const ok = await confirm({
-      title: `Remove “${fg.name}” from this job?`,
-      message:
-        "The product itself stays exactly as it is — its stock, recipe and place in the products list are all kept. Only this job link is removed.",
-      confirmLabel: "Remove from job",
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await detachFromJobM({ fgId: fg._id, jobId });
-      toast.success(`“${fg.name}” removed from this job.`);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Couldn't remove it from the job.",
-      );
-    }
-  };
-
-  /** The same idea for a product grouped under a project but on no job. */
-  const handleDetachFromProject = async (fg: FgDoc) => {
-    if (fg.productionStartedAt !== undefined) {
-      await confirm({
-        title: `“${fg.name}” is in production`,
-        message:
-          "Stop production before moving it out of this project. Stopping puts the raw materials it is using back into stock.",
-        confirmLabel: "Got it",
-        danger: true,
-      });
-      return;
-    }
-    const ok = await confirm({
-      title: `Remove “${fg.name}” from this project?`,
-      message:
-        "The product stays exactly as it is — its stock, recipe and place in the products list are all kept. It just stops being listed under this project.",
-      confirmLabel: "Remove from project",
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await detachFromProjectM({ fgId: fg._id });
-      toast.success(`“${fg.name}” removed from this project.`);
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Couldn't remove it from the project.",
-      );
-    }
-  };
 
   /**
    * Promote a name-only project (one that only exists as a projectName on its
@@ -1374,25 +1299,12 @@ export default function ProjectsSheet({
                                   <PriorityChip priority={fg.priority} />
                                   <button
                                     type="button"
-                                    title="Edit product"
-                                    aria-label={`Edit product “${fg.name}”`}
+                                    title="Add materials and custom lines to this product's costing sheet"
+                                    aria-label={`Add materials to “${fg.name}”`}
                                     className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-primary"
-                                    onClick={() => setEditProduct(fg)}
+                                    onClick={() => onOpenProduct?.(fg._id)}
                                   >
-                                    <Pencil className="size-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    title={
-                                      fg.productionStartedAt !== undefined
-                                        ? "Stop production before removing"
-                                        : "Remove from this job — the product itself is kept"
-                                    }
-                                    aria-label={`Remove ${fg.name} from this job`}
-                                    className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
-                                    onClick={() => void handleDetachFromJob(fg, job._id)}
-                                  >
-                                    <Trash2 className="size-3" />
+                                    <Plus className="size-3" />
                                   </button>
                                   <ProductionButton fg={fg} />
                                   <button
@@ -1483,25 +1395,12 @@ export default function ProjectsSheet({
                           <PriorityChip priority={fg.priority} />
                           <button
                             type="button"
-                            title="Edit product"
-                            aria-label={`Edit product “${fg.name}”`}
+                            title="Add materials and custom lines to this product's costing sheet"
+                            aria-label={`Add materials to “${fg.name}”`}
                             className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-primary"
-                            onClick={() => setEditProduct(fg)}
+                            onClick={() => onOpenProduct?.(fg._id)}
                           >
-                            <Pencil className="size-3" />
-                          </button>
-                          <button
-                            type="button"
-                            title={
-                              fg.productionStartedAt !== undefined
-                                ? "Stop production before removing"
-                                : "Remove from this project — the product itself is kept"
-                            }
-                            aria-label={`Remove ${fg.name} from this project`}
-                            className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
-                            onClick={() => void handleDetachFromProject(fg)}
-                          >
-                            <Trash2 className="size-3" />
+                            <Plus className="size-3" />
                           </button>
                           <button
                             type="button"
@@ -1598,13 +1497,6 @@ export default function ProjectsSheet({
           allProducts={allProducts}
           onOpenProduct={(fgId) => onOpenProduct?.(fgId)}
           onClose={() => setAddProductJob(null)}
-        />
-      )}
-
-      {editProduct && (
-        <EditProductDialog
-          fg={editProduct}
-          onClose={() => setEditProduct(null)}
         />
       )}
     </div>

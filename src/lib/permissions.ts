@@ -32,6 +32,12 @@ export const ITEMS = [
   { key: "purchases", section: "costing", label: "Purchase bills", actions: ["create", "edit", "delete", "view"] },
   { key: "dataImport", section: "costing", label: "Excel import / export", actions: ["create", "view"] },
   { key: "products", section: "costing", label: "Products (FG)", actions: ["create", "edit", "delete"] },
+  {
+    key: "completedProducts",
+    section: "costing",
+    label: "Completed / in-production products",
+    actions: ["edit", "delete"],
+  },
   { key: "projects", section: "costing", label: "Projects", actions: ["create", "edit", "delete"] },
   { key: "printing", section: "costing", label: "Printing costing sheets", actions: ["view"] },
 ] as const;

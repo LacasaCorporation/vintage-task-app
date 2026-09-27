@@ -24,6 +24,7 @@ import {
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import StockMovementList from "@/components/StockMovementList";
 import { PRODUCT_SOURCE_LABEL } from "@/lib/stock-labels";
+import { useItemPermission } from "@/lib/useItemPermission";
 import type { ProductStockRow } from "@/lib/stock-types";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { costByProduct } from "@/lib/product-cost";
@@ -48,6 +49,15 @@ import {
 import { cn } from "@/lib/utils";
 
 type FgDoc = Doc<"finishedGoods">;
+
+/**
+ * A product that is on the line or already finished. Its costs and stock are
+ * part of the books, so changing it is a deliberate, permission-gated act.
+ */
+const isLocked = (fg: FgDoc) =>
+  fg.productionStartedAt !== undefined ||
+  (fg.inProduction ?? 0) > 0 ||
+  fg.isCompleted === true;
 
 /** How the product list is narrowed down by production state. */
 type ProductionFilter = "all" | "not-started" | "in-production" | "finished";
@@ -136,6 +146,7 @@ export default function ProductForm({
 }) {
   const removeFg = useMutation(api.costing.removeFinishedGood);
   const { confirm } = useAppDialogs();
+  const canDoItem = useItemPermission();
   const addFg = useMutation(api.costing.addFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
   const { format: money, code: currencyCode, symbol } = useWorkspaceCurrency();
@@ -308,6 +319,18 @@ export default function ProductForm({
         title: `“${fg.name}” is in production`,
         message:
           "Stop production before deleting this product. Stopping puts the raw materials it is using back into stock.",
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
+    // a finished product is part of the company's record, so only people with
+    // the completed-products permission may touch it
+    if (isLocked(fg) && !canDoItem("completedProducts", "delete")) {
+      await confirm({
+        title: `“${fg.name}” is completed`,
+        message:
+          "Deleting a completed product changes costs and stock that are already on the books. Ask a workspace admin for the “Completed / in-production products” permission, or stop production and reopen the product first.",
         confirmLabel: "Got it",
         danger: true,
       });
@@ -874,11 +897,25 @@ export default function ProductForm({
                                   </span>
                                 </div>
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setEditTarget(f)}>
+                              <DropdownMenuItem
+                                onClick={() => setEditTarget(f)}
+                                disabled={isLocked(f) && !canDoItem("completedProducts", "edit")}
+                                className={cn(
+                                  isLocked(f) && !canDoItem("completedProducts", "edit") &&
+                                    "opacity-60",
+                                )}
+                              >
                                 <Pencil className="size-3.5" />
-                                <span className="text-xs font-medium">
-                                  Edit details
-                                </span>
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-medium">
+                                    Edit details
+                                  </span>
+                                  {isLocked(f) && !canDoItem("completedProducts", "edit") && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                      Needs permission on completed products
+                                    </span>
+                                  )}
+                                </div>
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => setLinkTarget(f)}
@@ -904,9 +941,18 @@ export default function ProductForm({
                                 className="text-destructive focus:text-destructive"
                               >
                                 <Trash2 className="size-3.5" />
-                                <span className="text-xs font-medium">
-                                  Delete product
-                                </span>
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-medium">
+                                    Delete product
+                                  </span>
+                                  {isLocked(f) && (
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {canDoItem("completedProducts", "delete")
+                                        ? "Completed — confirm to delete"
+                                        : "Completed — needs permission"}
+                                    </span>
+                                  )}
+                                </div>
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>

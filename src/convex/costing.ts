@@ -4,7 +4,7 @@ import { scopeUserId } from "./org";
 import { syncProductionConsumption } from "./production";
 import { getSettings } from "./settings";
 import type { MutationCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
   PROJECT_STATUS_FINISH,
@@ -908,6 +908,22 @@ export const updateFinishedGood = mutation({
  * Products are the first level of the delete order: a job can only go once its
  * products are gone, and a project only once its jobs are gone.
  */
+/**
+ * Why a product is off limits, or null when it can be changed. A product that
+ * is on the line or already finished is part of the project's record: its
+ * costs are in the totals and its units may have been invoiced, so it cannot
+ * be edited, detached or deleted out from under them.
+ */
+function lockedReason(fg: Doc<"finishedGoods">): string | null {
+  if (fg.productionStartedAt !== undefined || (fg.inProduction ?? 0) > 0) {
+    return "This product is in production. Stop production before changing it.";
+  }
+  if (fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH) {
+    return "This product is completed, so its costs and stock are already on the books.";
+  }
+  return null;
+}
+
 export const removeFinishedGood = mutation({
   args: { id: v.id("finishedGoods") },
   handler: async (ctx, { id }) => {
@@ -922,6 +938,22 @@ export const removeFinishedGood = mutation({
       throw new Error(
         "Production is running on this product. Stop production first, then delete the product.",
       );
+    if (fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH) {
+      throw new Error(
+        "This product is completed. Its cost and stock are already on the books, so it can't be deleted.",
+      );
+    }
+    // a product still sitting under a project or job belongs to that
+    // hierarchy's totals — take it out of the project first
+    if (
+      fg.projectName !== undefined ||
+      (fg.jobIds ?? []).length > 0 ||
+      fg.jobId !== undefined
+    ) {
+      throw new Error(
+        "This product is under a project. Remove it from the project first, then delete it.",
+      );
+    }
     const items = await ctx.db
       .query("costingItems")
       .withIndex("by_fg", (q) => q.eq("fgId", id))
@@ -1050,8 +1082,8 @@ export const detachFromJob = mutation({
     const fg = await ctx.db.get(fgId);
     if (fg === null || fg.ownerId !== userId)
       throw new Error("That product no longer exists.");
-    if (fg.productionStartedAt !== undefined)
-      throw new Error("Stop production before re-linking this product.");
+    const locked = lockedReason(fg);
+    if (locked !== null) throw new Error(locked);
 
     const rows = await ctx.db
       .query("jobProducts")
@@ -1088,8 +1120,8 @@ export const detachFromProject = mutation({
     const fg = await ctx.db.get(fgId);
     if (fg === null || fg.ownerId !== userId)
       throw new Error("That product no longer exists.");
-    if (fg.productionStartedAt !== undefined)
-      throw new Error("Stop production before moving this product.");
+    const locked = lockedReason(fg);
+    if (locked !== null) throw new Error(locked);
     if (fg.projectName === undefined)
       throw new Error("That product isn't under a project.");
     await ctx.db.patch(fgId, {

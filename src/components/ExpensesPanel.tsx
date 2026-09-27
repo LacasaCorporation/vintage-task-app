@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "convex/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Trash2, Wallet } from "lucide-react";
+import { Loader2, Plus, Trash2, Wallet } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -276,6 +276,17 @@ export default function ExpensesPanel({
               {rows.length} entr{rows.length === 1 ? "y" : "ies"} · {money(spent)} spent
             </span>
           </h2>
+          {canCreate && (
+            <button
+              type="button"
+              onClick={() => onFormOpenChange(true)}
+              aria-label="Record expense"
+              title="Record expense"
+              className="grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-primary"
+            >
+              <Plus className="size-4" />
+            </button>
+          )}
         </div>
 
         {expenses === undefined ? (

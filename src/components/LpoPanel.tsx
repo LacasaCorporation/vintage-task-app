@@ -380,6 +380,17 @@ export default function LpoPanel({
               {open.length} open · {onOrder} with vendors · {money(committed)} committed
             </span>
           </h2>
+          {canCreate && (
+            <button
+              type="button"
+              onClick={() => onFormOpenChange(true)}
+              aria-label="New LPO"
+              title="New LPO"
+              className="grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-primary"
+            >
+              <Plus className="size-4" />
+            </button>
+          )}
         </div>
 
         {lpos === undefined ? (
