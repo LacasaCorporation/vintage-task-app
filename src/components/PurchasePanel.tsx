@@ -11,7 +11,6 @@ import {
   ChevronLeft,
   ClipboardList,
   Eye,
-  FileText,
   Link2,
   List,
   Loader2,
@@ -246,54 +245,51 @@ export default function PurchasePanel({
 
   return (
     <div className="mt-4 space-y-4">
-      {/* ── Header: the tab strip steps aside on the bill form ──────── */}
-      {tab === "bill" ? (
-        <div className="flex items-center justify-between gap-2">
-          <button
+      {/* ── Header: the tabs stay put; the bill form has no tab of its own ── */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
+          {tabBtn("list", `Purchase list (${bills?.length ?? 0})`, List)}
+          {tabBtn("lpo", `LPO (${lpos?.filter((l) => l.status !== "cancelled").length ?? 0})`, ClipboardList)}
+          {tabBtn("expenses", `Expenses (${expenses?.length ?? 0})`, Wallet)}
+          {tabBtn("vendors", `Vendors (${vendors?.length ?? 0})`, Store)}
+        </div>
+        {canCreate && tab === "list" && (
+          <Button
             type="button"
+            size="sm"
             onClick={() => {
               resetForm();
-              setTab("list");
+              setTab("bill");
             }}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="h-9 rounded-xl px-3 text-sm"
           >
-            <ChevronLeft className="size-3.5" /> All purchases
-          </button>
-          {canCreate && (
+            <Plus className="size-4" /> Add bill
+          </Button>
+        )}
+        {canCreate && tab === "bill" && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                setTab("list");
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ChevronLeft className="size-3.5" /> All purchases
+            </button>
             <Button
               type="button"
               size="sm"
+              variant="outline"
               onClick={() => resetForm()}
               className="h-9 rounded-xl px-3 text-sm"
             >
-              <Plus className="size-4" /> Clear form
+              Clear form
             </Button>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-1 rounded-xl border bg-card p-1 shadow-sm">
-            {tabBtn("list", `Purchase list (${bills?.length ?? 0})`, List)}
-            {tabBtn("bill", "Bill entry", FileText)}
-            {tabBtn("lpo", `LPO (${lpos?.filter((l) => l.status !== "cancelled").length ?? 0})`, ClipboardList)}
-            {tabBtn("expenses", `Expenses (${expenses?.length ?? 0})`, Wallet)}
-            {tabBtn("vendors", `Vendors (${vendors?.length ?? 0})`, Store)}
           </div>
-          {canCreate && tab === "list" && (
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => {
-                resetForm();
-                setTab("bill");
-              }}
-              className="h-9 rounded-xl px-3 text-sm"
-            >
-              <Plus className="size-4" /> Add bill
-            </Button>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
       {materials.length === 0 && (
         <p className="rounded-xl border border-dashed bg-card px-4 py-3 text-center text-sm text-muted-foreground">
