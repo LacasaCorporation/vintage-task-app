@@ -25,6 +25,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import ContactDialog from "@/components/ContactDialog";
+import StockMovementPanel from "@/components/StockMovementPanel";
 import VendorField from "@/components/VendorField";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
@@ -968,29 +969,8 @@ export default function PurchasePanel({
         </form>
       )}
 
-      {/* recent activity, only on the list tab when no bill is open */}
-      {tab === "list" && viewed === null && (bills?.length ?? 0) > 0 && (
-        <section className="rounded-2xl border bg-card p-4 shadow-sm">
-          <h3 className="mb-2 text-sm font-semibold">What each bill added to stock</h3>
-          <ul className="space-y-1">
-            {(bills ?? []).slice(0, 5).flatMap((bill) =>
-              bill.lines.map((line) => (
-                <li
-                  key={`${bill._id}-${line.materialId}`}
-                  className="flex items-center gap-2 text-xs text-muted-foreground"
-                >
-                  <CheckCircle2 className="size-3 shrink-0 text-emerald-500/70" />
-                  <span className="font-mono text-[10px]">{bill.number}</span>
-                  <span className="min-w-0 flex-1 truncate">{line.name}</span>
-                  <span className="tabular-nums">
-                    +{line.qty} {line.unit}
-                  </span>
-                </li>
-              )),
-            )}
-          </ul>
-        </section>
-      )}
+      {/* stock movement, only on the list tab when no bill is open */}
+      {tab === "list" && viewed === null && <StockMovementPanel />}
 
       <ContactDialog
         kind="vendor"

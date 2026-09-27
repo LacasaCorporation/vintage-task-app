@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { getSettings } from "./settings";
+import { stockIn, stockOut } from "./stock";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -36,8 +37,12 @@ export async function syncProductionConsumption(
   for (const used of fg.productionConsumed ?? []) {
     const material = await ctx.db.get(used.materialId);
     if (material === null) continue;
-    await ctx.db.patch(used.materialId, {
-      stock: (material.stock ?? 0) + used.qty,
+    await stockIn(ctx, {
+      ownerId: fg.ownerId,
+      material,
+      qty: used.qty,
+      source: "production-return",
+      ref: fg.name,
     });
   }
   // then take the amounts the sheet calls for now
@@ -45,7 +50,13 @@ export async function syncProductionConsumption(
     if (qty <= 0) continue;
     const material = await ctx.db.get(materialId);
     if (material === null) continue;
-    await ctx.db.patch(materialId, { stock: (material.stock ?? 0) - qty });
+    await stockOut(ctx, {
+      ownerId: fg.ownerId,
+      material,
+      qty,
+      source: "production",
+      ref: fg.name,
+    });
   }
 
   await ctx.db.patch(fg._id, {
@@ -95,8 +106,12 @@ export const start = mutation({
       const material = await ctx.db.get(materialId);
       if (material === null || material.ownerId !== userId)
         throw new Error("A material this product needs no longer exists.");
-      await ctx.db.patch(materialId, {
-        stock: (material.stock ?? 0) - qty,
+      await stockOut(ctx, {
+        ownerId: userId,
+        material,
+        qty,
+        source: "production",
+        ref: fg.name,
       });
     }
 
@@ -142,8 +157,12 @@ export const editConsumption = mutation({
     for (const used of fg.productionConsumed ?? []) {
       const material = await ctx.db.get(used.materialId);
       if (material === null || material.ownerId !== userId) continue;
-      await ctx.db.patch(used.materialId, {
-        stock: (material.stock ?? 0) + used.qty,
+      await stockIn(ctx, {
+        ownerId: userId,
+        material,
+        qty: used.qty,
+        source: "production-return",
+        ref: fg.name,
       });
     }
     for (const materialId of next.keys()) {
@@ -155,7 +174,13 @@ export const editConsumption = mutation({
       if (qty <= 0) continue;
       const material = await ctx.db.get(materialId);
       if (material === null) continue;
-      await ctx.db.patch(materialId, { stock: (material.stock ?? 0) - qty });
+      await stockOut(ctx, {
+        ownerId: userId,
+        material,
+        qty,
+        source: "production",
+        ref: fg.name,
+      });
     }
 
     await ctx.db.patch(fgId, {
@@ -182,8 +207,12 @@ export const stop = mutation({
     for (const used of fg.productionConsumed ?? []) {
       const material = await ctx.db.get(used.materialId);
       if (material === null || material.ownerId !== userId) continue;
-      await ctx.db.patch(used.materialId, {
-        stock: (material.stock ?? 0) + used.qty,
+      await stockIn(ctx, {
+        ownerId: userId,
+        material,
+        qty: used.qty,
+        source: "production-return",
+        ref: fg.name,
       });
     }
 

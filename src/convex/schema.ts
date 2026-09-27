@@ -380,6 +380,29 @@ const schema = defineSchema(
       .index("by_owner", ["ownerId"])
       .index("by_purchase", ["purchaseId"]),
 
+    /**
+     * Every stock change, so income / outgoing / balance can be reported per
+     * material. `qty` is always positive; `direction` says which way it moved.
+     */
+    stockMovements: defineTable({
+      ownerId: v.id("users"),
+      materialId: v.id("rawMaterials"),
+      name: v.string(), // material name at the time of the movement
+      unit: v.string(),
+      qty: v.number(),
+      direction: v.union(v.literal("in"), v.literal("out")),
+      source: v.union(
+        v.literal("purchase"),
+        v.literal("production"),
+        v.literal("production-return"),
+        v.literal("adjustment"),
+      ),
+      ref: v.optional(v.string()), // bill number or product name
+      at: v.number(), // ms
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_material", ["materialId"]),
+
     /** Suppliers / vendors that purchase bills can be raised against. */
     vendors: defineTable({
       ownerId: v.id("users"),

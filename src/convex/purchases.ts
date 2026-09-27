@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
+import { stockIn, stockOut } from "./stock";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -65,6 +66,8 @@ export const create = mutation({    args: {
     if (userId === null) throw new Error("Sign in first.");
     if (lines.length === 0) throw new Error("Add at least one material to the bill.");
 
+    const number = await nextPurchaseNumber(ctx, userId);
+    const at = purchasedAt ?? Date.now();
     const resolved = [];
     let total = 0;
     for (const line of lines) {
@@ -81,9 +84,14 @@ export const create = mutation({    args: {
         unitCost: line.unitCost,
       });
       total += line.qty * line.unitCost;
-      // stock in
-      await ctx.db.patch(material._id, {
-        stock: (material.stock ?? 0) + line.qty,
+      // stock in, logged as income against this bill
+      await stockIn(ctx, {
+        ownerId: userId,
+        material,
+        qty: line.qty,
+        source: "purchase",
+        ref: number,
+        at,
       });
     }
 
@@ -93,11 +101,11 @@ export const create = mutation({    args: {
     const grand = total - (total * discount) / 100 + ((total * (100 - discount)) / 100) * (tax / 100);
     const purchaseId = await ctx.db.insert("purchases", {
       ownerId: userId,
-      number: await nextPurchaseNumber(ctx, userId),
+      number,
       supplier: cleanSupplier || undefined,
       supplierId,
       supplierAddress: (supplierAddress ?? "").trim().slice(0, 240) || undefined,
-      purchasedAt: purchasedAt ?? Date.now(),
+      purchasedAt: at,
       dueAt,
       note: (note ?? "").trim().slice(0, 500) || undefined,
       currency: (currency ?? "").trim().slice(0, 8) || undefined,
@@ -156,8 +164,14 @@ export const update = mutation({
     for (const line of previous) {
       const material = await ctx.db.get(line.materialId);
       if (material === null || material.ownerId !== userId) continue;
-      await ctx.db.patch(material._id, {
-        stock: (material.stock ?? 0) - line.qty,
+      // an edited bill is a correction, not new income
+      await stockOut(ctx, {
+        ownerId: userId,
+        material,
+        qty: line.qty,
+        source: "adjustment",
+        ref: `${bill.number} (edited)`,
+        at: args.purchasedAt ?? bill.purchasedAt,
       });
       await ctx.db.delete(line._id);
     }
@@ -182,8 +196,13 @@ export const update = mutation({
       resolved.push(stored);
       total += line.qty * line.unitCost;
       await ctx.db.insert("purchaseLines", { ownerId: userId, purchaseId: id, ...stored });
-      await ctx.db.patch(material._id, {
-        stock: (material.stock ?? 0) + line.qty,
+      await stockIn(ctx, {
+        ownerId: userId,
+        material,
+        qty: line.qty,
+        source: "purchase",
+        ref: bill.number,
+        at: args.purchasedAt ?? bill.purchasedAt,
       });
     }
 
@@ -242,8 +261,13 @@ export const remove = mutation({
       for (const line of stored) {
         const material = await ctx.db.get(line.materialId);
         if (material !== null && material.ownerId === userId) {
-          await ctx.db.patch(material._id, {
-            stock: Math.max(0, (material.stock ?? 0) - line.qty),
+          await stockOut(ctx, {
+            ownerId: userId,
+            material,
+            qty: Math.min(line.qty, material.stock ?? 0),
+            source: "adjustment",
+            ref: `${bill.number} (deleted)`,
+            at: bill.purchasedAt,
           });
         }
         await ctx.db.delete(line._id);
@@ -252,8 +276,13 @@ export const remove = mutation({
       for (const line of bill.lines) {
         const material = await ctx.db.get(line.materialId);
         if (material !== null && material.ownerId === userId) {
-          await ctx.db.patch(material._id, {
-            stock: Math.max(0, (material.stock ?? 0) - line.qty),
+          await stockOut(ctx, {
+            ownerId: userId,
+            material,
+            qty: Math.min(line.qty, material.stock ?? 0),
+            source: "adjustment",
+            ref: `${bill.number} (deleted)`,
+            at: bill.purchasedAt,
           });
         }
       }
@@ -272,6 +301,13 @@ export const adjustStock = mutation({
     if (material === null) throw new Error("That material no longer exists.");
     if (material.ownerId !== userId) throw new Error("Not your material.");
     // negative stock is a real state (a shortage) and is shown, not blocked
-    await ctx.db.patch(id, { stock });
+    // a hand-set figure is a correction: log the difference, not the total
+    await stockIn(ctx, {
+      ownerId: userId,
+      material,
+      qty: stock - (material.stock ?? 0),
+      source: "adjustment",
+      ref: "Stock correction",
+    });
   },
 });
