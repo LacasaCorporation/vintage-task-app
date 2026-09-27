@@ -1047,8 +1047,6 @@ export default function Dashboard() {
               canCreateSteps={canDoItem("taskSteps", "create")}
               canEditSteps={canDoItem("taskSteps", "edit")}
               canDeleteSteps={canDoItem("taskSteps", "delete")}
-              taskScope={dataScope}
-              onScopeChange={setDataScope}
             />
           ) : (
             <NotesPanel

@@ -13,8 +13,8 @@ import {
 
 type ListId = Id<"taskLists">;
 
-/** null = All tasks; "today" / "starred" / "flagged" are smart views; otherwise a list id. */
-export type ActiveTaskView = ListId | "today" | "starred" | "flagged" | null;
+/** null = All tasks; "mine" / "starred" / "flagged" are smart views; otherwise a list id. */
+export type ActiveTaskView = ListId | "mine" | "starred" | "flagged" | null;
 
 /**
  * Sidebar: folders and task lists — shown while Tasks is active.

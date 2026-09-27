@@ -78,8 +78,6 @@ export default function TasksPanel({
   canCreateSteps = true,
   canEditSteps = true,
   canDeleteSteps = true,
-  taskScope,
-  onScopeChange,
 }: {
   activeView: ActiveTaskView;
   lists: { _id: ListId; name: string }[];
@@ -92,10 +90,14 @@ export default function TasksPanel({
   canEditSteps?: boolean;
   canDeleteSteps?: boolean;
   /** Mine / ALL scope filter value shared with the sidebar. */
-  taskScope: "mine" | "all";
-  onScopeChange: (scope: "mine" | "all") => void;
 }) {
-  // Mine / ALL filter shown above the task list ("mine" is the default).
+  /**
+   * "Mine" and "All tasks" are two sides of the same view, not a scope
+   * switch sitting beside it: Mine asks the server for only what belongs to
+   * the caller, while every other view wants everything shared with them —
+   * their reports' tasks and their managers' included.
+   */
+  const taskScope = activeView === "mine" ? "mine" : "all";
   const allTasks = useQuery(api.tasks.list, { scope: taskScope });
   const allPages = useQuery(api.notebooks.listAllPages, { scope: taskScope });
   const addTask = useMutation(api.tasks.add);
@@ -165,6 +167,8 @@ export default function TasksPanel({
   const [openTaskId, setOpenTaskId] = useState<Id<"tasks"> | null>(null);
   const [showDone, setShowDone] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("manual");
+  /** Today is a narrowing control that rides with the sort, not a view. */
+  const [todayOnly, setTodayOnly] = useState(false);
 
   // Projects view: level filter (projects / jobs / products), status filter
   // and the products-only list-vs-board presentation.
@@ -216,8 +220,8 @@ export default function TasksPanel({
 
   // ── filtering by the active sidebar view ───────────────────────────
   const viewLabel =
-    activeView === "today"
-      ? "Today"
+    activeView === "mine"
+      ? "Mine"
       : activeView === "starred"
         ? "Starred"
         : activeView === "flagged"
@@ -228,13 +232,14 @@ export default function TasksPanel({
 
   const tasks = useMemo(() => {
     let out: TaskDoc[] = allTasks ?? [];
-    if (activeView === "today") {
-      out = out.filter((t) => isDueToday(t) || isOverdue(t));
-    } else if (activeView === "starred") {
+    if (activeView === "starred") {
       out = out.filter((t) => t.starred);
-    } else if (activeView) {
+    } else if (activeView && activeView !== "mine") {
       out = out.filter((t) => t.listId === activeView);
     }
+    // Today belongs to the Sort group, so it narrows whichever view is open
+    // rather than taking its place
+    if (todayOnly) out = out.filter((t) => isDueToday(t) || isOverdue(t));
     if (!showDone) out = out.filter((t) => !t.isCompleted);
     const sorted = [...out];
     if (sortMode === "due") {
@@ -249,18 +254,17 @@ export default function TasksPanel({
       sorted.sort((a, b) => b._creationTime - a._creationTime);
     }
     return sorted;
-  }, [allTasks, activeView, showDone, sortMode]);
+  }, [allTasks, activeView, todayOnly, showDone, sortMode]);
 
   const doneCount = useMemo(
     () =>
       (allTasks ?? []).filter((t) => {
         if (!t.isCompleted) return false;
-        if (activeView === "today") return isDueToday(t) || isOverdue(t);
         if (activeView === "starred") return t.starred;
-        if (activeView) return t.listId === activeView;
-        return true;
+        if (activeView && activeView !== "mine") return t.listId === activeView;
+        return todayOnly ? isDueToday(t) || isOverdue(t) : true;
       }).length,
-    [allTasks, activeView],
+    [allTasks, activeView, todayOnly],
   );
 
   const activeList = lists.find((l) => l._id === activeView) ?? null;
@@ -274,6 +278,7 @@ export default function TasksPanel({
     const open = (allTasks ?? []).filter((t) => !t.isCompleted);
     return {
       all: open.length,
+      mine: open.length,
       today: open.filter((t) => isDueToday(t) || isOverdue(t)).length,
       starred: open.filter((t) => t.starred).length,
     };
@@ -318,11 +323,11 @@ export default function TasksPanel({
           hint: "Every task you can see",
         },
         {
-          view: "today",
-          label: "Today",
-          Icon: CalendarDays,
-          count: viewCounts.today,
-          hint: "Due today, or already overdue",
+          view: "mine",
+          label: "Mine",
+          Icon: User,
+          count: viewCounts.mine,
+          hint: "Only the tasks you own or are assigned",
         },
         {
           view: "starred",
@@ -376,7 +381,7 @@ export default function TasksPanel({
         tags: tags.length > 0 ? tags : undefined,
         listId:
           typeof activeView === "string" &&
-          activeView !== "today" &&
+          activeView !== "mine" &&
           activeView !== "starred" &&
           activeView !== "flagged"
             ? (activeView as ListId)
@@ -579,28 +584,9 @@ export default function TasksPanel({
         </button>
       </div>
 
-      {/* ── Scope / view / sort controls ────────────────────────────── */}
+      {/* ── View / sort controls ──────────────────────────────────── */}
       <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1.5">
         <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-          <button
-            type="button"
-            title={
-              taskScope === "mine"
-                ? "Only the tasks you own"
-                : "Switch back to your own tasks — currently showing everyone who reports to you"
-            }
-            onClick={() => onScopeChange("mine")}
-            className={cn(
-              "flex h-7 items-center gap-1.5 rounded-lg border px-2 font-medium transition-colors",
-              taskScope === "mine"
-                ? "border-primary/40 bg-primary/10 text-primary"
-                : "border-border bg-card hover:bg-accent hover:text-foreground",
-            )}
-          >
-            <User className="size-3.5 shrink-0" />
-            Mine
-          </button>
-          <span className="mx-1 h-4 w-px bg-border" />
           <span className="mr-1">View</span>
           {viewFilters.map(({ view, label, Icon, count, hint }) => {
             const active = activeView === view;
@@ -637,6 +623,24 @@ export default function TasksPanel({
           )}
           <span className="mx-1 h-4 w-px bg-border" />
           <span className="mr-1">Sort</span>
+          <button
+            type="button"
+            title="Narrow the list to what is due today or already overdue"
+            onClick={() => setTodayOnly((v) => !v)}
+            aria-pressed={todayOnly}
+            className={cn(
+              "flex h-7 items-center gap-1.5 rounded-lg border px-2 font-medium transition-colors",
+              todayOnly
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border bg-card hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <CalendarDays className="size-3.5 shrink-0" />
+            Today
+            <span className="text-[10px] font-normal tabular-nums opacity-70">
+              {viewCounts.today}
+            </span>
+          </button>
           {(
             [
               ["manual", "Custom"],
@@ -714,7 +718,7 @@ export default function TasksPanel({
             <Inbox className="mx-auto size-8 text-muted-foreground/40" />
             <p className="mt-3 font-medium">Nothing here</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {activeView === "today"
+              {todayOnly
                 ? "Nothing due today — enjoy the calm."
                 : activeView === "starred"
                   ? "Star a task to pin what matters most."
