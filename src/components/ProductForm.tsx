@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import StockMovementList from "@/components/StockMovementList";
+import ProductLedgerDialog from "@/components/ProductLedgerDialog";
 import { PRODUCT_SOURCE_LABEL } from "@/lib/stock-labels";
 import { useItemPermission } from "@/lib/useItemPermission";
 import type { ProductStockRow } from "@/lib/stock-types";
@@ -204,6 +205,8 @@ export default function ProductForm({
   const [showForm, setShowForm] = useState(false);
   /** The product whose transactions are open, if any. */
   const [openStock, setOpenStock] = useState<Id<"finishedGoods"> | null>(null);
+  /** The product whose full ledger is open over the list, if any. */
+  const [ledgerFor, setLedgerFor] = useState<FgDoc | null>(null);
 
   // the finished-goods ledger, the same in / out / balance the raw material
   // list shows, opened from the chevron on the left of each row
@@ -811,9 +814,9 @@ export default function ProductForm({
                       <td className="px-3 py-1.5">
                         <button
                           type="button"
-                          onClick={() => (onOpenSheet ?? onSelectFg)(f._id)}
+                          onClick={() => setLedgerFor(f)}
                           className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-primary/5"
-                          title="Open the costing sheet"
+                          title="Open this product's stock ledger"
                         >
                           <Package
                             className={cn(
@@ -895,7 +898,31 @@ export default function ProductForm({
                         )}
                       </td>
                       <td className="px-2 py-1 text-center">
-                        <span className="inline-flex gap-1 group-hover/row:inline-flex">
+                        <span className="inline-flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            aria-label={`Edit “${f.name}”`}
+                            title="Edit product details"
+                            className="grid size-6 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-primary"
+                            onClick={() => setEditTarget(f)}
+                          >
+                            <Pencil className="size-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Delete “${f.name}”`}
+                            title={
+                              isLocked(f)
+                                ? canDoItem("completedProducts", "delete")
+                                  ? "Completed — confirm to delete"
+                                  : "Completed — needs permission to delete"
+                                : "Delete product"
+                            }
+                            className="grid size-6 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-destructive"
+                            onClick={() => void handleDelete(f)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
@@ -919,26 +946,6 @@ export default function ProductForm({
                                   <span className="text-[10px] text-muted-foreground">
                                     Edit the BOM right here
                                   </span>
-                                </div>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => setEditTarget(f)}
-                                disabled={isLocked(f) && !canDoItem("completedProducts", "edit")}
-                                className={cn(
-                                  isLocked(f) && !canDoItem("completedProducts", "edit") &&
-                                    "opacity-60",
-                                )}
-                              >
-                                <Pencil className="size-3.5" />
-                                <div className="flex flex-col">
-                                  <span className="text-xs font-medium">
-                                    Edit details
-                                  </span>
-                                  {isLocked(f) && !canDoItem("completedProducts", "edit") && (
-                                    <span className="text-[10px] text-muted-foreground">
-                                      Needs permission on completed products
-                                    </span>
-                                  )}
                                 </div>
                               </DropdownMenuItem>
                               <DropdownMenuItem
@@ -976,24 +983,6 @@ export default function ProductForm({
                                   </div>
                                 </DropdownMenuItem>
                               )}
-                              <DropdownMenuItem
-                                onClick={() => void handleDelete(f)}
-                                className="text-destructive focus:text-destructive"
-                              >
-                                <Trash2 className="size-3.5" />
-                                <div className="flex flex-col">
-                                  <span className="text-xs font-medium">
-                                    Delete product
-                                  </span>
-                                  {isLocked(f) && (
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {canDoItem("completedProducts", "delete")
-                                        ? "Completed — confirm to delete"
-                                        : "Completed — needs permission"}
-                                    </span>
-                                  )}
-                                </div>
-                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </span>
@@ -1050,10 +1039,22 @@ export default function ProductForm({
         />
       )}
 
+      {ledgerFor && (
+        <ProductLedgerDialog
+          productId={ledgerFor._id}
+          productName={ledgerFor.name}
+          unitPrice={costByFg.get(ledgerFor._id) !== undefined
+            ? (costByFg.get(ledgerFor._id) ?? 0) * (1 + (ledgerFor.markupPct ?? 0) / 100)
+            : 0}
+          onClose={() => setLedgerFor(null)}
+          onOpenCosting={(id) => (onOpenSheet ?? onSelectFg)(id)}
+        />
+      )}
+
       <p className="mt-3 text-xs text-muted-foreground">
-        Click a product to open its costing sheet right here — add raw materials with quantities
-        and custom lines, then read the total with markup. Cost updates live as you edit the
-        sheet, and the list stays where you left it.
+        Click a product to read its full stock ledger. Use the arrow on the left for a
+        quick transaction list, Σ to open the costing sheet, and the pencil or bin to
+        change or remove it.
       </p>
     </div>
   );

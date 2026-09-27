@@ -153,6 +153,107 @@ export const report = query({
   },
 });
 
+/** One line of a product's ledger, with the balance it left behind. */
+export type ProductLedgerLine = {
+  /** A movement id, or `opening:<id>` for the synthetic opening line. */
+  _id: string;
+  at: number;
+  qty: number;
+  unit: string;
+  direction: "in" | "out";
+  source: Doc<"productMovements">["source"];
+  ref: string | undefined;
+  /** Stock on hand once this movement is applied. */
+  balance: number;
+};
+
+/**
+ * The whole story for one product: every movement, oldest first, each carrying
+ * the balance it left, so the column adds up the way a real ledger does. The
+ * opening figure is the first line so the arithmetic starts from nothing.
+ */
+export const ledger = query({
+  args: { productId: v.id("finishedGoods") },
+  handler: async (
+    ctx,
+    { productId },
+  ): Promise<{
+    product: {
+      _id: Id<"finishedGoods">;
+      name: string;
+      code: string | undefined;
+      unit: string;
+      category: string | undefined;
+      note: string | undefined;
+    };
+    opening: number;
+    income: number;
+    outgoing: number;
+    balance: number;
+    lines: ProductLedgerLine[];
+  } | null> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return null;
+    const product = await ctx.db.get(productId);
+    if (product === null || product.ownerId !== userId) return null;
+
+    const all = await ctx.db
+      .query("productMovements")
+      .withIndex("by_product", (q) => q.eq("productId", productId))
+      .collect();
+    const { income, outgoing } = explained(all);
+    const balance = round(product.stock ?? 0);
+    const opening = round(product.opening ?? balance - income + outgoing);
+
+    // walk the movements forward from the opening so each line can show the
+    // balance it produced — this is what makes the column verifiable
+    const ordered = all.slice().sort((a, b) => a.at - b.at || a._id.localeCompare(b._id));
+    let running = opening;
+    const lines: ProductLedgerLine[] = ordered.map((m) => {
+      running = round(running + (m.direction === "in" ? m.qty : -m.qty));
+      return {
+        _id: m._id,
+        at: m.at,
+        qty: m.qty,
+        unit: m.unit,
+        direction: m.direction,
+        source: m.source,
+        ref: m.ref,
+        balance: running,
+      };
+    });
+    // the opening is its own line: it is where the balance came from
+    if (opening !== 0) {
+      lines.unshift({
+        _id: `opening:${productId}`,
+        at: ordered[0]?.at ?? Date.now(),
+        qty: Math.abs(opening),
+        unit: product.unit ?? "pcs",
+        direction: opening > 0 ? "in" : "out",
+        source: "adjustment",
+        ref: "Opening balance",
+        balance: round(opening),
+      });
+    }
+
+    return {
+      product: {
+        _id: product._id,
+        name: product.name,
+        code: product.code,
+        unit: product.unit ?? "pcs",
+        category: product.category,
+        note: product.note,
+      },
+      opening,
+      income,
+      outgoing,
+      balance,
+      lines,
+    };
+  },
+});
+
 /**
  * Sets the opening figure for a product: the units already on hand before any
  * run or invoice was recorded. The difference against the live balance is
