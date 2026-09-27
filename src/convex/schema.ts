@@ -839,10 +839,29 @@ const schema = defineSchema(
         v.literal("expense"),
       ),
       isGroup: v.optional(v.boolean()),
+      /**
+       * The group this account sits under. Groups may themselves sit under a
+       * group, so the chart can nest as deeply as a business needs — a
+       * "Current assets" heading can hold Cash, Bank and Receivable, and those
+       * can hold sub-ledgers of their own.
+       */
+      parentId: v.optional(v.id("accounts")),
       note: v.optional(v.string()),
+      /**
+       * Bank detail. Only meaningful on an account that actually holds money
+       * at a bank: the name it is held at, the account number and BSB/routing
+       * line. Cash accounts keep this off.
+       */
+      isBank: v.optional(v.boolean()),
+      bankName: v.optional(v.string()),
+      accountNumber: v.optional(v.string()),
+      bsb: v.optional(v.string()),
+      /** Overrides the firm default on this account alone. */
+      currency: v.optional(v.string()),
     })
       .index("by_owner", ["ownerId"])
-      .index("by_code", ["ownerId", "code"]),
+      .index("by_code", ["ownerId", "code"])
+      .index("by_parent", ["ownerId", "parentId"]),
 
     /**
      * A journal entry — the header of a double-entry posting. `kind` records

@@ -17,12 +17,21 @@ export type AccountRow = {
   type: AccountType;
   isGroup: boolean;
   note?: string;
+  /** The group this account sits under, if any. */
+  parentId?: Id<"accounts">;
+  isBank: boolean;
+  bankName?: string;
+  accountNumber?: string;
+  bsb?: string;
+  currency?: string;
   /** Debit-positive balance from posted lines, plus the opening balance. */
   balance: number;
   debit: number;
   credit: number;
   /** A signed balance, as the type reports it (income and liability read positive). */
   signed: number;
+  /** Direct children, so the chart can subtotal a group without a second query. */
+  childIds: Id<"accounts">[];
 };
 
 export type EntryRow = {
@@ -58,34 +67,85 @@ const DEFAULT_ACCOUNTS: {
   name: string;
   type: AccountType;
   isGroup?: boolean;
+  /** The code of the group this sits under. Applied once the ids exist. */
+  parent?: string;
+  isBank?: boolean;
+  bankName?: string;
 }[] = [
   { code: "1000", name: "Assets", type: "asset", isGroup: true },
-  { code: "1100", name: "Cash in hand", type: "asset" },
-  { code: "1110", name: "Bank account", type: "asset" },
-  { code: "1200", name: "Accounts receivable", type: "asset" },
-  { code: "1300", name: "Raw material inventory", type: "asset" },
-  { code: "1400", name: "Finished goods inventory", type: "asset" },
-  { code: "1500", name: "Plant & equipment", type: "asset" },
+  { code: "1100", name: "Cash in hand", type: "asset", parent: "1000" },
+  {
+    code: "1110",
+    name: "Bank account",
+    type: "asset",
+    parent: "1000",
+    isBank: true,
+    bankName: "Bank account",
+  },
+  {
+    code: "1120",
+    name: "Payroll account",
+    type: "asset",
+    parent: "1000",
+    isBank: true,
+    bankName: "Payroll account",
+  },
+  { code: "1200", name: "Accounts receivable", type: "asset", parent: "1000" },
+  {
+    code: "1210",
+    name: "Customer advances",
+    type: "asset",
+    parent: "1200",
+  },
+  {
+    code: "1300",
+    name: "Raw material inventory",
+    type: "asset",
+    parent: "1000",
+  },
+  {
+    code: "1400",
+    name: "Finished goods inventory",
+    type: "asset",
+    parent: "1000",
+  },
+  { code: "1500", name: "Plant & equipment", type: "asset", parent: "1000" },
 
   { code: "2000", name: "Liabilities", type: "liability", isGroup: true },
-  { code: "2100", name: "Accounts payable", type: "liability" },
-  { code: "2200", name: "Loans payable", type: "liability" },
-  { code: "2300", name: "GST / tax payable", type: "liability" },
+  { code: "2100", name: "Accounts payable", type: "liability", parent: "2000" },
+  {
+    code: "2110",
+    name: "Supplier advances",
+    type: "liability",
+    parent: "2100",
+  },
+  { code: "2200", name: "Loans payable", type: "liability", parent: "2000" },
+  { code: "2300", name: "GST / tax payable", type: "liability", parent: "2000" },
 
   { code: "3000", name: "Equity", type: "equity", isGroup: true },
-  { code: "3100", name: "Owner capital", type: "equity" },
-  { code: "3200", name: "Retained earnings", type: "equity" },
+  { code: "3100", name: "Owner capital", type: "equity", parent: "3000" },
+  { code: "3200", name: "Retained earnings", type: "equity", parent: "3000" },
 
   { code: "4000", name: "Income", type: "income", isGroup: true },
-  { code: "4100", name: "Sales revenue", type: "income" },
-  { code: "4200", name: "Other income", type: "income" },
+  { code: "4100", name: "Sales revenue", type: "income", parent: "4000" },
+  { code: "4200", name: "Other income", type: "income", parent: "4000" },
 
   { code: "5000", name: "Expenses", type: "expense", isGroup: true },
-  { code: "5100", name: "Cost of goods sold", type: "expense" },
-  { code: "5200", name: "Raw material purchased", type: "expense" },
-  { code: "5300", name: "Rent", type: "expense" },
-  { code: "5400", name: "Salaries & wages", type: "expense" },
-  { code: "5500", name: "Utilities", type: "expense" },
+  {
+    code: "5100",
+    name: "Cost of goods sold",
+    type: "expense",
+    parent: "5000",
+  },
+  {
+    code: "5200",
+    name: "Raw material purchased",
+    type: "expense",
+    parent: "5000",
+  },
+  { code: "5300", name: "Rent", type: "expense", parent: "5000" },
+  { code: "5400", name: "Salaries & wages", type: "expense", parent: "5000" },
+  { code: "5500", name: "Utilities", type: "expense", parent: "5000" },
 ];
 
 /** JE0001, JE0002, … */
@@ -116,14 +176,25 @@ export const ensureDefaults = mutation({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .first();
     if (existing !== null) return false;
+    // Parents are written first and their ids remembered, so a child can be
+    // filed under its heading in the same pass. Codes run in ascending order
+    // and a group always carries a lower code than what sits under it.
+    const idOf = new Map<string, Id<"accounts">>();
     for (const a of DEFAULT_ACCOUNTS) {
-      await ctx.db.insert("accounts", {
+      const parentId =
+        a.parent === undefined ? undefined : idOf.get(a.parent);
+      if (a.parent !== undefined && parentId === undefined) continue;
+      const id = await ctx.db.insert("accounts", {
         ownerId: userId,
         code: a.code,
         name: a.name,
         type: a.type,
-        isGroup: a.isGroup,
+        isGroup: a.isGroup === true ? true : undefined,
+        parentId,
+        isBank: a.isBank === true ? true : undefined,
+        bankName: a.bankName,
       });
+      idOf.set(a.code, id);
     }
     return true;
   },
@@ -155,6 +226,14 @@ export const listAccounts = query({
       totals.set(line.accountId, t);
     }
 
+    const childrenOf = new Map<Id<"accounts">, Id<"accounts">[]>();
+    for (const a of accounts) {
+      if (a.parentId === undefined) continue;
+      const list = childrenOf.get(a.parentId) ?? [];
+      list.push(a._id);
+      childrenOf.set(a.parentId, list);
+    }
+
     return accounts
       .map((a) => {
         const t = totals.get(a._id) ?? { debit: 0, credit: 0 };
@@ -168,10 +247,17 @@ export const listAccounts = query({
           type: a.type,
           isGroup: a.isGroup === true,
           note: a.note,
+          parentId: a.parentId,
+          isBank: a.isBank === true,
+          bankName: a.bankName,
+          accountNumber: a.accountNumber,
+          bsb: a.bsb,
+          currency: a.currency,
           balance,
           debit,
           credit,
           signed: round(balance * signFor(a.type)),
+          childIds: childrenOf.get(a._id) ?? [],
         };
       })
       .sort((x, y) => x.code.localeCompare(y.code, undefined, { numeric: true }));
@@ -348,19 +434,126 @@ export const listEntries = query({
   },
 });
 
+const accountTypeValidator = v.union(
+  v.literal("asset"),
+  v.literal("liability"),
+  v.literal("equity"),
+  v.literal("income"),
+  v.literal("expense"),
+);
+
+/** The leading digit of a code, by the side of the balance it lands on. */
+const TYPE_PREFIX: Record<AccountType, string> = {
+  asset: "1",
+  liability: "2",
+  equity: "3",
+  income: "4",
+  expense: "5",
+};
+
+/**
+ * A parent must be a group of the same type: an asset account cannot sit
+ * under an expense heading. The walk up the chain also refuses to meet the
+ * account being moved, which is what would make the chart loop forever.
+ */
+async function assertParent(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+  parentId: Id<"accounts"> | undefined,
+  type: AccountType,
+  selfId?: Id<"accounts">,
+): Promise<void> {
+  if (parentId === undefined) return;
+  if (selfId !== undefined && parentId === selfId) {
+    throw new Error("An account cannot be its own parent.");
+  }
+  const parent = await ctx.db.get(parentId);
+  if (parent === null || parent.ownerId !== ownerId) {
+    throw new Error("That group no longer exists.");
+  }
+  if (parent.isGroup !== true) {
+    throw new Error(`${parent.code} ${parent.name} is not a group.`);
+  }
+  if (parent.type !== type) {
+    throw new Error(
+      `${parent.code} ${parent.name} is an ${parent.type} group — this account is ${type}.`,
+    );
+  }
+  let cursor: Doc<"accounts"> | null = parent;
+  while (cursor !== null && cursor.parentId !== undefined) {
+    if (selfId !== undefined && cursor.parentId === selfId) {
+      throw new Error("That would nest the account inside itself.");
+    }
+    cursor = await ctx.db.get(cursor.parentId);
+  }
+}
+
+/** Bank detail is stripped unless the account is actually flagged as a bank. */
+function bankFields(args: {
+  isBank?: boolean;
+  bankName?: string;
+  accountNumber?: string;
+  bsb?: string;
+  currency?: string;
+}): {
+  isBank: boolean;
+  bankName?: string;
+  accountNumber?: string;
+  bsb?: string;
+  currency?: string;
+} {
+  const currency = args.currency?.trim() || undefined;
+  if (args.isBank !== true) {
+    return {
+      isBank: false,
+      bankName: undefined,
+      accountNumber: undefined,
+      bsb: undefined,
+      currency,
+    };
+  }
+  return {
+    isBank: true,
+    bankName: args.bankName?.trim() || undefined,
+    accountNumber: args.accountNumber?.trim() || undefined,
+    bsb: args.bsb?.trim() || undefined,
+    currency,
+  };
+}
+
+/** The next free code in a block, so the form can offer one. */
+export const suggestCode = query({
+  args: { type: accountTypeValidator },
+  handler: async (ctx, { type }): Promise<string> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return `${TYPE_PREFIX[type]}100`;
+    const accounts = await ctx.db
+      .query("accounts")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const used = new Set(accounts.map((a) => a.code));
+    const prefix = TYPE_PREFIX[type];
+    for (let n = 1; n <= 99; n += 1) {
+      const candidate = `${prefix}${n < 10 ? "0" : ""}${n}`;
+      if (!used.has(candidate)) return candidate;
+    }
+    return `${prefix}99`;
+  },
+});
+
 export const createAccount = mutation({
   args: {
     code: v.string(),
     name: v.string(),
-    type: v.union(
-      v.literal("asset"),
-      v.literal("liability"),
-      v.literal("equity"),
-      v.literal("income"),
-      v.literal("expense"),
-    ),
+    type: accountTypeValidator,
     isGroup: v.optional(v.boolean()),
+    parentId: v.optional(v.id("accounts")),
     note: v.optional(v.string()),
+    isBank: v.optional(v.boolean()),
+    bankName: v.optional(v.string()),
+    accountNumber: v.optional(v.string()),
+    bsb: v.optional(v.string()),
+    currency: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"accounts">> => {
     const userId = await scopeUserId(ctx);
@@ -369,6 +562,9 @@ export const createAccount = mutation({
     const name = args.name.trim();
     if (!code) throw new Error("Give the account a code.");
     if (!name) throw new Error("Give the account a name.");
+    if (args.isBank === true && args.isGroup === true) {
+      throw new Error("A group holds no balance, so it cannot be a bank account.");
+    }
     const clash = await ctx.db
       .query("accounts")
       .withIndex("by_code", (q) =>
@@ -376,13 +572,16 @@ export const createAccount = mutation({
       )
       .first();
     if (clash !== null) throw new Error(`Account ${code} already exists.`);
+    await assertParent(ctx, userId, args.parentId, args.type);
     return await ctx.db.insert("accounts", {
       ownerId: userId,
       code,
       name,
       type: args.type,
-      isGroup: args.isGroup,
+      isGroup: args.isGroup === true ? true : undefined,
+      parentId: args.parentId,
       note: args.note?.trim() || undefined,
+      ...bankFields(args),
     });
   },
 });
@@ -390,16 +589,17 @@ export const createAccount = mutation({
 export const updateAccount = mutation({
   args: {
     id: v.id("accounts"),
+    code: v.optional(v.string()),
     name: v.string(),
-    type: v.union(
-      v.literal("asset"),
-      v.literal("liability"),
-      v.literal("equity"),
-      v.literal("income"),
-      v.literal("expense"),
-    ),
+    type: accountTypeValidator,
     isGroup: v.optional(v.boolean()),
+    parentId: v.optional(v.id("accounts")),
     note: v.optional(v.string()),
+    isBank: v.optional(v.boolean()),
+    bankName: v.optional(v.string()),
+    accountNumber: v.optional(v.string()),
+    bsb: v.optional(v.string()),
+    currency: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<void> => {
     const userId = await scopeUserId(ctx);
@@ -410,11 +610,62 @@ export const updateAccount = mutation({
     }
     const name = args.name.trim();
     if (!name) throw new Error("Give the account a name.");
+    if (args.isBank === true && args.isGroup === true) {
+      throw new Error("A group holds no balance, so it cannot be a bank account.");
+    }
+
+    const code = args.code?.trim() || account.code;
+    if (code !== account.code) {
+      const clash = await ctx.db
+        .query("accounts")
+        .withIndex("by_code", (q) =>
+          q.eq("ownerId", userId).eq("code", code),
+        )
+        .first();
+      if (clash !== null) throw new Error(`Account ${code} already exists.`);
+    }
+
+    // turning a leaf into a group is fine; turning a group into a leaf would
+    // silently swallow everything filed under it
+    const children = await ctx.db
+      .query("accounts")
+      .withIndex("by_parent", (q) =>
+        q.eq("ownerId", userId).eq("parentId", args.id),
+      )
+      .collect();
+    if (children.length > 0 && args.isGroup !== true) {
+      throw new Error(
+        `${code} ${name} still holds ${children.length} account${
+          children.length === 1 ? "" : "s"
+        } — move them out first.`,
+      );
+    }
+
+    // the type decides which side of the balance reads positive, so it cannot
+    // move once money has been posted through the account
+    if (args.type !== account.type) {
+      const used = await ctx.db
+        .query("journalLines")
+        .withIndex("by_account", (q) =>
+          q.eq("ownerId", userId).eq("accountId", args.id),
+        )
+        .first();
+      if (used !== null) {
+        throw new Error(
+          `${code} ${name} has postings, so its type can no longer be changed.`,
+        );
+      }
+    }
+
+    await assertParent(ctx, userId, args.parentId, args.type, args.id);
     await ctx.db.patch(args.id, {
+      code,
       name,
       type: args.type,
-      isGroup: args.isGroup,
+      isGroup: args.isGroup === true ? true : undefined,
+      parentId: args.parentId,
       note: args.note?.trim() || undefined,
+      ...bankFields(args),
     });
   },
 });
@@ -427,6 +678,19 @@ export const removeAccount = mutation({
     const account = await ctx.db.get(id);
     if (account === null || account.ownerId !== userId) {
       throw new Error("That account no longer exists.");
+    }
+    const children = await ctx.db
+      .query("accounts")
+      .withIndex("by_parent", (q) =>
+        q.eq("ownerId", userId).eq("parentId", id),
+      )
+      .collect();
+    if (children.length > 0) {
+      throw new Error(
+        `${account.code} ${account.name} still holds ${children.length} account${
+          children.length === 1 ? "" : "s"
+        } — move or remove them first.`,
+      );
     }
     const used = await ctx.db
       .query("journalLines")

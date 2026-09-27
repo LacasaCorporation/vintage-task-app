@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import {
   BookOpen,
   CalendarDays,
+  Eye,
   Landmark,
   Loader2,
   Pencil,
@@ -23,6 +24,7 @@ import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
 import PageTabs from "@/components/PageTabs";
 import AccountLedgerDialog from "@/components/AccountLedgerDialog";
+import AccountFormDialog from "@/components/AccountFormDialog";
 import type { AccountType } from "@/convex/accounting";
 
 /** The sub-pages of the accounting module, in the order the sidebar lists them. */
@@ -81,6 +83,26 @@ function toDateInput(ms: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/**
+ * How deep in the chart an account sits, so the row can be indented under the
+ * heading it belongs to. Capped at three so a deep chart never pushes the
+ * figures off the right-hand edge.
+ */
+function depthOf(
+  account: { parentId?: Id<"accounts"> },
+  byId: Map<Id<"accounts">, { parentId?: Id<"accounts"> }>,
+): number {
+  let depth = 0;
+  let cursor = account.parentId;
+  while (cursor !== undefined && depth < 3) {
+    const parent = byId.get(cursor);
+    if (parent === undefined) break;
+    depth += 1;
+    cursor = parent.parentId;
+  }
+  return depth;
+}
+
 function Panel({
   title,
   count,
@@ -135,8 +157,7 @@ export default function AccountingPanel({
     (shownKinds as readonly string[]).includes(e.kind),
   ).length} entries`;
   const ensureDefaults = useMutation(api.accounting.ensureDefaults);
-  const addAccount = useMutation(api.accounting.createAccount);
-  const editAccount = useMutation(api.accounting.updateAccount);
+  // create and edit live in AccountFormDialog, which owns its own mutations
   const removeAccount = useMutation(api.accounting.removeAccount);
   const postEntry = useMutation(api.accounting.createEntry);
   const dropEntry = useMutation(api.accounting.removeEntry);
@@ -148,6 +169,15 @@ export default function AccountingPanel({
   );
   /** The entry to highlight after jumping out of a ledger row. */
   const [focusEntry, setFocusEntry] = useState<Id<"journalEntries"> | null>(null);
+  /** The account the create/edit/view form is open on, if any. */
+  const [accountForm, setAccountForm] = useState<{
+    mode: "create" | "edit" | "view";
+    id?: Id<"accounts">;
+  } | null>(null);
+  const formAccount =
+    accountForm?.id === undefined
+      ? undefined
+      : (accounts ?? []).find((a) => a._id === accountForm.id);
 
   // a brand-new firm has no chart, so seed the standard one on first open
   useEffect(() => {
@@ -164,64 +194,6 @@ export default function AccountingPanel({
     () => new Map((accounts ?? []).map((a) => [a._id, a])),
     [accounts],
   );
-
-  const newAccount = async () => {
-    const values = await promptMulti({
-      title: "New account",
-      message: "Group rows are headings only — they hold no balance.",
-      confirmLabel: "Add account",
-      columns: 2,
-      fields: [
-        { key: "code", label: "Code", placeholder: "1300", required: true },
-        { key: "name", label: "Name", placeholder: "Raw material inventory", required: true },
-        { key: "type", label: "Type", initial: "asset" },
-        { key: "note", label: "Note (optional)" },
-      ],
-    });
-    if (!values) return;
-    const type = (values.type ?? "asset").trim().toLowerCase();
-    try {
-      await addAccount({
-        code: values.code ?? "",
-        name: values.name ?? "",
-        type: (["asset", "liability", "equity", "income", "expense"] as const)
-          .find((t) => t === type) ?? "asset",
-        note: values.note,
-      });
-      toast.success("Account added.");
-    } catch (error) {
-      toast.error(messageFrom(error, "Couldn't add that account."));
-    }
-  };
-
-  const editOne = async (id: Id<"accounts">) => {
-    const a = byId.get(id);
-    if (!a) return;
-    const values = await promptMulti({
-      title: `Edit ${a.code}`,
-      confirmLabel: "Save changes",
-      columns: 2,
-      fields: [
-        { key: "name", label: "Name", initial: a.name, required: true },
-        { key: "type", label: "Type", initial: a.type },
-        { key: "note", label: "Note (optional)", initial: a.note ?? "", full: true },
-      ],
-    });
-    if (!values) return;
-    const type = (values.type ?? a.type).trim().toLowerCase();
-    try {
-      await editAccount({
-        id,
-        name: values.name ?? "",
-        type: (["asset", "liability", "equity", "income", "expense"] as const)
-          .find((t) => t === type) ?? a.type,
-        note: values.note,
-      });
-      toast.success("Account updated.");
-    } catch (error) {
-      toast.error(messageFrom(error, "Couldn't update that account."));
-    }
-  };
 
   const deleteOne = async (id: Id<"accounts">) => {
     const a = byId.get(id);
@@ -388,7 +360,7 @@ export default function AccountingPanel({
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => void newAccount()}
+                onClick={() => setAccountForm({ mode: "create" })}
                 className="h-7 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
               >
                 <Plus className="size-3.5" /> Account
@@ -411,7 +383,7 @@ export default function AccountingPanel({
                     <th className="w-28 px-3 py-2 text-right">Debit</th>
                     <th className="w-28 px-3 py-2 text-right">Credit</th>
                     <th className="w-32 px-3 py-2 text-right">Balance</th>
-                    <th className="w-10 px-2 py-2" />
+                    <th className="w-24 px-2 py-2" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -436,11 +408,34 @@ export default function AccountingPanel({
                           a.isGroup ? "font-semibold" : "font-medium",
                         )}
                       >
+                        {/* indentation shows where the account sits in the chart */}
+                        <span
+                          className="inline-block shrink-0 align-middle"
+                          style={{ width: depthOf(a, byId) * 14 }}
+                        />
                         {a.isGroup ? (
-                          a.name
+                          <span>
+                            {a.name}
+                            {a.childIds.length > 0 && (
+                              <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                                {a.childIds.length}
+                              </span>
+                            )}
+                          </span>
                         ) : (
                           <span className="underline decoration-transparent underline-offset-2 transition-colors group-hover/account:decoration-current">
                             {a.name}
+                          </span>
+                        )}
+                        {a.isBank && (
+                          <span
+                            className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 align-middle text-[10px] font-medium text-primary"
+                            title={
+                              [a.bankName, a.accountNumber].filter(Boolean).join(" · ") ||
+                              "Bank account"
+                            }
+                          >
+                            <Landmark className="size-2.5" /> Bank
                           </span>
                         )}
                       </td>
@@ -491,13 +486,28 @@ export default function AccountingPanel({
                             >
                               <ScrollText className="size-3" />
                             </button>
+                          </span>
+                        )}
+                        <span className="flex justify-end gap-0.5">
+                            <button
+                              type="button"
+                              aria-label={`View ${a.name}`}
+                              title="View account"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setAccountForm({ mode: "view", id: a._id });
+                              }}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
+                            >
+                              <Eye className="size-3" />
+                            </button>
                             <button
                               type="button"
                               aria-label={`Edit ${a.name}`}
                               title="Edit account"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                void editOne(a._id);
+                                setAccountForm({ mode: "edit", id: a._id });
                               }}
                               className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
                             >
@@ -515,8 +525,7 @@ export default function AccountingPanel({
                             >
                               <Trash2 className="size-3.5" />
                             </button>
-                          </span>
-                        )}
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -585,6 +594,22 @@ export default function AccountingPanel({
         </Panel>
       ) : (
         <BookPanel cashOnly={tab === "cashbook"} money={money} />
+      )}
+
+      {accountForm !== null && formAccount !== undefined && (
+        <AccountFormDialog
+          mode={accountForm.mode}
+          account={formAccount}
+          accounts={accounts ?? []}
+          money={money}
+          onClose={() => setAccountForm(null)}
+          onSaved={() => setAccountForm(null)}
+          onDeleted={() => setAccountForm(null)}
+          onOpenLedger={(id) => {
+            setAccountForm(null);
+            setLedgerAccountId(id);
+          }}
+        />
       )}
 
       {ledgerAccountId !== null && (
