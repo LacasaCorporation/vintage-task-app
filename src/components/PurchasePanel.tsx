@@ -31,6 +31,7 @@ import LpoPanel from "@/components/LpoPanel";
 import ExpensesPanel from "@/components/ExpensesPanel";
 import VendorField from "@/components/VendorField";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
+import VendorLedgerDialog from "@/components/VendorLedgerDialog";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
@@ -43,6 +44,9 @@ const emptyLine = (): DraftLine => ({ materialId: "", qty: "1", rate: "" });
 const todayInput = () => toLocalInput(new Date());
 
 const num = (value: string) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+
+/** Money is summed in cents, so a column of bills never shows a float tail. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
 /**
  * Purchase module. The list of purchase bills is the default screen, with an
  * "Add bill" button that opens the bill entry form; saving a bill adds every
@@ -82,6 +86,8 @@ export default function PurchasePanel({
   const [vendorPickerOpen, setVendorPickerOpen] = useState(false);
   const [vendorEditing, setVendorEditing] = useState<Doc<"vendors"> | null>(null);
   const [supplierId, setSupplierId] = useState<Id<"vendors"> | undefined>(undefined);
+  /** The vendor whose bill ledger is open. */
+  const [ledgerVendor, setLedgerVendor] = useState<Doc<"vendors"> | null>(null);
   const [supplier, setSupplier] = useState("");
   const [supplierAddress, setSupplierAddress] = useState("");
   const [purchasedOn, setPurchasedOn] = useState(todayInput);
@@ -94,6 +100,25 @@ export default function PurchasePanel({
   const [busy, setBusy] = useState(false);
 
   const materialOf = (id: Id<"rawMaterials"> | "") => materials.find((m) => m._id === id);
+
+  /**
+   * What the saved suppliers owe in total. A paid bill is money already gone,
+   * so it counts towards paid rather than billed — the two never double up.
+   */
+  const savedVendorTotals = useMemo(() => {
+    let billed = 0;
+    let paid = 0;
+    for (const b of bills ?? []) {
+      if (b.supplierId === undefined) continue;
+      if (b.isPaid === true) paid += b.total;
+      else billed += b.total;
+    }
+    return {
+      billed: round2(billed),
+      paid: round2(paid),
+      outstanding: round2(billed),
+    };
+  }, [bills]);
 
   /** Searchable options for the per-line material pickers. */
   const materialOptions = useMemo<PickerItem[]>(
@@ -645,12 +670,18 @@ export default function PurchasePanel({
               Vendors
               <span className="ml-2 text-xs font-normal text-muted-foreground">
                 {vendors?.length ?? 0} supplier{(vendors?.length ?? 0) === 1 ? "" : "s"} ·{" "}
-                {money(
-                  (bills ?? [])
-                    .filter((b) => b.supplierId !== undefined)
-                    .reduce((sum, b) => sum + b.total, 0),
-                )}{" "}
-                billed to saved vendors
+                {money(savedVendorTotals.billed)} billed · {money(savedVendorTotals.paid)}{" "}
+                paid ·{" "}
+                <span
+                  className={cn(
+                    "font-medium",
+                    savedVendorTotals.outstanding > 0
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-emerald-600 dark:text-emerald-400",
+                  )}
+                >
+                  {money(savedVendorTotals.outstanding)} outstanding
+                </span>
               </span>
             </h2>
             <button
@@ -688,6 +719,8 @@ export default function PurchasePanel({
                     <th className="px-3 py-2 text-left font-medium">Address</th>
                     <th className="px-3 py-2 text-right font-medium">Bills</th>
                     <th className="px-3 py-2 text-right font-medium">Billed</th>
+                    <th className="px-3 py-2 text-right font-medium">Paid</th>
+                    <th className="px-3 py-2 text-right font-medium">Balance</th>
                     <th className="w-20 px-2 py-2" />
                   </tr>
                 </thead>
@@ -696,10 +729,23 @@ export default function PurchasePanel({
                     const theirBills = (bills ?? []).filter(
                       (b) => b.supplierId === vendor._id,
                     );
+                    const billed = round2(
+                      theirBills
+                        .filter((b) => b.isPaid !== true)
+                        .reduce((sum, b) => sum + b.total, 0),
+                    );
+                    const paid = round2(
+                      theirBills
+                        .filter((b) => b.isPaid === true)
+                        .reduce((sum, b) => sum + b.total, 0),
+                    );
                     return (
                       <tr
                         key={vendor._id}
-                        className="transition-colors hover:bg-accent/40"
+                        // the whole row opens the ledger; the buttons inside it
+                        // stop the click so they keep doing their own thing
+                        onClick={() => setLedgerVendor(vendor)}
+                        className="cursor-pointer transition-colors hover:bg-accent/40"
                       >
                         <td className="px-4 py-2.5">
                           <p className="font-medium">{vendor.name}</p>
@@ -729,12 +775,26 @@ export default function PurchasePanel({
                           {theirBills.length}
                         </td>
                         <td className="px-3 py-2.5 text-right font-medium tabular-nums">
-                          {theirBills.length > 0
-                            ? money(theirBills.reduce((sum, b) => sum + b.total, 0))
-                            : "—"}
+                          {theirBills.length > 0 ? money(billed) : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs tabular-nums text-emerald-600 dark:text-emerald-400">
+                          {paid > 0 ? money(paid) : theirBills.length > 0 ? "—" : ""}
+                        </td>
+                        <td
+                          className={cn(
+                            "px-3 py-2.5 text-right font-semibold tabular-nums",
+                            billed > 0
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          {theirBills.length > 0 ? money(billed) : "—"}
                         </td>
                         <td className="px-2 py-2 text-center">
-                          <div className="flex items-center justify-center gap-0.5">
+                          <div
+                            className="flex items-center justify-center gap-0.5"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <button
                               type="button"
                               aria-label={`Use ${vendor.name}`}
@@ -789,6 +849,30 @@ export default function PurchasePanel({
             </div>
           )}
         </section>
+      )}
+
+      {ledgerVendor !== null && (
+        <VendorLedgerDialog
+          vendor={ledgerVendor}
+          bills={(bills ?? []).filter((b) => b.supplierId === ledgerVendor._id)}
+          money={money}
+          canCreate={canCreate}
+          onClose={() => setLedgerVendor(null)}
+          onOpenBill={(id) => {
+            setLedgerVendor(null);
+            setViewingId(id);
+            setTab("list");
+          }}
+          onNewBill={() => {
+            const v = ledgerVendor;
+            setLedgerVendor(null);
+            setSupplierId(v._id);
+            setSupplier(v.name);
+            if (v.address) setSupplierAddress(v.address);
+            setViewingId(null);
+            setTab("bill");
+          }}
+        />
       )}
 
       {/* ── Professional bill entry form ────────────────────────────── */}
