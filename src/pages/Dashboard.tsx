@@ -794,7 +794,7 @@ export default function Dashboard() {
     },
     {
       id: "costing",
-      label: "Production",
+      label: "Projects",
       icon: Calculator,
       description: "Projects, products & materials",
     },
