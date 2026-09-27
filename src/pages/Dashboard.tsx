@@ -9,13 +9,13 @@ import TasksSidebar from "@/components/TasksSidebar";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import NotesPanel from "@/components/NotesPanel";
 import TasksPanel from "@/components/TasksPanel";
-import CostingSidebar from "@/components/CostingSidebar";
+import PrimaryNav, { type PrimarySection } from "@/components/PrimaryNav";
 import type { CostingView } from "@/components/CostingSidebar";
 import CostingPanel from "@/components/CostingPanel";
 import SettingsPanel from "@/components/SettingsPanel";
 import SettingsSidebar from "@/components/SettingsSidebar";
 import { format } from "date-fns";
-import { Calculator, CheckSquare, LogOut, NotebookPen, Settings } from "lucide-react";
+import { LogOut, Menu, Settings, X } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -451,6 +451,7 @@ export default function Dashboard() {
   const [costingView, setCostingView] = useState<CostingView>({
     kind: "projects",
   });
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   type ProjectFields = {
     name: string;
     client: string;
@@ -660,41 +661,20 @@ export default function Dashboard() {
     navigate("/");
   };
 
-  const NAV_ITEMS: {
-    id: Section;
-    label: string;
-    icon: typeof CheckSquare;
-    description: string;
-  }[] = [
-    {
-      id: "tasks",
-      label: "Tasks",
-      icon: CheckSquare,
-      description: "Your to-do lists",
-    },
-    {
-      id: "notes",
-      label: "Notes",
-      icon: NotebookPen,
-      description: "Notebooks & pages",
-    },
-    {
-      id: "costing",
-      label: "Operations",
-      icon: Calculator,
-      description: "Projects, products & materials",
-    },
-    ...(canOpenSettings
-      ? [
-          {
-            id: "settings" as Section,
-            label: "Settings",
-            icon: Settings,
-            description: "Users, roles & restrictions",
-          },
-        ]
-      : []),
-  ];
+  /** Sidebar navigation. Choosing a working area leaves Settings behind. */
+  const handleSelectSection = (next: PrimarySection) => {
+    if (!sectionAllowed(next)) return;
+    setSection(next);
+    setMobileNavOpen(false);
+  };
+
+  /** Picking a costing area implies you are working in Costing, not Tasks. */
+  const handleSelectCostingView = (next: CostingView) => {
+    if (!sectionAllowed("costing")) return;
+    setSection("costing");
+    setCostingView(next);
+    setMobileNavOpen(false);
+  };
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
@@ -711,26 +691,26 @@ export default function Dashboard() {
           </span>
         </div>
 
-        {/* section-aware explorer tree */}
-        <div className="mt-4 border-t border-border/60 px-3 pt-3 pb-4">
-          {section === "settings" ? (
-            <SettingsSidebar />
-          ) : section === "costing" ? (
-            <CostingSidebar
-              finishedGoods={finishedGoods ?? []}
-              materials={materials ?? []}
-              view={costingView}
-              onSelectView={setCostingView}
-              onMaterialsClick={() => setCostingView({ kind: "materials" })}
-              showMaterials={canDoItem("materials", "view")}
-              showPurchase={canDoItem("purchases", "view")}
-              purchaseCount={purchases?.length ?? 0}
-              showSales={canDoItem("purchases", "view")}
-              salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
-              showAccounting={canDoItem("purchases", "view")}
-              accountCount={ledgerAccounts?.length ?? 0}
-            />
-          ) : section === "tasks" ? (
+        {/* the one navigation list, then the drill-down for the open area */}
+        <div className="mt-4 space-y-4 border-t border-border/60 px-3 pt-3 pb-4">
+          <PrimaryNav
+            section={section}
+            view={costingView}
+            finishedGoods={finishedGoods ?? []}
+            materials={materials ?? []}
+            purchaseCount={purchases?.length ?? 0}
+            salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
+            accountCount={ledgerAccounts?.length ?? 0}
+            onSelectSection={handleSelectSection}
+            onSelectView={handleSelectCostingView}
+            canViewMaterials={canDoItem("materials", "view")}
+            canViewPurchase={canDoItem("purchases", "view")}
+            canViewSales={canDoItem("purchases", "view")}
+            canViewAccounting={canDoItem("purchases", "view")}
+          />
+
+          {section === "settings" && <SettingsSidebar />}
+          {section === "tasks" && (
             <TasksSidebar
               lists={taskLists ?? []}
               folders={taskFolders ?? []}
@@ -749,25 +729,26 @@ export default function Dashboard() {
               onNewFolder={canDoItem("taskFolders", "create") ? handleNewFolder : undefined}
               onDeleteFolder={canDoItem("taskFolders", "delete") ? handleDeleteFolder : undefined}
             />
-          ) : (
+          )}
+          {section === "notes" && (
             <NotesSidebar
-            notebooks={nbList}
-            allPages={allPages}
-            loading={notebooks === undefined || allPages === undefined}
-            taskScope={dataScope}
-            onScopeChange={setDataScope}
-            activeNotebookId={notebookId}
-            activePageId={activePage?._id ?? null}
-            onSelectNotebook={handleSelectNotebook}
-            onSelectPage={handleSelectPage}
-            onNewNotebook={canDoItem("notebooks", "create") ? handleNewNotebook : undefined}
-            onNewPage={canDoItem("notePages", "create") ? (nbId) => void handleNewPage(nbId) : undefined}
-            onNewSubPage={canDoItem("notePages", "create") ? (nbId, parentId) => void handleNewPage(nbId, parentId) : undefined}
-            onRenameNotebook={canDoItem("notebooks", "edit") ? handleRenameNotebook : undefined}
-            onRenamePage={canDoItem("notePages", "edit") ? handleRenamePage : undefined}
-            onDeleteNotebook={canDoItem("notebooks", "delete") ? handleDeleteNotebook : undefined}
-            onDeletePage={canDoItem("notePages", "delete") ? handleDeletePage : undefined}
-          />
+              notebooks={nbList}
+              allPages={allPages}
+              loading={notebooks === undefined || allPages === undefined}
+              taskScope={dataScope}
+              onScopeChange={setDataScope}
+              activeNotebookId={notebookId}
+              activePageId={activePage?._id ?? null}
+              onSelectNotebook={handleSelectNotebook}
+              onSelectPage={handleSelectPage}
+              onNewNotebook={canDoItem("notebooks", "create") ? handleNewNotebook : undefined}
+              onNewPage={canDoItem("notePages", "create") ? (nbId) => void handleNewPage(nbId) : undefined}
+              onNewSubPage={canDoItem("notePages", "create") ? (nbId, parentId) => void handleNewPage(nbId, parentId) : undefined}
+              onRenameNotebook={canDoItem("notebooks", "edit") ? handleRenameNotebook : undefined}
+              onRenamePage={canDoItem("notePages", "edit") ? handleRenamePage : undefined}
+              onDeleteNotebook={canDoItem("notebooks", "delete") ? handleDeleteNotebook : undefined}
+              onDeletePage={canDoItem("notePages", "delete") ? handleDeletePage : undefined}
+            />
           )}
         </div>
 
@@ -794,62 +775,133 @@ export default function Dashboard() {
             <LogOut className="size-3.5" />
             Sign out
           </Button>
+          {canOpenSettings && (
+            <button
+              type="button"
+              onClick={() => setSection("settings")}
+              aria-current={section === "settings" ? "page" : undefined}
+              className={cn(
+                "mt-1.5 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
+                section === "settings"
+                  ? "bg-primary/10 font-medium text-primary"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              <Settings
+                className={cn(
+                  "size-4 shrink-0",
+                  section === "settings"
+                    ? "text-primary"
+                    : "text-muted-foreground/70",
+                )}
+              />
+              Settings
+            </button>
+          )}
         </div>
       </aside>
+
+      {/* ── Mobile navigation: the same list, behind a scrim ────────── */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setMobileNavOpen(false)}
+            className="absolute inset-0 bg-foreground/30 backdrop-blur-[2px]"
+          />
+          <div className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col overflow-y-auto border-r border-border/60 bg-background shadow-2xl">
+            <div className="flex items-center justify-between gap-2 px-4 py-4">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <FirmMark logo={firmLogo} className="size-8" markClassName="size-4" />
+                <span className="min-w-0 truncate font-display text-lg font-semibold tracking-tight">
+                  {brandName}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(false)}
+                aria-label="Close navigation"
+                className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="border-t border-border/60 px-3 py-3">
+              <PrimaryNav
+                section={section}
+                view={costingView}
+                finishedGoods={finishedGoods ?? []}
+                materials={materials ?? []}
+                purchaseCount={purchases?.length ?? 0}
+                salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
+                accountCount={ledgerAccounts?.length ?? 0}
+                onSelectSection={handleSelectSection}
+                onSelectView={handleSelectCostingView}
+                canViewMaterials={canDoItem("materials", "view")}
+                canViewPurchase={canDoItem("purchases", "view")}
+                canViewSales={canDoItem("purchases", "view")}
+                canViewAccounting={canDoItem("purchases", "view")}
+              />
+            </div>
+
+            <div className="mt-auto space-y-1 border-t border-border/60 p-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start rounded-lg"
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  void handleSignOut();
+                }}
+              >
+                <LogOut className="size-3.5" />
+                Sign out
+              </Button>
+              {canOpenSettings && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectSection("settings")}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
+                    section === "settings"
+                      ? "bg-primary/10 font-medium text-primary"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  <Settings className="size-4 shrink-0" />
+                  Settings
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Main column ─────────────────────────────────────────────── */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* top bar */}
         <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-md">
-          <div className="flex h-16 items-center justify-between gap-3 px-4 sm:px-8">
+          <div className="flex h-14 items-center justify-between gap-3 px-4 sm:px-8">
             <div className="flex items-center gap-2 md:hidden">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                aria-label="Open navigation"
+                className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Menu className="size-5" />
+              </button>
               <FirmMark logo={firmLogo} className="size-7" markClassName="size-3.5" />
               <span className="max-w-40 truncate font-display font-semibold" title={brandName}>
                 {brandName}
               </span>
-              <span className="mx-1 h-5 w-px bg-border" />
-              {NAV_ITEMS.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => sectionAllowed(item.id) && setSection(item.id)}
-                    aria-label={item.label}
-                    className={cn(
-                      "grid size-7 place-items-center rounded-lg transition-colors",
-                      section === item.id
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="size-4" />
-                  </button>
-                );
-              })}
             </div>
-            <div className="hidden items-center gap-1.5 md:flex">
-              {NAV_ITEMS.map((item) => {
-                const Icon = item.icon;
-                const active = section === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => sectionAllowed(item.id) && setSection(item.id)}
-                    aria-current={active ? "page" : undefined}
-                    className={cn(
-                      "flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors",
-                      active
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="size-4" />
-                    {item.label}
-                  </button>
-                );
-              })}
+            <div className="hidden min-w-0 items-center gap-2 md:flex">
+              <span className="truncate font-display text-sm font-semibold tracking-tight">
+                {brandName}
+              </span>
             </div>
             <div className="flex items-center gap-3">
               <FirmSwitcher />
