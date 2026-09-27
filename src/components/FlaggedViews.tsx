@@ -11,6 +11,7 @@ import {
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
+  middleProjectStatuses,
   PROJECT_STATUS_FINISH,
   projectStatusesOrDefaults,
 } from "@/lib/project-statuses";
@@ -427,7 +428,10 @@ function JobRow({
                   product is actually in production */}
               <StatusSelect
                 value={fgProjectStatus(fg, projectStatuses)}
-                statuses={projectStatuses}
+                statuses={middleProjectStatuses(
+                  projectStatuses,
+                  fgProjectStatus(fg, projectStatuses),
+                )}
                 disabled={fg.productionStartedAt === undefined}
                 title={
                   fg.productionStartedAt === undefined

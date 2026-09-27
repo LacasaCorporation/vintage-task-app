@@ -34,6 +34,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_PROJECT_STATUSES,
+  middleProjectStatuses,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
   projectStatusesOrDefaults,
@@ -422,7 +423,13 @@ export function FlaggedItemsList({
                     )}
                     <StatusSelect
                       value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
-                      statuses={projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]}
+                      statuses={middleProjectStatuses(
+                        projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
+                        fgProjectStatus(
+                          fg,
+                          projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
+                        ),
+                      )}
                       disabled={fg.productionStartedAt === undefined}
                       title={
                         fg.productionStartedAt === undefined
@@ -795,7 +802,10 @@ export function FlaggedProductsList({
               repeat it */}
           <StatusSelect
             value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
-            statuses={projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]}
+            statuses={middleProjectStatuses(
+              projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
+              fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]),
+            )}
             disabled={fg.productionStartedAt === undefined}
             title={
               fg.productionStartedAt === undefined
@@ -2126,7 +2136,10 @@ export function FlaggedDetail({
                     disabled={busy}
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                   >
-                    {projectStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                    {middleProjectStatuses(
+                      projectStatuses,
+                      fgProjectStatus(fg, projectStatuses),
+                    ).map((status) => <option key={status} value={status}>{status}</option>)}
                   </select>
                 </DetailRow>
 

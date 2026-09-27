@@ -34,7 +34,10 @@ const prioChip: Record<string, string> = {
 };
 import { REMINDER_OFFSETS, formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import { assigneeLabel, assigneesOfTask } from "@/lib/task-people";
-import { projectStatusesOrDefaults } from "@/lib/project-statuses";
+import {
+  middleProjectStatuses,
+  projectStatusesOrDefaults,
+} from "@/lib/project-statuses";
 import { messageFrom } from "@/lib/errors";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -136,6 +139,12 @@ export default function ProductDetailPanel({
     ? projects.find((p) => p._id === parentJob.projectId)
     : undefined;
   const currentStatus = fg.projectStatus ?? (fg.isCompleted ? "Finish" : "Listed");
+  // once production has started, Listed and Finish are off limits: they are
+  // reached by starting production and by finishing the job
+  const statusChoices =
+    fg.productionStartedAt === undefined
+      ? projectStatuses
+      : middleProjectStatuses(projectStatuses, currentStatus);
 
   // the role gates the panel; the product's own grant narrows it
   const mayEdit = canEdit && (rights?.canEdit ?? true);
@@ -401,7 +410,7 @@ export default function ProductDetailPanel({
                 disabled={busy}
                 className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               >
-                {projectStatuses.map((status) => (
+                {statusChoices.map((status) => (
                   <option key={status} value={status}>
                     {status}
                   </option>

@@ -20,6 +20,25 @@ export function middleProjectStatus(statuses: readonly string[]): string {
   return statuses[1] ?? PROJECT_STATUS_START;
 }
 
+/**
+ * Once production has started a product may only sit in one of the middle
+ * statuses: Listed and Finish belong to the edges of the workflow and are
+ * reached by starting production and by finishing the job, not by picking a
+ * status by hand. The current status is kept in the list so the dropdown never
+ * renders blank if the product somehow sits on an edge status.
+ */
+export function middleProjectStatuses(
+  statuses: readonly string[],
+  current?: string,
+): string[] {
+  const middle = statuses.slice(1, -1);
+  if (middle.length === 0) return [...statuses];
+  if (current !== undefined && !middle.includes(current)) {
+    return [...middle, current];
+  }
+  return middle;
+}
+
 /** Map a pre-rename saved status list onto the current names. */
 export function normalizeProjectStatuses(
   statuses: readonly string[],
