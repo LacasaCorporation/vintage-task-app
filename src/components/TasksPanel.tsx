@@ -3,9 +3,9 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
 import TaskDetail from "@/components/TaskDetail";
 import StepDetail from "@/components/StepDetail";
+import AddSubtaskDialog from "@/components/AddSubtaskDialog";
 import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
 import { useAppDialogs } from "@/components/AppDialogs";
 import ProjectsWorkspace from "@/components/ProjectsWorkspace";
@@ -127,7 +127,8 @@ export default function TasksPanel({
   const [openStepRows, setOpenStepRows] = useState<Set<string>>(() => new Set());
   const [openStepId, setOpenStepId] = useState<Id<"taskSteps"> | null>(null);
   const [stepBusy, setStepBusy] = useState(false);
-  const [stepDrafts, setStepDrafts] = useState<Record<string, string>>({});
+  /** The task whose “add subtask” popup is open, if any. */
+  const [stepDialogTask, setStepDialogTask] = useState<Id<"tasks"> | null>(null);
 
   const stepsByTask = useMemo(() => {
     const map = new Map<string, Doc<"taskSteps">[]>();
@@ -1147,44 +1148,21 @@ export default function TasksPanel({
                                 </ul>
                               )}
                               {canCreateSteps && (
-                                <form
-                                  className="flex items-center gap-1.5 pt-1"
-                                  onSubmit={(e) => {
-                                    e.preventDefault();
-                                    const text = (stepDrafts[task._id] ?? "").trim();
-                                    if (!text) return;
-                                    setStepDrafts((current) => ({ ...current, [task._id]: "" }));
-                                    void addStepM({ taskId: task._id, text }).catch(() =>
-                                      toast.error("Couldn't add the subtask."),
-                                    );
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  title="Add a subtask — with its own date, priority and tags"
+                                  className="mt-1 h-7 shrink-0 gap-1.5 rounded-lg border-dashed border-primary/40 px-2 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 hover:text-primary"
+                                  onClick={() => {
+                                    // only open — clicking must never close the panel
+                                    if (!openStepRows.has(task._id)) toggleStepRow(task._id);
+                                    setStepDialogTask(task._id);
                                   }}
                                 >
-                                  <Input
-                                    value={stepDrafts[task._id] ?? ""}
-                                    onChange={(e) =>
-                                      setStepDrafts((current) => ({
-                                        ...current,
-                                        [task._id]: e.target.value,
-                                      }))
-                                    }
-                                    onFocus={() => {
-                                      // only open — focusing must never close the panel
-                                      if (!openStepRows.has(task._id)) toggleStepRow(task._id);
-                                    }}
-                                    placeholder="Add a subtask… (date is capped by the task)"
-                                    aria-label="New subtask"
-                                    maxLength={280}
-                                    className="h-8 rounded-lg text-xs"
-                                  />
-                                  <Button
-                                    type="submit"
-                                    size="sm"
-                                    disabled={!(stepDrafts[task._id] ?? "").trim()}
-                                    className="h-8 shrink-0 rounded-lg px-2.5 text-xs"
-                                  >
-                                    <Plus className="size-3" /> Add
-                                  </Button>
-                                </form>
+                                  <Plus className="size-3" />
+                                  Subtask
+                                </Button>
                               )}
                             </div>
                           </motion.div>
@@ -1230,6 +1208,24 @@ export default function TasksPanel({
         )}
       </section>
       )}
+
+      {/* the “+ Subtask” popup — a dialog, so the list is not permanently
+          shortened by a row of empty inputs under every open task */}
+      <AddSubtaskDialog
+        key={stepDialogTask ?? "none"}
+        open={stepDialogTask !== null}
+        onClose={() => setStepDialogTask(null)}
+        onSubmit={async (values) => {
+          if (stepDialogTask === null) return;
+          await addStepM({
+            taskId: stepDialogTask,
+            text: values.text,
+            dueAt: values.due,
+            priority: values.priority,
+            tags: values.tags,
+          });
+        }}
+      />
 
       {doneCount > 0 && !showDone && activeView !== "flagged" && (
         <p className="mt-3 text-center text-xs text-muted-foreground">

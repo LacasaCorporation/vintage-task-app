@@ -8,17 +8,19 @@ import {
   Landmark,
   Loader2,
   Plus,
+  Scale,
   ScrollText,
   Trash2,
   Wallet,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import type { DialogsApi } from "@/components/AppDialogs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
+import type { AccountType } from "@/convex/accounting";
 
 /** The sub-pages of the accounting module, in the order the sidebar lists them. */
 export type AccountingTab =
@@ -27,7 +29,7 @@ export type AccountingTab =
   | "receipt"
   | "cashbook"
   | "daybook"
-  | "opening";
+  | "balance";
 
 export const ACCOUNTING_TABS: {
   id: AccountingTab;
@@ -36,11 +38,11 @@ export const ACCOUNTING_TABS: {
   hint: string;
 }[] = [
   { id: "accounts", label: "Chart of accounts", icon: BookOpen, hint: "Every ledger account and its running balance" },
+  { id: "balance", label: "Balance sheet", icon: Scale, hint: "Opening balances — assets against liabilities and equity" },
   { id: "journal", label: "Journal entry", icon: ScrollText, hint: "A balanced debit and credit posting" },
   { id: "receipt", label: "Receipt / payment", icon: Wallet, hint: "Money received from a customer, or paid to a supplier" },
   { id: "cashbook", label: "Cash book", icon: Landmark, hint: "Cash and bank movement only" },
   { id: "daybook", label: "Day book", icon: CalendarDays, hint: "Every posting, by day" },
-  { id: "opening", label: "Opening balance", icon: BookOpen, hint: "Balances carried in at the start of the books" },
 ];
 
 const TYPE_LABEL: Record<string, string> = {
@@ -58,6 +60,13 @@ const TYPE_CHIP: Record<string, string> = {
   income: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   expense: "bg-rose-500/10 text-rose-700 dark:text-rose-400",
 };
+
+/** Today, as `yyyy-mm-dd`. Fixed once at load so a render stays pure. */
+const TODAY = (() => {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+})();
 
 /** `yyyy-mm-dd` for <input type="date">, in the browser's own timezone. */
 function toDateInput(ms: number): string {
@@ -263,7 +272,7 @@ export default function AccountingPanel({
             key: "at",
             label: "Date",
             type: "date" as const,
-            initial: toDateInput(Date.now()),
+            initial: TODAY,
           },
           kind === "receipt" || kind === "payment"
             ? { key: "party", label: "Party", full: true as const }
@@ -488,31 +497,26 @@ export default function AccountingPanel({
             </div>
           )}
         </Panel>
-      ) : tab === "journal" || tab === "receipt" || tab === "opening" ? (
-        <Panel
-          title={
-            tab === "journal"
-              ? "Journal entries"
-              : tab === "receipt"
-                ? "Receipts & payments"
-                : "Opening balances"
-          }
-          count={`${(entries ?? []).length} entries`}
+      ) : tab === "balance" ? (
+        <BalanceSheet
+          accounts={accounts ?? []}
+          entries={(entries ?? []).filter((e) => e.kind === "opening")}
+          money={money}
+          onPosted={() => onTabChange("journal")}
+          postEntry={postEntry}
+        />
+      ) : tab === "journal" || tab === "receipt" ? (
+        <Panel            title={
+              tab === "journal" ? "Journal entries" : "Receipts & payments"
+            }
+            count={`${(entries ?? []).length} entries`}
           actions={
             <Button
               type="button"
               size="sm"
               variant="outline"
               disabled={busy}
-              onClick={() =>
-                void compose(
-                  tab === "journal"
-                    ? "journal"
-                    : tab === "receipt"
-                      ? "receipt"
-                      : "opening",
-                )
-              }
+              onClick={() => void compose(tab === "journal" ? "journal" : "receipt")}
               className="h-7 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
             >
               {busy ? (
@@ -527,19 +531,263 @@ export default function AccountingPanel({
           <EntryTable
             entries={entries ?? []}
             money={money}
-            kinds={
-              tab === "journal"
-                ? ["journal"]
-                : tab === "receipt"
-                  ? ["receipt", "payment"]
-                  : ["opening"]
-            }
+            kinds={tab === "journal" ? ["journal"] : ["receipt", "payment"]}
             onDelete={deleteEntry}
           />
         </Panel>
       ) : (
         <BookPanel cashOnly={tab === "cashbook"} money={money} />
       )}
+    </div>
+  );
+}
+
+/**
+ * The balance sheet: every balance-sheet account with an inline opening
+ * figure, and a live proof that the two sides agree. Nothing is posted until
+ * they do — the button stays disabled while the difference is not zero.
+ */
+function BalanceSheet({
+  accounts,
+  entries,
+  money,
+  postEntry,
+  onPosted,
+}: {
+  accounts: {
+    _id: Id<"accounts">;
+    code: string;
+    name: string;
+    type: AccountType;
+    isGroup: boolean;
+  }[];
+  entries: {
+    _id: Id<"journalEntries">;
+    at: number;
+    debit: number;
+  }[];
+  money: (n: number) => string;
+  postEntry: (args: {
+    at: number;
+    kind: "opening";
+    memo?: string;
+    lines: { accountId: Id<"accounts">; debit: number; credit: number }[];
+  }) => Promise<unknown>;
+  onPosted: () => void;
+}) {
+  const sheet = accounts.filter(
+    (a) => !a.isGroup && (a.type === "asset" || a.type === "liability" || a.type === "equity"),
+  );
+  const [at, setAt] = useState(TODAY);
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  const read = (id: Id<"accounts">): number => {
+    const raw = Number((amounts[id] ?? "").trim());
+    return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 100) / 100 : 0;
+  };
+
+  const assets = sheet
+    .filter((a) => a.type === "asset")
+    .reduce((s, a) => s + read(a._id), 0);
+  const liabilities = sheet
+    .filter((a) => a.type === "liability")
+    .reduce((s, a) => s + read(a._id), 0);
+  const equity = sheet
+    .filter((a) => a.type === "equity")
+    .reduce((s, a) => s + read(a._id), 0);
+  const difference = Math.round((assets - (liabilities + equity)) * 100) / 100;
+  const balanced = difference === 0;
+  const entered = sheet.some((a) => read(a._id) > 0);
+
+  const post = async () => {
+    if (!balanced || busy) return;
+    setBusy(true);
+    try {
+      // Assets are debits; liabilities and equity are credits. Because the two
+      // sides were made to agree above, the entry balances as written.
+      const lines = sheet
+        .map((a) => ({ accountId: a._id, amount: read(a._id) }))
+        .filter((l) => l.amount > 0)
+        .map((l) => ({
+          accountId: l.accountId,
+          debit: accounts.find((a) => a._id === l.accountId)?.type === "asset" ? l.amount : 0,
+          credit: accounts.find((a) => a._id === l.accountId)?.type === "asset" ? 0 : l.amount,
+        }));
+      await postEntry({
+        at: new Date(`${at}T12:00:00`).getTime(),
+        kind: "opening",
+        memo: "Opening balances",
+        lines,
+      });
+      setAmounts({});
+      toast.success("Opening balances posted.");
+      onPosted();
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't post those opening balances."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const groups: { type: AccountType; label: string }[] = [
+    { type: "asset", label: "Assets" },
+    { type: "liability", label: "Liabilities" },
+    { type: "equity", label: "Equity" },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <Panel
+        title="Balance sheet"
+        count="opening balances"
+        actions={
+          <>
+            <span className="text-[11px] text-muted-foreground">As at</span>
+            <Input
+              type="date"
+              value={at}
+              onChange={(e) => setAt(e.target.value)}
+              aria-label="Balance sheet date"
+              className="h-7 w-32 rounded-lg text-xs"
+            />
+          </>
+        }
+      >
+        {sheet.length === 0 ? (
+          <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+            Add some accounts to the chart first.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border/60 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                <th className="w-20 px-4 py-2">Code</th>
+                <th className="px-3 py-2">Account</th>
+                <th className="w-44 px-4 py-2 text-right">Opening balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => {
+                const rows = sheet.filter((a) => a.type === g.type);
+                if (rows.length === 0) return null;
+                const subtotal = rows.reduce((s, a) => s + read(a._id), 0);
+                return (
+                  <Fragment key={g.type}>
+                    <tr className="border-b border-border/60 bg-muted/20">
+                      <td colSpan={2} className="px-4 py-1.5 text-xs font-semibold">
+                        {g.label}
+                      </td>
+                      <td className="px-4 py-1.5 text-right text-xs font-semibold tabular-nums">
+                        {money(subtotal)}
+                      </td>
+                    </tr>
+                    {rows.map((a) => (
+                      <tr
+                        key={a._id}
+                        className="border-b border-border/40 transition-colors hover:bg-accent/40"
+                      >
+                        <td className="px-4 py-1.5 font-mono text-xs text-muted-foreground">
+                          {a.code}
+                        </td>
+                        <td className="px-3 py-1.5">{a.name}</td>
+                        <td className="px-4 py-1">
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            inputMode="decimal"
+                            value={amounts[a._id] ?? ""}
+                            onChange={(e) =>
+                              setAmounts((d) => ({ ...d, [a._id]: e.target.value }))
+                            }
+                            placeholder="0.00"
+                            aria-label={`Opening balance for ${a.code} ${a.name}`}
+                            className="h-7 w-full rounded-lg border bg-card px-2 text-right text-xs tabular-nums outline-none placeholder:text-muted-foreground/50 focus:ring-2 focus:ring-primary/30"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+
+        {/* the live proof, and the only way to post */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            <span className="text-muted-foreground">
+              Assets{" "}
+              <span className="font-semibold tabular-nums text-foreground">
+                {money(assets)}
+              </span>
+            </span>
+            <span className="text-muted-foreground">
+              Liabilities + equity{" "}
+              <span className="font-semibold tabular-nums text-foreground">
+                {money(liabilities + equity)}
+              </span>
+            </span>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
+                balanced
+                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+              )}
+            >
+              {balanced
+                ? "Balanced"
+                : `Out by ${money(Math.abs(difference))}`}
+            </span>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            disabled={!balanced || !entered || busy}
+            onClick={() => void post()}
+            title={
+              balanced
+                ? "Post these opening balances"
+                : "Assets must equal liabilities plus equity before posting"
+            }
+            className="h-7 gap-1.5 rounded-lg px-2.5 text-xs"
+          >
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Scale className="size-3.5" />
+            )}
+            Post opening balances
+          </Button>
+        </div>
+      </Panel>
+
+      <Panel
+        title="Posted opening balances"
+        count={`${entries.length} ${entries.length === 1 ? "entry" : "entries"}`}
+      >
+        {entries.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+            Nothing posted yet — fill in the two sides above and they will balance.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border/60">
+            {entries.map((e) => (
+              <li key={e._id} className="flex items-center gap-3 px-4 py-2 text-xs">
+                <span className="tabular-nums text-muted-foreground">
+                  {toDateInput(e.at)}
+                </span>
+                <span className="ml-auto font-medium tabular-nums">
+                  {money(e.debit)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
     </div>
   );
 }
@@ -696,7 +944,7 @@ function BookPanel({
   const [from, setFrom] = useState(
     toDateInput(new Date(today.getFullYear(), today.getMonth(), 1).getTime()),
   );
-  const [to, setTo] = useState(toDateInput(today.getTime()));
+  const [to, setTo] = useState(TODAY);
 
   const book = useQuery(api.accounting.dayBook, {
     from: new Date(`${from}T00:00:00`).getTime(),
