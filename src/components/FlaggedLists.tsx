@@ -3,7 +3,8 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
 import ProductQtyInline from "@/components/ProductQtyInline";
 import ProductCodeInline from "@/components/ProductCodeInline";
-import ProductMetaInline from "@/components/ProductMetaInline";
+import ProductTagsInline from "@/components/ProductTagsInline";
+import PriorityChip from "@/components/PriorityChip";
 import StatusSelect from "@/components/StatusSelect";
 import AssigneeChip from "@/components/AssigneeChip";
 import { assigneesOfTask } from "@/lib/task-people";
@@ -426,7 +427,7 @@ export function FlaggedItemsList({
                         <span className="min-w-0 truncate">{fg.name}</span>
                         <ProductCodeInline code={fg.code} />
                         <ProductQtyInline qty={fg.qty} unit={fg.unit} />
-                        <ProductMetaInline priority={fg.priority} tags={fg.tags} />
+                        <ProductTagsInline tags={fg.tags} />
                       </span>
                       {fg.note && (
                         <span className="w-full truncate text-[10px] text-muted-foreground/80 line-through-0">
@@ -438,6 +439,7 @@ export function FlaggedItemsList({
                       dueAt={fg.dueAt ?? job.dueAt}
                       inherited={fg.dueAt === undefined && job.dueAt !== undefined}
                     />
+                    <PriorityChip priority={fg.priority} />
                     {showTags && (
                       <span className={tagChip}>{data.projectNameOf(job)}</span>
                     )}
@@ -804,7 +806,7 @@ export function FlaggedProductsList({
               <span className="min-w-0 truncate">{fg.name}</span>
               <ProductCodeInline code={fg.code} />
               <ProductQtyInline qty={fg.qty} unit={fg.unit} />
-              <ProductMetaInline priority={fg.priority} tags={fg.tags} />
+              <ProductTagsInline tags={fg.tags} />
             </span>
             {fg.note && (
               <span className="w-full truncate text-[10px] font-normal text-muted-foreground/80 line-through-0">
@@ -821,6 +823,7 @@ export function FlaggedProductsList({
             inherited={fg.dueAt === undefined && parentJob?.dueAt !== undefined}
             empty
           />
+          <PriorityChip priority={fg.priority} />
           {showTags && parentJob && <span className={tagChip}>{data.projectNameOf(parentJob)}</span>}
           {/* one status per row: while production is running, ProductionButton
               already says "In production", so the plain status chip would

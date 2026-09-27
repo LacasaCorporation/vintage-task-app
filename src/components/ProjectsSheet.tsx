@@ -29,7 +29,8 @@ import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
 import ProductQtyInline from "@/components/ProductQtyInline";
 import ProductCodeInline from "@/components/ProductCodeInline";
-import ProductMetaInline from "@/components/ProductMetaInline";
+import ProductTagsInline from "@/components/ProductTagsInline";
+import PriorityChip from "@/components/PriorityChip";
 import CustomersPanel from "@/components/CustomersPanel";
 import {
   JobsList,
@@ -1221,7 +1222,7 @@ export default function ProjectsSheet({
                                         </span>
                                         <ProductCodeInline code={fg.code} />
                                         <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
-                                        <ProductMetaInline priority={fg.priority} tags={fg.tags} />
+                                        <ProductTagsInline tags={fg.tags} />
                                       </span>
                                       {fg.note && (
                                         <span className="w-full truncate text-[10px] text-muted-foreground/80">
@@ -1234,6 +1235,7 @@ export default function ProjectsSheet({
                                     </span>
                                     <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
                                   </button>
+                                  <PriorityChip priority={fg.priority} />
                                   <button
                                     type="button"
                                     title="Edit product"
@@ -1328,7 +1330,7 @@ export default function ProjectsSheet({
                                 </span>
                                 <ProductCodeInline code={fg.code} />
                                 <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
-                                <ProductMetaInline priority={fg.priority} tags={fg.tags} />
+                                <ProductTagsInline tags={fg.tags} />
                               </span>
                               {fg.note && (
                                 <span className="w-full truncate text-[10px] text-muted-foreground/80">
@@ -1341,6 +1343,7 @@ export default function ProjectsSheet({
                             </span>
                             <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
                           </button>
+                          <PriorityChip priority={fg.priority} />
                           <button
                             type="button"
                             title="Edit product"
