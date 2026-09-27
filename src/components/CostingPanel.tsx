@@ -276,14 +276,16 @@ export default function CostingPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, activeFg?._id]);
 
+  /**
+   * The sheet prices ONE product. The batch quantity is deliberately absent
+   * here — it is applied on the project line, where the product's cost is
+   * multiplied by how many are being made.
+   */
   const totals = useMemo(() => {
     const subtotal = rows.reduce((sum, r) => sum + r.qty * r.unitPrice, 0);
     const markup = subtotal * (markupPct / 100);
-    // what one unit costs to make, which is the figure most sheets are after
-    const perUnit = activeFg ? subtotal / batchQty(activeFg) : 0;
-    const salesPerUnit = activeFg ? (subtotal + markup) / batchQty(activeFg) : 0;
-    return { subtotal, markup, grand: subtotal + markup, perUnit, salesPerUnit };
-  }, [rows, markupPct, activeFg]);
+    return { subtotal, markup, grand: subtotal + markup };
+  }, [rows, markupPct]);
 
   // ── Draft (save-button) logic ─────────────────────────────────────
   // Keep a local draft of every visible row; reset it when the sheet's
@@ -774,28 +776,22 @@ export default function CostingPanel({
             </div>
             {/* at-a-glance figures, so the sheet needs no scrolling to read */}
             <dl className="flex shrink-0 items-center gap-3 text-right">
-              <div>
-                <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                  Cost / unit
-                </dt>
-                <dd className="text-xs font-semibold tabular-nums">
-                  {money(totals.perUnit)}
-                </dd>
-              </div>
-              <div>
+              <div
+                title="This sheet prices one product — the batch quantity is applied on the project line"
+              >
                 <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
                   Batch
                 </dt>
-                <dd className="text-xs font-semibold tabular-nums">
+                <dd className="text-xs font-semibold tabular-nums text-muted-foreground">
                   {batchQty(activeFg)} {activeFg.unit ?? "pcs"}
                 </dd>
               </div>
               <div>
                 <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                  Total
+                  Sales price
                 </dt>
-                <dd className="text-sm font-bold tabular-nums text-primary">
-                  {money(totals.subtotal)}
+                <dd className="text-sm font-bold tabular-nums text-foreground">
+                  {money(totals.grand)}
                 </dd>
               </div>
             </dl>
@@ -993,8 +989,7 @@ export default function CostingPanel({
                                 const m = materials.find((x) => x._id === row.materialId);
                                 if (m === undefined) return null;
                                 const need =
-                                  (drafts.find((d) => d.id === row._id)?.qty ?? row.qty) *
-                                  batchQty(activeFg);
+                                  drafts.find((d) => d.id === row._id)?.qty ?? row.qty;
                                 const short = (m.stock ?? 0) < need;
                                 return (
                                   <span
@@ -1154,10 +1149,9 @@ export default function CostingPanel({
               <Figure label="Sales price" strong>
                 {money(totals.grand)}
               </Figure>
-              <span className="text-muted-foreground/50">·</span>
-              <Figure label="Cost / unit">
-                {money(totals.perUnit)} {activeFg.unit ?? "pcs"}
-              </Figure>
+              <span className="text-[10px] text-muted-foreground/60">
+                per {activeFg.unit ?? "pcs"}
+              </span>
             </div>
           )}
 
