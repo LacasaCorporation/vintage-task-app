@@ -17,6 +17,7 @@ import {
   Package,
   PackagePlus,
   Plus,
+  Save,
   Search as SearchIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -399,6 +400,134 @@ export function AddProductToJobDialog({
             </ul>
           )}
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Edit a product in place: the name, code, quantity and unit shown on its row.
+ * The costing sheet and everything else stays where it is.
+ */
+export function EditProductDialog({
+  fg,
+  onClose,
+}: {
+  fg: Doc<"finishedGoods">;
+  onClose: () => void;
+}) {
+  const updateFg = useMutation(api.costing.updateFinishedGood);
+  const [name, setName] = useState(fg.name);
+  const [code, setCode] = useState(fg.code ?? "");
+  const [qty, setQty] = useState(fg.qty === undefined ? "" : String(fg.qty));
+  const [unit, setUnit] = useState(fg.unit ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = name.trim();
+    if (!clean) {
+      toast.error("Give the product a name.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateFg({
+        id: fg._id,
+        name: clean,
+        code: code.trim(),
+        qty: qty.trim() === "" ? undefined : Number(qty),
+        unit: unit.trim(),
+      });
+      toast.success(`“${clean}” updated.`);
+      onClose();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't save the product.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+              <Package className="size-4" />
+            </span>
+            Edit product
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            The name and quantity are what every product row shows.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSave} className="space-y-3">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium">Product name *</label>
+            <Input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Oak door panel"
+              className={inputCls}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium">Code</label>
+            <Input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="Auto (FG0001)"
+              className={inputCls}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Qty</label>
+              <Input
+                type="number"
+                min={0}
+                step="any"
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                placeholder="e.g. 12"
+                className={inputCls}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Sold per (unit)</label>
+              <Input
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                placeholder="e.g. pcs"
+                className={inputCls}
+              />
+            </div>
+          </div>
+          <DialogFooter className="pt-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-lg"
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" className="rounded-lg" disabled={saving}>
+              {saving ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

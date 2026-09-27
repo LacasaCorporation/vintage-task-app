@@ -40,7 +40,11 @@ import {
 } from "@/components/ProjectsTabs";
 import { projectStatusesOrDefaults } from "@/lib/project-statuses";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
-import { JobDialog, AddProductToJobDialog } from "@/components/ProjectDialogs";
+import {
+  JobDialog,
+  AddProductToJobDialog,
+  EditProductDialog,
+} from "@/components/ProjectDialogs";
 import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
 
 const PROJECT_FILTERS: readonly FilterOption<"all" | "flagged">[] = [
@@ -187,6 +191,7 @@ export default function ProjectsSheet({
     job: JobDoc;
     projectLabel: string;
   } | null>(null);
+  const [editProduct, setEditProduct] = useState<FgDoc | null>(null);
   const projects = useQuery(api.costing.listProjects);
   const allItems = useQuery(api.costing.listAllItems);
   const allJobs = useQuery(api.jobs.listJobs);
@@ -209,9 +214,44 @@ export default function ProjectsSheet({
   const updateJob = useMutation(api.jobs.updateJob);
   const setJobFlag = useMutation(api.jobs.setJobFlag);
   const setFgFlag = useMutation(api.costing.setFgFlag);
+  const removeFg = useMutation(api.costing.removeFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const { confirm } = useAppDialogs();
+
+  /**
+   * Delete a product from its row. Products go first in the delete order, and
+   * production has to be stopped before one can be removed, so a running
+   * product is stopped at with an explanation instead of a confirm.
+   */
+  const handleDeleteProduct = async (fg: FgDoc) => {
+    if (fg.productionStartedAt !== undefined) {
+      await confirm({
+        title: `“${fg.name}” is in production`,
+        message:
+          "Stop production before deleting this product. Stopping puts the raw materials it is using back into stock.",
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
+    const ok = await confirm({
+      title: `Delete “${fg.name}”?`,
+      message:
+        "The product and its costing lines are permanently removed, and it disappears from the Tasks page too. Its job and project stay.",
+      confirmLabel: "Delete product",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await removeFg({ id: fg._id });
+      toast.success("Product deleted.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't delete the product.",
+      );
+    }
+  };
 
   /**
    * Promote a name-only project (one that only exists as a projectName on its
@@ -797,7 +837,7 @@ export default function ProjectsSheet({
                           type="button"
                           aria-label={`Edit “${p.name}”`}
                           title="Edit project details"
-                          className="hidden size-6 place-items-center rounded-md text-muted-foreground hover:text-primary group-hover/row:grid"
+                          className="grid size-6 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-primary"
                           onClick={() => onEditProject(detail)}
                         >
                           <Pencil className="size-3" />
@@ -807,8 +847,8 @@ export default function ProjectsSheet({
                         <button
                           type="button"
                           aria-label={`Delete “${p.name}”`}
-                          title="Delete project (products are kept)"
-                          className="hidden size-6 place-items-center rounded-md text-muted-foreground hover:text-destructive group-hover/row:grid"
+                          title="Delete project"
+                          className="grid size-6 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
                           onClick={() => onDeleteProject(detail)}
                         >
                           <Trash2 className="size-3" />
@@ -1084,7 +1124,7 @@ export default function ProjectsSheet({
                                   type="button"
                                   title="Edit job"
                                   aria-label="Edit job"
-                                  className="hidden size-5 place-items-center rounded-md text-muted-foreground hover:text-primary group-hover/job:grid"
+                                  className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-primary"
                                   onClick={() => {
                                     if (!detail) return;
                                     setJobDialog({
@@ -1100,7 +1140,7 @@ export default function ProjectsSheet({
                                   type="button"
                                   title="Delete job"
                                   aria-label="Delete job"
-                                  className="hidden size-5 place-items-center rounded-md text-muted-foreground hover:text-destructive group-hover/job:grid"
+                                  className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
                                   onClick={async () => {
                                     // products are the first level of the delete
                                     // order, so a job waits until they are gone
@@ -1184,6 +1224,28 @@ export default function ProjectsSheet({
                                     </span>
                                     <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
                                   </button>
+                                  <button
+                                    type="button"
+                                    title="Edit product"
+                                    aria-label={`Edit product “${fg.name}”`}
+                                    className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-primary"
+                                    onClick={() => setEditProduct(fg)}
+                                  >
+                                    <Pencil className="size-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title={
+                                      fg.productionStartedAt !== undefined
+                                        ? "Stop production before deleting"
+                                        : "Delete product"
+                                    }
+                                    aria-label={`Delete product “${fg.name}”`}
+                                    className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
+                                    onClick={() => void handleDeleteProduct(fg)}
+                                  >
+                                    <Trash2 className="size-3" />
+                                  </button>
                                   <ProductionButton fg={fg} />
                                   <button
                                     type="button"
@@ -1261,6 +1323,28 @@ export default function ProjectsSheet({
                               {money(costByFg.get(fg._id) ?? 0)}
                             </span>
                             <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
+                          </button>
+                          <button
+                            type="button"
+                            title="Edit product"
+                            aria-label={`Edit product “${fg.name}”`}
+                            className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-primary"
+                            onClick={() => setEditProduct(fg)}
+                          >
+                            <Pencil className="size-3" />
+                          </button>
+                          <button
+                            type="button"
+                            title={
+                              fg.productionStartedAt !== undefined
+                                ? "Stop production before deleting"
+                                : "Delete product"
+                            }
+                            aria-label={`Delete product “${fg.name}”`}
+                            className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
+                            onClick={() => void handleDeleteProduct(fg)}
+                          >
+                            <Trash2 className="size-3" />
                           </button>
                           <button
                             type="button"
@@ -1354,6 +1438,13 @@ export default function ProjectsSheet({
           allProducts={allProducts}
           onOpenProduct={(fgId) => onOpenProduct?.(fgId)}
           onClose={() => setAddProductJob(null)}
+        />
+      )}
+
+      {editProduct && (
+        <EditProductDialog
+          fg={editProduct}
+          onClose={() => setEditProduct(null)}
         />
       )}
     </div>
