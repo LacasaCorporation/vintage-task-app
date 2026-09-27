@@ -1,6 +1,7 @@
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
 import ProductQtyInline from "@/components/ProductQtyInline";
+import ProductCodeInline from "@/components/ProductCodeInline";
 import StatusSelect from "@/components/StatusSelect";
 import {
   Briefcase,
@@ -416,6 +417,7 @@ function JobRow({
               >
                 <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
                   <span className="min-w-0 truncate">{fg.name}</span>
+                  <ProductCodeInline code={fg.code} />
                   <ProductQtyInline qty={fg.qty} unit={fg.unit} />
                 </span>
                 {fg.note && (
@@ -424,11 +426,6 @@ function JobRow({
                   </span>
                 )}
               </button>
-              {fg.code && (
-                <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                  {fg.code}
-                </span>
-              )}
               <DueChips
                 dueAt={fg.dueAt ?? job.dueAt}
                 inherited={fg.dueAt === undefined && job.dueAt !== undefined}

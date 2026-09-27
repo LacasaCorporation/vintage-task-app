@@ -28,6 +28,7 @@ import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
 import ProductQtyInline from "@/components/ProductQtyInline";
+import ProductCodeInline from "@/components/ProductCodeInline";
 import CustomersPanel from "@/components/CustomersPanel";
 import {
   JobsList,
@@ -1217,6 +1218,7 @@ export default function ProjectsSheet({
                                         <span className="min-w-0 truncate font-medium">
                                           {fg.name}
                                         </span>
+                                        <ProductCodeInline code={fg.code} />
                                         <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                                       </span>
                                       {fg.note && (
@@ -1225,11 +1227,6 @@ export default function ProjectsSheet({
                                         </span>
                                       )}
                                     </span>
-                                    {fg.code && (
-                                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                                        {fg.code}
-                                      </span>
-                                    )}
                                     <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
                                       {money(costByFg.get(fg._id) ?? 0)}
                                     </span>
@@ -1327,6 +1324,7 @@ export default function ProjectsSheet({
                                 <span className="min-w-0 truncate font-medium">
                                   {fg.name}
                                 </span>
+                                <ProductCodeInline code={fg.code} />
                                 <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
                               </span>
                               {fg.note && (
@@ -1335,11 +1333,6 @@ export default function ProjectsSheet({
                                 </span>
                               )}
                             </span>
-                            {fg.code && (
-                              <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                                {fg.code}
-                              </span>
-                            )}
                             <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
                               {money(costByFg.get(fg._id) ?? 0)}
                             </span>
