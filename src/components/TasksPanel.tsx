@@ -27,6 +27,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlarmClock,
+  Briefcase,
   CalendarDays,
   ChevronDown,
   Clock,
@@ -70,6 +71,7 @@ import {
 export default function TasksPanel({
   activeView,
   lists,
+  onSelectView,
   canCreate = true,
   canEdit = true,
   canDelete = true,
@@ -264,6 +266,20 @@ export default function TasksPanel({
   const activeList = lists.find((l) => l._id === activeView) ?? null;
 
   /**
+   * Counts for the view filters. These used to sit beside the smart-view rows
+   * in the side menu; the filters themselves now live on this page, so the
+   * numbers that label them are derived here too.
+   */
+  const viewCounts = useMemo(() => {
+    const open = (allTasks ?? []).filter((t) => !t.isCompleted);
+    return {
+      all: open.length,
+      today: open.filter((t) => isDueToday(t) || isOverdue(t)).length,
+      starred: open.filter((t) => t.starred).length,
+    };
+  }, [allTasks]);
+
+  /**
    * The Flagged view is driven entirely by the flags: a job or product whose
    * flag was taken off on the Projects page drops out of this page too, and
    * comes back only when the flag goes on again. The queries return the full
@@ -289,6 +305,42 @@ export default function TasksPanel({
     };
     return { jobs, fgs, projects: flaggedProjects ?? [], projectNameOf };
   }, [onlyFlaggedJobs, onlyFlaggedFgs, flaggedProjects]);
+
+  /** The view filters, in the order they are offered. */
+  const viewFilters = useMemo(
+    () =>
+      [
+        {
+          view: null,
+          label: "All tasks",
+          Icon: Inbox,
+          count: viewCounts.all,
+          hint: "Every task you can see",
+        },
+        {
+          view: "today",
+          label: "Today",
+          Icon: CalendarDays,
+          count: viewCounts.today,
+          hint: "Due today, or already overdue",
+        },
+        {
+          view: "starred",
+          label: "Starred",
+          Icon: Star,
+          count: viewCounts.starred,
+          hint: "The tasks you have starred",
+        },
+        {
+          view: "flagged",
+          label: "Productions",
+          Icon: Briefcase,
+          count: (flaggedItems?.jobs.length ?? 0) + (flaggedItems?.fgs.length ?? 0),
+          hint: "Flagged jobs and products, worked start → complete",
+        },
+      ] as const,
+    [viewCounts, flaggedItems],
+  );
 
   const handleAdd = async () => {
     if (isAdding) return;
@@ -534,9 +586,44 @@ export default function TasksPanel({
         </button>
       </div>
 
-      {/* ── Scope / sort / filter controls ───────────────────────────── */}
+      {/* ── View / scope / sort / filter controls ───────────────────── */}
       <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1.5">
         <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="mr-1">View</span>
+          {viewFilters.map(({ view, label, Icon, count, hint }) => {
+            const active = activeView === view;
+            return (
+              <button
+                key={label}
+                type="button"
+                title={hint}
+                onClick={() => onSelectView(view)}
+                aria-current={active ? "true" : undefined}
+                className={cn(
+                  "flex h-7 items-center gap-1.5 rounded-lg border px-2 font-medium transition-colors",
+                  active
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : "border-border bg-card hover:bg-accent hover:text-foreground",
+                )}
+              >
+                <Icon className="size-3.5 shrink-0" />
+                {label}
+                <span className="text-[10px] font-normal tabular-nums opacity-70">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+          {activeList && (
+            <span
+              className="flex h-7 items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2 font-medium text-primary"
+              title="Chosen from the Lists tree in the sidebar"
+            >
+              <ListTodo className="size-3.5 shrink-0" />
+              {activeList.name}
+            </span>
+          )}
+          <span className="mx-1 h-4 w-px bg-border" />
           <span className="mr-1">Show</span>
           {(
             [

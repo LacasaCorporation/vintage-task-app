@@ -1,19 +1,13 @@
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import type { TaskDoc } from "@/lib/task-utils";
-import { isDueToday, isOverdue } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
 import {
-  Briefcase,
-  CalendarDays,
   CheckSquare,
   ChevronRight,
   Folder,
   FolderInput,
-  Inbox,
   Loader2,
   Pencil,
   Plus,
-  Star,
   Trash2,
 } from "lucide-react";
 
@@ -22,11 +16,16 @@ type ListId = Id<"taskLists">;
 /** null = All tasks; "today" / "starred" / "flagged" are smart views; otherwise a list id. */
 export type ActiveTaskView = ListId | "today" | "starred" | "flagged" | null;
 
-/** Sidebar: smart views, folders, and task lists — shown while Tasks is active. */
+/**
+ * Sidebar: folders and task lists — shown while Tasks is active.
+ *
+ * The smart views (All tasks / Today / Starred / Productions) used to live
+ * here. They are filters over the whole list rather than somewhere to file
+ * something, so they now sit on the Tasks page itself, next to Show and Sort.
+ */
 export default function TasksSidebar({
   lists,
   folders,
-  tasks,
   loading,
   activeView,
   onSelectView,
@@ -36,11 +35,9 @@ export default function TasksSidebar({
   onMoveListToFolder,
   onNewFolder,
   onDeleteFolder,
-  flaggedCount = 0,
 }: {
   lists: Doc<"taskLists">[];
   folders: Doc<"taskFolders">[];
-  tasks: TaskDoc[];
   loading: boolean;
   activeView: ActiveTaskView;
   onSelectView: (view: ActiveTaskView) => void;
@@ -50,13 +47,7 @@ export default function TasksSidebar({
   onMoveListToFolder: (list: Doc<"taskLists">) => void;
   onNewFolder?: () => void;
   onDeleteFolder?: (folder: Doc<"taskFolders">) => void;
-  /** Count of flagged jobs/products (from the Productions view). */
-  flaggedCount?: number;
 }) {
-  const openTasks = tasks.filter((t) => !t.isCompleted);
-  const todayCount = openTasks.filter((t) => isDueToday(t) || isOverdue(t)).length;
-  const starredCount = openTasks.filter((t) => t.starred).length;
-
   const unfoldered = lists.filter((l) => !l.folderId);
 
   const renderListRow = (list: Doc<"taskLists">) => {
@@ -127,48 +118,6 @@ export default function TasksSidebar({
     );
   };
 
-  const smartRow = (
-    view: "today" | "starred",
-    label: string,
-    Icon: typeof Star,
-    count: number,
-  ) => {
-    const active = activeView === view;
-    return (
-      <button
-        type="button"
-        onClick={() => onSelectView(view)}
-        aria-current={active ? "true" : undefined}
-        className={cn(
-          "flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
-          active
-            ? "bg-primary/10 text-primary"
-            : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        )}
-      >
-        <Icon
-          className={cn(
-            "size-4 shrink-0",
-            active ? "text-primary" : "text-muted-foreground/70",
-          )}
-        />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-sm",
-            active ? "font-medium" : "text-foreground/85",
-          )}
-        >
-          {label}
-        </span>
-        {count > 0 && (
-          <span className="shrink-0 rounded-full bg-muted px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground">
-            {count}
-          </span>
-        )}
-      </button>
-    );
-  };
-
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex items-center justify-between px-2 pb-1">
@@ -194,69 +143,6 @@ export default function TasksSidebar({
           Loading…
         </div>
       )}
-
-      {/* smart views */}
-      <button
-        type="button"
-        onClick={() => onSelectView(null)}
-        aria-current={activeView === null ? "true" : undefined}
-        className={cn(
-          "group/all flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
-          activeView === null
-            ? "bg-primary/10 text-primary"
-            : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        )}
-      >
-        <Inbox
-          className={cn(
-            "size-4 shrink-0",
-            activeView === null ? "text-primary" : "text-muted-foreground/70",
-          )}
-        />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-sm",
-            activeView === null ? "font-medium" : "text-foreground/85",
-          )}
-        >
-          All tasks
-        </span>
-      </button>
-      {smartRow("today", "Today", CalendarDays, todayCount)}
-      {smartRow("starred", "Starred", Star, starredCount)}
-
-      {/* Productions: flagged jobs & products, worked start → complete */}
-      <button
-        type="button"
-        onClick={() => onSelectView("flagged")}
-        aria-current={activeView === "flagged" ? "true" : undefined}
-        className={cn(
-          "flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
-          activeView === "flagged"
-            ? "bg-primary/10 text-primary"
-            : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        )}
-      >
-        <Briefcase
-          className={cn(
-            "size-4 shrink-0",
-            activeView === "flagged" ? "text-sky-500" : "text-muted-foreground/70",
-          )}
-        />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-sm",
-            activeView === "flagged" ? "font-medium text-primary" : "text-foreground/85",
-          )}
-        >
-          Productions
-        </span>
-        {flaggedCount > 0 && (
-          <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium tabular-nums text-amber-700 dark:text-amber-400">
-            {flaggedCount}
-          </span>
-        )}
-      </button>
 
       {/* folders + their lists */}
       {folders.length > 0 && (
@@ -319,7 +205,8 @@ export default function TasksSidebar({
 
       {!loading && lists.length === 0 && folders.length === 0 && (
         <p className="px-2 py-2 text-xs text-muted-foreground">
-          No lists yet — create one to organize tasks.
+          No lists yet — create one to organize tasks, or use the filters above
+          to work across all of them.
         </p>
       )}
     </div>

@@ -15,7 +15,7 @@ import CostingPanel from "@/components/CostingPanel";
 import SettingsPanel from "@/components/SettingsPanel";
 import SettingsSidebar from "@/components/SettingsSidebar";
 import { format } from "date-fns";
-import { LogOut, Menu, Settings, X } from "lucide-react";
+import { LogOut, Menu, NotebookPen, Settings, X } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -676,6 +676,34 @@ export default function Dashboard() {
     setMobileNavOpen(false);
   };
 
+  /**
+   * The notebook tree. It used to sit under Notes inside the main side menu,
+   * which pushed the working areas down and made the notes hierarchy feel
+   * subordinate to the app's navigation. It is now its own column, shown only
+   * while Notes is open (and inside the mobile drawer, where the wide side
+   * menu is not available).
+   */
+  const notebookTree = (
+    <NotesSidebar
+      notebooks={nbList}
+      allPages={allPages}
+      loading={notebooks === undefined || allPages === undefined}
+      taskScope={dataScope}
+      onScopeChange={setDataScope}
+      activeNotebookId={notebookId}
+      activePageId={activePage?._id ?? null}
+      onSelectNotebook={handleSelectNotebook}
+      onSelectPage={handleSelectPage}
+      onNewNotebook={canDoItem("notebooks", "create") ? handleNewNotebook : undefined}
+      onNewPage={canDoItem("notePages", "create") ? (nbId) => void handleNewPage(nbId) : undefined}
+      onNewSubPage={canDoItem("notePages", "create") ? (nbId, parentId) => void handleNewPage(nbId, parentId) : undefined}
+      onRenameNotebook={canDoItem("notebooks", "edit") ? handleRenameNotebook : undefined}
+      onRenamePage={canDoItem("notePages", "edit") ? handleRenamePage : undefined}
+      onDeleteNotebook={canDoItem("notebooks", "delete") ? handleDeleteNotebook : undefined}
+      onDeletePage={canDoItem("notePages", "delete") ? handleDeletePage : undefined}
+    />
+  );
+
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       {/* ── Side menu ───────────────────────────────────────────────── */}
@@ -714,40 +742,15 @@ export default function Dashboard() {
             <TasksSidebar
               lists={taskLists ?? []}
               folders={taskFolders ?? []}
-              tasks={allTasks ?? []}
               loading={taskLists === undefined}
               activeView={activeTaskView}
               onSelectView={setActiveTaskView}
-              flaggedCount={
-                (finishedGoods ?? []).filter((f) => f.isFlagged).length +
-                ((allJobs ?? []) as { isFlagged?: boolean }[]).filter((j) => j.isFlagged).length
-              }
               onNewList={canDoItem("taskLists", "create") ? handleNewList : undefined}
               onRenameList={canDoItem("taskLists", "edit") ? handleRenameList : undefined}
               onDeleteList={canDoItem("taskLists", "delete") ? handleDeleteList : undefined}
               onMoveListToFolder={handleMoveListToFolder}
               onNewFolder={canDoItem("taskFolders", "create") ? handleNewFolder : undefined}
               onDeleteFolder={canDoItem("taskFolders", "delete") ? handleDeleteFolder : undefined}
-            />
-          )}
-          {section === "notes" && (
-            <NotesSidebar
-              notebooks={nbList}
-              allPages={allPages}
-              loading={notebooks === undefined || allPages === undefined}
-              taskScope={dataScope}
-              onScopeChange={setDataScope}
-              activeNotebookId={notebookId}
-              activePageId={activePage?._id ?? null}
-              onSelectNotebook={handleSelectNotebook}
-              onSelectPage={handleSelectPage}
-              onNewNotebook={canDoItem("notebooks", "create") ? handleNewNotebook : undefined}
-              onNewPage={canDoItem("notePages", "create") ? (nbId) => void handleNewPage(nbId) : undefined}
-              onNewSubPage={canDoItem("notePages", "create") ? (nbId, parentId) => void handleNewPage(nbId, parentId) : undefined}
-              onRenameNotebook={canDoItem("notebooks", "edit") ? handleRenameNotebook : undefined}
-              onRenamePage={canDoItem("notePages", "edit") ? handleRenamePage : undefined}
-              onDeleteNotebook={canDoItem("notebooks", "delete") ? handleDeleteNotebook : undefined}
-              onDeletePage={canDoItem("notePages", "delete") ? handleDeletePage : undefined}
             />
           )}
         </div>
@@ -801,6 +804,19 @@ export default function Dashboard() {
         </div>
       </aside>
 
+      {/* ── Notes: its own notebook column, only while Notes is open ── */}
+      {section === "notes" && (
+        <aside className="sticky top-0 hidden h-screen w-72 shrink-0 flex-col overflow-y-auto border-r border-border/60 bg-card/30 md:flex">
+          <div className="flex items-center gap-2 border-b border-border/60 px-5 py-4">
+            <NotebookPen className="size-4 shrink-0 text-primary" />
+            <span className="font-display text-base font-semibold tracking-tight">
+              Notes
+            </span>
+          </div>
+          <div className="px-3 py-3">{notebookTree}</div>
+        </aside>
+      )}
+
       {/* ── Mobile navigation: the same list, behind a scrim ────────── */}
       {mobileNavOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
@@ -844,6 +860,14 @@ export default function Dashboard() {
                 canViewSales={canDoItem("purchases", "view")}
                 canViewAccounting={canDoItem("purchases", "view")}
               />
+
+              {/* the notebook tree lives in its own column on wide screens;
+                  here it follows the navigation list instead */}
+              {section === "notes" && (
+                <div className="mt-3 border-t border-border/60 pt-3">
+                  {notebookTree}
+                </div>
+              )}
             </div>
 
             <div className="mt-auto space-y-1 border-t border-border/60 p-3">
