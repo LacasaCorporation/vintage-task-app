@@ -220,6 +220,7 @@ export const listEntries = query({
           kind: e.kind,
           memo: e.memo,
           party: e.party,
+          expenseId: e.expenseId,
           lines: entryLines,
           debit: round(entryLines.reduce((s, l) => s + l.debit, 0)),
           credit: round(entryLines.reduce((s, l) => s + l.credit, 0)),
@@ -348,6 +349,8 @@ export async function postEntry(
     kind: Doc<"journalEntries">["kind"];
     memo?: string;
     party?: string;
+    /** Set when the entry is raised by an expense, so the two link up. */
+    expenseId?: Id<"expenses">;
     lines: {
       accountId: Id<"accounts">;
       debit: number;
@@ -395,6 +398,7 @@ export async function postEntry(
     kind: args.kind,
     memo: args.memo?.trim() || undefined,
     party: args.party?.trim() || undefined,
+    expenseId: args.expenseId,
     createdAt: Date.now(),
   });
   for (const line of usable) {

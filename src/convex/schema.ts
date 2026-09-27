@@ -826,10 +826,15 @@ const schema = defineSchema(
         v.literal("opening"),
         v.literal("receipt"),
         v.literal("payment"),
+        // posted automatically by the Expenses register, so the two can never
+        // drift apart
+        v.literal("expense"),
       ),
       memo: v.optional(v.string()),
       /** Customer or supplier the receipt / payment came from or went to. */
       party: v.optional(v.string()),
+      /** Set when this entry was raised by an expense, so the two link up. */
+      expenseId: v.optional(v.id("expenses")),
       createdAt: v.number(),
     })
       .index("by_owner", ["ownerId"])

@@ -45,6 +45,9 @@ export const ACCOUNTING_TABS: {
   { id: "daybook", label: "Day book", icon: CalendarDays, hint: "Every posting, by day" },
 ];
 
+/** The kinds an entry can be filed under. */
+type EntryKind = "journal" | "opening" | "receipt" | "payment" | "expense";
+
 const TYPE_LABEL: Record<string, string> = {
   asset: "Asset",
   liability: "Liability",
@@ -116,6 +119,18 @@ export default function AccountingPanel({
 
   const accounts = useQuery(api.accounting.listAccounts);
   const entries = useQuery(api.accounting.listEntries, { limit: 200 });
+  /**
+   * Which kinds belong to which tab. Expenses post as their own kind so they
+   * show up in the journal — the one place a posting is meant to be seen —
+   * rather than being filed with supplier payments where nobody looks.
+   */
+  const journalKinds: EntryKind[] = ["journal", "expense"];
+  const receiptKinds: EntryKind[] = ["receipt", "payment"];
+  const shownKinds: EntryKind[] =
+    tab === "journal" ? journalKinds : tab === "receipt" ? receiptKinds : [];
+  const entryCount = `${(entries ?? []).filter((e) =>
+    (shownKinds as readonly string[]).includes(e.kind),
+  ).length} entries`;
   const ensureDefaults = useMutation(api.accounting.ensureDefaults);
   const addAccount = useMutation(api.accounting.createAccount);
   const editAccount = useMutation(api.accounting.updateAccount);
@@ -506,10 +521,11 @@ export default function AccountingPanel({
           postEntry={postEntry}
         />
       ) : tab === "journal" || tab === "receipt" ? (
-        <Panel            title={
-              tab === "journal" ? "Journal entries" : "Receipts & payments"
-            }
-            count={`${(entries ?? []).length} entries`}
+        <Panel
+          title={
+            tab === "journal" ? "Journal entries" : "Receipts & payments"
+          }
+          count={entryCount}
           actions={
             <Button
               type="button"
@@ -531,7 +547,7 @@ export default function AccountingPanel({
           <EntryTable
             entries={entries ?? []}
             money={money}
-            kinds={tab === "journal" ? ["journal"] : ["receipt", "payment"]}
+            kinds={tab === "journal" ? journalKinds : receiptKinds}
             onDelete={deleteEntry}
           />
         </Panel>
@@ -842,7 +858,7 @@ function EntryTable({
     _id: Id<"journalEntries">;
     number: string;
     at: number;
-    kind: "journal" | "opening" | "receipt" | "payment";
+    kind: EntryKind;
     memo?: string;
     party?: string;
     debit: number;
@@ -856,7 +872,7 @@ function EntryTable({
     }[];
   }[];
   money: (n: number) => string;
-  kinds: ("journal" | "opening" | "receipt" | "payment")[];
+  kinds: EntryKind[];
   onDelete: (id: Id<"journalEntries">) => Promise<void>;
 }) {
   const shown = entries.filter((e) => kinds.includes(e.kind));
@@ -881,7 +897,7 @@ function EntryTable({
             </span>
             {e.kind !== "journal" && (
               <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary capitalize">
-                {e.kind}
+                {e.kind === "expense" ? "expense" : e.kind}
               </span>
             )}
             {e.party && (

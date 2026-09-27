@@ -27,11 +27,19 @@ export const list = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
     const nameOf = new Map(accounts.map((a) => [a._id, a.name]));
+    const entries = await ctx.db
+      .query("journalEntries")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const numberOf = new Map(entries.map((e) => [e._id, e.number]));
     return rows
       .sort((a, b) => b.at - a.at)
       .map((e) => ({
         ...e,
         paidFromName: e.paidFrom !== undefined ? nameOf.get(e.paidFrom) : undefined,
+        // undefined means the row never reached the ledger — the panel offers
+        // a repair rather than showing it as posted
+        entryNumber: e.entryId !== undefined ? numberOf.get(e.entryId) : undefined,
       }));
   },
 });
@@ -159,18 +167,7 @@ export const create = mutation({
     }
 
     const memo = args.description?.trim() || category;
-    const entryId = await postEntry(ctx, userId, {
-      at: args.at,
-      kind: "payment",
-      memo,
-      party: args.vendor?.trim() || undefined,
-      lines: [
-        { accountId: expenseAccount._id, debit: amount, credit: 0 },
-        { accountId: cashAccount._id, debit: 0, credit: amount },
-      ],
-    });
-
-    return ctx.db.insert("expenses", {
+    const expenseId = await ctx.db.insert("expenses", {
       ownerId: userId,
       at: args.at,
       category: expenseAccount.name,
@@ -181,9 +178,79 @@ export const create = mutation({
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
       reference: args.reference?.trim().slice(0, 60) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
-      entryId,
       createdAt: Date.now(),
     });
+
+    // the register row and its ledger posting are written in the same call, so
+    // an expense and the accounts can never drift apart
+    const entryId = await postEntry(ctx, userId, {
+      at: args.at,
+      kind: "expense",
+      memo,
+      party: args.vendor?.trim() || undefined,
+      expenseId,
+      lines: [
+        { accountId: expenseAccount._id, debit: amount, credit: 0 },
+        { accountId: cashAccount._id, debit: 0, credit: amount },
+      ],
+    });
+    await ctx.db.patch(expenseId, { entryId });
+    return expenseId;
+  },
+});
+
+/**
+ * Posts the ledger entry for any expense that never got one — rows recorded
+ * before the register wrote to the accounts, or entries lost to a failed call.
+ * Refuses to guess instead of posting to the wrong account: anything it cannot
+ * file comes back in `skipped` for the panel to show.
+ */
+export const postMissing = mutation({
+  args: {},
+  handler: async (ctx): Promise<{ posted: number; skipped: string[] }> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const rows = await ctx.db
+      .query("expenses")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const accounts = await ctx.db
+      .query("accounts")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+
+    let posted = 0;
+    const skipped: string[] = [];
+    for (const e of rows) {
+      if (e.entryId !== undefined) continue;
+      const expenseAccount = accounts.find(
+        (a) => a.isGroup !== true && a.name.toLowerCase() === e.category.toLowerCase(),
+      );
+      if (expenseAccount === undefined) {
+        skipped.push(`${e.category} — no account by that name`);
+        continue;
+      }
+      const cashAccount =
+        e.paidFrom !== undefined ? await ctx.db.get(e.paidFrom) : null;
+      if (cashAccount === null || cashAccount.ownerId !== userId) {
+        skipped.push(`${e.category} — the account it was paid from is gone`);
+        continue;
+      }
+      const entryId = await postEntry(ctx, userId, {
+        at: e.at,
+        kind: "expense",
+        memo: e.description?.trim() || e.category,
+        party: e.vendor?.trim() || undefined,
+        expenseId: e._id,
+        lines: [
+          { accountId: expenseAccount._id, debit: e.amount, credit: 0 },
+          { accountId: cashAccount._id, debit: 0, credit: e.amount },
+        ],
+      });
+      await ctx.db.patch(e._id, { entryId });
+      posted++;
+    }
+    return { posted, skipped };
   },
 });
 

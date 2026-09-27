@@ -5,7 +5,14 @@ import { useMutation, useQuery } from "convex/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Plus, Trash2, Wallet } from "lucide-react";
+import {
+  AlertTriangle,
+  FileSpreadsheet,
+  Loader2,
+  Plus,
+  Trash2,
+  Wallet,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -232,11 +239,39 @@ export default function ExpensesPanel({
   const expenses = useQuery(api.expenses.list);
   const totals = useQuery(api.expenses.byCategory);
   const removeExpense = useMutation(api.expenses.remove);
+  const postMissing = useMutation(api.expenses.postMissing);
   const { format: money } = useWorkspaceCurrency();
   const [busy, setBusy] = useState<Id<"expenses"> | null>(null);
 
   const rows = expenses ?? [];
   const spent = rows.reduce((sum, e) => sum + e.amount, 0);
+  /** Rows recorded before the register wrote to the ledger, or lost to a fault. */
+  const unposted = rows.filter((e) => e.entryId === undefined);
+  const [repairing, setRepairing] = useState(false);
+
+  const repair = async () => {
+    setRepairing(true);
+    try {
+      const { posted, skipped } = await postMissing({});
+      if (posted > 0) {
+        toast.success(
+          `Posted ${posted} missing ${posted === 1 ? "entry" : "entries"} to the chart of accounts.`,
+        );
+      }
+      if (skipped.length > 0) {
+        toast.error(`Couldn't post: ${skipped.join("; ")}.`);
+      }
+      if (posted === 0 && skipped.length === 0) {
+        toast.success("Every expense is already in the accounts.");
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't post the missing entries.",
+      );
+    } finally {
+      setRepairing(false);
+    }
+  };
 
   const drop = async (id: Id<"expenses">) => {
     setBusy(id);
@@ -254,6 +289,32 @@ export default function ExpensesPanel({
 
   return (
     <div className="space-y-4">
+      {unposted.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <strong>
+              {unposted.length} expense{unposted.length === 1 ? "" : "s"}
+            </strong>{" "}
+            {unposted.length === 1 ? "has" : "have"} not reached the chart of
+            accounts.
+          </span>
+          <button
+            type="button"
+            onClick={() => void repair()}
+            disabled={repairing}
+            className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg bg-amber-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+          >
+            {repairing ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <FileSpreadsheet className="size-3" />
+            )}
+            Post to accounts
+          </button>
+        </div>
+      )}
+
       {(totals?.length ?? 0) > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {totals?.map((t) => (
@@ -313,6 +374,7 @@ export default function ExpensesPanel({
                   <th className="w-40 px-3 py-2">Paid to</th>
                   <th className="w-32 px-3 py-2">From</th>
                   <th className="w-28 px-3 py-2 text-right">Amount</th>
+                  <th className="w-24 px-3 py-2">Journal</th>
                   <th className="w-12 px-2 py-2" />
                 </tr>
               </thead>
@@ -331,6 +393,23 @@ export default function ExpensesPanel({
                       {e.paidFromName ?? "—"}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{money(e.amount)}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {e.entryNumber ? (
+                        <span
+                          className="font-mono text-muted-foreground"
+                          title="Posted to the chart of accounts — open Accounts → Journal entry to see it"
+                        >
+                          {e.entryNumber}
+                        </span>
+                      ) : (
+                        <span
+                          className="text-amber-600 dark:text-amber-400"
+                          title="Not in the chart of accounts yet — use “Post to accounts” above"
+                        >
+                          not posted
+                        </span>
+                      )}
+                    </td>
                     <td className="px-2 py-1 text-right">
                       {canDelete && (
                         <button
