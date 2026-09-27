@@ -30,6 +30,7 @@ import ContactDialog from "@/components/ContactDialog";
 import LpoPanel from "@/components/LpoPanel";
 import ExpensesPanel from "@/components/ExpensesPanel";
 import VendorField from "@/components/VendorField";
+import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
@@ -93,6 +94,19 @@ export default function PurchasePanel({
   const [busy, setBusy] = useState(false);
 
   const materialOf = (id: Id<"rawMaterials"> | "") => materials.find((m) => m._id === id);
+
+  /** Searchable options for the per-line material pickers. */
+  const materialOptions = useMemo<PickerItem[]>(
+    () =>
+      materials.map((m) => ({
+        id: m._id,
+        label: m.name,
+        sub: [m.code, m.category].filter((v) => !!v && v !== "").join(" · ") || undefined,
+        hint: `${money(m.pricePerUnit)}/${m.unit}`,
+        keywords: `${(m.stock ?? 0).toLocaleString()} ${m.unit} in stock`,
+      })),
+    [materials, money],
+  );
 
   /** The bill the view tab is showing. */
   const viewed = bills?.find((b) => b._id === viewingId) ?? null;
@@ -877,27 +891,21 @@ export default function PurchasePanel({
                         {index + 1}
                       </td>
                       <td className="py-2 pr-2">
-                        <select
+                        <ItemPicker
+                          items={materialOptions}
                           value={line.materialId}
-                          aria-label="Material"
                           disabled={!canCreate}
-                          onChange={(e) => {
-                            const id = e.target.value as Id<"rawMaterials"> | "";
+                          onChange={(id) => {
                             updateLine(index, {
-                              materialId: id,
-                              rate: line.rate || String(materialOf(id)?.pricePerUnit ?? ""),
+                              materialId: id as Id<"rawMaterials"> | "",
+                              rate: line.rate || String(materialOf(id as Id<"rawMaterials">)?.pricePerUnit ?? ""),
                             });
                           }}
-                          className="h-9 w-full rounded-lg border bg-card px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
-                        >
-                          <option value="">Choose a material…</option>
-                          {materials.map((m) => (
-                            <option key={m._id} value={m._id}>
-                              {m.code ? `${m.code} · ` : ""}
-                              {m.name}
-                            </option>
-                          ))}
-                        </select>
+                          placeholder="Choose or search material…"
+                          searchPlaceholder="Search name, code or category…"
+                          emptyLabel="No material matches that."
+                          aria-label="Material"
+                        />
                       </td>
                       <td className="py-2 pr-2">
                         <Input

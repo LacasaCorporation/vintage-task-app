@@ -27,6 +27,7 @@ import {
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { toLocalInput } from "@/lib/task-utils";
+import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
@@ -92,6 +93,7 @@ function LpoForm({
   );
   const [send, setSend] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { format: money } = useWorkspaceCurrency();
 
   const subtotal = useMemo(
     () => lines.reduce((sum, l) => sum + num(l.qty) * num(l.rate), 0),
@@ -145,8 +147,18 @@ function LpoForm({
     }
   };
 
-  const selectCls =
-    "h-9 rounded-lg border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30";
+  /** Searchable options for the per-line material pickers. */
+  const materialOptions = useMemo<PickerItem[]>(
+    () =>
+      materials.map((m) => ({
+        id: m._id,
+        label: m.name,
+        sub: [m.code, m.category].filter((v) => !!v && v !== "").join(" · ") || undefined,
+        hint: `${money(m.pricePerUnit)}/${m.unit}`,
+        keywords: `${(m.stock ?? 0).toLocaleString()} ${m.unit} in stock`,
+      })),
+    [materials, money],
+  );
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -195,10 +207,12 @@ function LpoForm({
           </p>
           {lines.map((line, i) => (
             <div key={i} className="flex items-center gap-2">
-              <select
+              <ItemPicker
+                className="min-w-[160px] flex-1"
+                items={materialOptions}
                 value={line.materialId}
-                onChange={(e) => {
-                  const materialId = e.target.value as Id<"rawMaterials"> | "";
+                onChange={(id) => {
+                  const materialId = id as Id<"rawMaterials"> | "";
                   const material = materials.find((m) => m._id === materialId);
                   updateLine(i, {
                     materialId,
@@ -208,16 +222,11 @@ function LpoForm({
                         : line.rate,
                   });
                 }}
+                placeholder="Choose or search material…"
+                searchPlaceholder="Search name, code or category…"
+                emptyLabel="No material matches that."
                 aria-label="Material"
-                className={cn(selectCls, "min-w-0 flex-1")}
-              >
-                <option value="">Choose a material…</option>
-                {materials.map((m) => (
-                  <option key={m._id} value={m._id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+              />
               <Input
                 type="number"
                 min="0"

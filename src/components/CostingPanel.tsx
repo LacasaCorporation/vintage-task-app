@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import MaterialsSheet from "@/components/MaterialsSheet";
 import CreateMaterialDialog from "@/components/CreateMaterialDialog";
+import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import ProductForm from "@/components/ProductForm";
 import ProjectsSheet from "@/components/ProjectsSheet";
 import type { CostingView } from "@/components/CostingSidebar";
@@ -42,9 +43,6 @@ import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type FgDoc = Doc<"finishedGoods">;
 type MaterialDoc = Doc<"rawMaterials">;
-
-/** Sentinel option value: pick it to create a material instead of choosing one. */
-const NEW_MATERIAL = "__new__";
 
 const cellCls =
   "w-full bg-transparent px-2 py-1 text-xs outline-none focus:bg-primary/5 focus:ring-2 focus:ring-primary/30 rounded-md";
@@ -254,6 +252,19 @@ export default function CostingPanel({
     activeFgId === null ? "skip" : { fgId: activeFgId },
   );
   const rows = useMemo(() => items ?? [], [items]);
+
+  /** Searchable options for the "add a material" picker. */
+  const materialOptions = useMemo<PickerItem[]>(
+    () =>
+      materials.map((m) => ({
+        id: m._id,
+        label: m.name,
+        sub: [m.code, m.category].filter((v) => !!v && v !== "").join(" · ") || undefined,
+        hint: `${money(m.pricePerUnit)}/${m.unit}`,
+        keywords: `${(m.stock ?? 0).toLocaleString()} ${m.unit} in stock`,
+      })),
+    [materials, money],
+  );
 
   // Collapse duplicate rows (same description/price/unit) once per sheet open.
   useEffect(() => {
@@ -916,31 +927,21 @@ export default function CostingPanel({
                 <Package className="size-3" />
                 Material
               </span>
-              <select
+              <ItemPicker
+                className="min-w-[180px] flex-1"
+                size="sm"
+                items={materialOptions}
                 value={addingMaterialId}
-                onChange={(e) => {
-                  // the last option opens the create dialog instead of
-                  // selecting a material
-                  if (e.target.value === NEW_MATERIAL) {
-                    setCreateMaterialKey((k) => k + 1);
-                    setCreateMaterialOpen(true);
-                    return;
-                  }
-                  setAddingMaterialId(e.target.value);
-                }}
+                onChange={setAddingMaterialId}
+                placeholder="Choose or search material…"
+                searchPlaceholder="Search name, code or category…"
+                emptyLabel="No material matches that."
                 aria-label="Choose a raw material"
-                className="h-7 min-w-0 flex-1 rounded-lg border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option value="">Choose material…</option>
-                {materials.map((m) => (
-                  <option key={m._id} value={m._id}>
-                    {m.code ? `${m.code} · ` : ""}
-                    {m.name}
-                    {m.category ? ` [${m.category}]` : ""} ({money(m.pricePerUnit)}/{m.unit})
-                  </option>
-                ))}
-                <option value={NEW_MATERIAL}>+ Create new material…</option>
-              </select>
+                onCreateNew={() => {
+                  setCreateMaterialKey((k) => k + 1);
+                  setCreateMaterialOpen(true);
+                }}
+              />
               <Input
                 type="number"
                 min="0"

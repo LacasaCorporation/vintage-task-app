@@ -24,6 +24,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { toLocalInput } from "@/lib/task-utils";
+import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 
 type FgDoc = Doc<"finishedGoods">;
 type QuotationDoc = Doc<"quotations">;
@@ -72,6 +73,19 @@ export default function SalesPanel({
   const sales = useQuery(api.sales.listSales);
   const customers = useQuery(api.contacts.listCustomers);
   const { format: money } = useWorkspaceCurrency();
+
+  /** Searchable options for the per-line product pickers. */
+  const productOptions = useMemo<PickerItem[]>(
+    () =>
+      products.map((p) => ({
+        id: p._id,
+        label: p.name,
+        sub: [p.code, p.projectName].filter((v) => !!v && v !== "").join(" · ") || undefined,
+        hint: p.unit ?? undefined,
+        keywords: `${(p.stock ?? 0).toLocaleString()} in stock`,
+      })),
+    [products],
+  );
 
   const createQuote = useMutation(api.sales.createQuotation);
   const setQuoteStatus = useMutation(api.sales.updateQuotation);
@@ -545,25 +559,20 @@ export default function SalesPanel({
             {draft.map((line, i) => {
               return (
                 <div key={i} className="flex flex-wrap items-center gap-1.5">
-                  <select
+                  <ItemPicker
+                    className="min-w-[180px] flex-1"
+                    items={productOptions}
                     value={line.productId}
-                    onChange={(e) => {
-                      const id = e.target.value as Id<"finishedGoods"> | "";
+                    onChange={(id) => {
                       const next = [...draft];
-                      next[i] = { ...line, productId: id };
+                      next[i] = { ...line, productId: id as Id<"finishedGoods"> | "" };
                       setDraft(next);
                     }}
+                    placeholder="Choose or search product…"
+                    searchPlaceholder="Search name, code or project…"
+                    emptyLabel="No product matches that."
                     aria-label="Product"
-                    className="h-9 min-w-[150px] flex-1 rounded-lg border bg-card px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                  >
-                    <option value="">Choose product…</option>
-                    {products.map((p) => (
-                      <option key={p._id} value={p._id}>
-                        {p.name}
-                        {p.unit ? ` (${p.unit})` : ""}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   <Input
                     type="number"
                     min="0"
