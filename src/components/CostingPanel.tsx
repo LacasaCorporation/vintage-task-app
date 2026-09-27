@@ -12,6 +12,7 @@ import SalesPanel from "@/components/SalesPanel";
 import AccountingPanel from "@/components/AccountingPanel";
 import {
   ChevronDown,
+  ChevronRight,
   AlertTriangle,
   Copy,
   Download,
@@ -24,7 +25,6 @@ import {
   Plus,
   Printer,
   Save,
-  Sigma,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -49,6 +49,83 @@ const NEW_MATERIAL = "__new__";
 
 const cellCls =
   "w-full bg-transparent px-2 py-1 text-xs outline-none focus:bg-primary/5 focus:ring-2 focus:ring-primary/30 rounded-md";
+
+const CHIP_TONE: Record<
+  "cost" | "margin" | "sales",
+  { box: string; label: string; value: string }
+> = {
+  cost: {
+    box: "border-border bg-muted/60",
+    label: "text-muted-foreground",
+    value: "text-foreground",
+  },
+  margin: {
+    box: "border-amber-500/30 bg-amber-500/10",
+    label: "text-amber-700/80 dark:text-amber-400/80",
+    value: "text-amber-700 dark:text-amber-400",
+  },
+  sales: {
+    box: "border-primary/30 bg-primary/10",
+    label: "text-primary/80",
+    value: "text-primary",
+  },
+};
+
+/** The little chevron between two summary chips. */
+function Arrow() {
+  return (
+    <ChevronRight
+      className="size-3.5 shrink-0 text-muted-foreground/50"
+      aria-hidden
+    />
+  );
+}
+
+/** One bracketed figure in the summary line; `children` replaces the value. */
+function Chip({
+  tone,
+  label,
+  value,
+  detail,
+  children,
+}: {
+  tone: "cost" | "margin" | "sales";
+  label: string;
+  value?: string;
+  detail?: string;
+  children?: React.ReactNode;
+}) {
+  const t = CHIP_TONE[tone];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-lg border px-2.5 py-1",
+        t.box,
+      )}
+    >
+      <span className="flex flex-col leading-tight">
+        <span
+          className={cn(
+            "text-[9px] font-semibold tracking-widest uppercase",
+            t.label,
+          )}
+        >
+          {label}
+        </span>
+        {children ?? (
+          <span className={cn("text-sm font-bold tabular-nums", t.value)}>
+            {value}
+          </span>
+        )}
+      </span>
+      {detail && (
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          {detail}
+        </span>
+      )}
+    </span>
+  );
+}
 
 /** Main costing area: raw-materials sheet, product form/list, or FG costing grid. */
 export default function CostingPanel({
@@ -115,6 +192,7 @@ export default function CostingPanel({
   const addFgItem = useMutation(api.costing.addFgItem);
   const updateItem = useMutation(api.costing.updateItem);
   const removeItem = useMutation(api.costing.removeItem);
+  const updateFg = useMutation(api.costing.updateFinishedGood);
   const setFgImage = useMutation(api.costing.setFgImage);
   const clearFgImageM = useMutation(api.costing.clearFgImage);
   const mergeDuplicates = useMutation(api.costing.mergeFgDuplicateItems);
@@ -1074,21 +1152,7 @@ export default function CostingPanel({
                           {rows.length} row{rows.length === 1 ? "" : "s"}
                         </span>
                       </td>
-                      <td colSpan={3} className="px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground">
-                        {money(totals.perUnit)} / {activeFg.unit ?? "pcs"}
-                      </td>
-                    </tr>
-                    <tr className="border-t border-border/70 bg-primary/5">
-                      <td colSpan={4} className="px-3 py-2 text-right text-sm font-semibold">
-                        <span className="inline-flex items-center gap-1.5">
-                          <Sigma className="size-3.5 text-primary" />
-                          Total cost
-                        </span>
-                      </td>
-                      <td
-                        colSpan={3}
-                        className="px-3 py-2 text-right font-display text-base font-bold tabular-nums text-primary"
-                      >
+                      <td colSpan={3} className="px-3 py-1.5 text-right text-sm font-semibold tabular-nums">
                         {money(totals.subtotal)}
                       </td>
                     </tr>
@@ -1097,6 +1161,50 @@ export default function CostingPanel({
               </table>
             </div>
           </section>
+
+          {rows.length > 0 && (
+            /* ── the summary line: cost → margin → sales price ───────── */
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <Chip tone="cost" label="Cost" value={money(totals.subtotal)} />
+              <Arrow />
+              <Chip
+                tone="margin"
+                label="Margin"
+                value={`${markupPct}%`}
+                detail={`+${money(totals.markup)}`}
+              >
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={markupPct}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v >= 0 && activeFg) {
+                      void updateFg({ id: activeFg._id, markupPct: v }).catch(() =>
+                        toast.error("Couldn't update the margin."),
+                      );
+                    }
+                  }}
+                  aria-label="Margin percent"
+                  className="w-9 rounded border border-amber-500/30 bg-card px-1 py-0.5 text-right text-xs font-semibold tabular-nums outline-none focus:ring-2 focus:ring-amber-500/40"
+                />
+                <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                  %
+                </span>
+              </Chip>
+              <Arrow />
+              <Chip
+                tone="sales"
+                label="Sales price"
+                value={money(totals.grand)}
+                detail={`${money(totals.salesPerUnit)} / ${activeFg.unit ?? "pcs"}`}
+              />
+              <span className="ml-1 text-[11px] text-muted-foreground">
+                cost per unit {money(totals.perUnit)} / {activeFg.unit ?? "pcs"}
+              </span>
+            </div>
+          )}
 
           {rows.length > 0 && (
             <div className="mt-2 flex items-center justify-end gap-1.5">
