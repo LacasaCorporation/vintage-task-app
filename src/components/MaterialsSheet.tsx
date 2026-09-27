@@ -1,8 +1,10 @@
 import { api } from "@/convex/_generated/api";
-import type { Doc } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import MaterialImportDialog from "@/components/MaterialImportDialog";
 import CreateMaterialDialog from "@/components/CreateMaterialDialog";
+import StockMovementList from "@/components/StockMovementList";
+import type { StockRow } from "@/lib/stock-types";
 import {
   AlertTriangle,
   ChevronDown,
@@ -23,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { exportMaterialTemplate, exportMaterials } from "@/lib/materialImport";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -140,6 +142,15 @@ export default function MaterialsSheet({
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [importOpen, setImportOpen] = useState(false);
+  /** the material whose income / outgoing transactions are open */
+  const [openStock, setOpenStock] = useState<Id<"rawMaterials"> | null>(null);
+  // the movement report, joined onto the table below by material id
+  const stockReport = useQuery(api.stock.report, { limit: 500 });
+  const stockByMaterial = useMemo(
+    () =>
+      new Map((stockReport ?? []).map((row) => [row.materialId, row] as const)),
+    [stockReport],
+  );
 
   const categories = useMemo(
     () => Array.from(new Set(materials.map((m) => m.category).filter(Boolean) as string[])).sort(),
@@ -326,36 +337,83 @@ export default function MaterialsSheet({
           <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="border-b border-border/70 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
-                <th className="w-10 px-3 py-2 font-semibold">#</th>
+                <th className="w-8 px-2 py-2" />
+                <th className="w-8 px-3 py-2 font-semibold">#</th>
                 <th className="w-24 px-3 py-2 font-semibold">Code</th>
                 <th className="px-3 py-2 font-semibold">Name</th>
                 <th className="w-28 px-3 py-2 font-semibold">Category</th>
                 <th className="w-28 px-3 py-2 font-semibold">Sub-cat.</th>
                 <th className="w-16 px-3 py-2 font-semibold">Unit</th>
                 <th className="w-28 px-3 py-2 text-right font-semibold">Unit price</th>
-                <th className="w-28 px-3 py-2 text-right font-semibold">Stock</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">Income</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">Outgoing</th>
+                <th className="w-28 px-3 py-2 text-right font-semibold">Balance</th>
                 <th className="w-10 px-2 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading materials…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                     {search || categoryFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No raw materials yet — add your first one above."}
                   </td>
                 </tr>
               ) : (
-                rows.map((m, i) => (
-                  <tr key={m._id} className="group/row transition-colors hover:bg-accent/40">
+                rows.map((m, i) => {
+                  const stock = stockByMaterial.get(m._id);
+                  const open = openStock === m._id;
+                  // a material with no recorded movement still has a balance
+                  const income = stock?.income ?? 0;
+                  const outgoing = stock?.outgoing ?? 0;
+                  const movementRow: StockRow = stock ?? {
+                    materialId: m._id,
+                    name: m.name,
+                    code: m.code,
+                    unit: m.unit,
+                    category: m.category,
+                    income: 0,
+                    outgoing: 0,
+                    balance: m.stock ?? 0,
+                    opening: 0,
+                    movements: [],
+                  };
+                  return (
+                  <Fragment key={m._id}>
+                  <tr
+                    className={cn(
+                      "group/row transition-colors hover:bg-accent/40",
+                      open && "bg-accent/40",
+                    )}
+                  >
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => setOpenStock(open ? null : m._id)}
+                        aria-expanded={open}
+                        title={
+                          open
+                            ? "Hide transactions"
+                            : "Show income and outgoing transactions"
+                        }
+                        className="grid size-5 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <ChevronDown
+                          className={cn(
+                            "size-3.5 transition-transform",
+                            open && "rotate-180",
+                          )}
+                        />
+                      </button>
+                    </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
                     <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{m.code ?? "—"}</td>
                     <td className="px-3 py-2 font-medium">{m.name}</td>
@@ -363,6 +421,18 @@ export default function MaterialsSheet({
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.subCategory ?? "—"}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.unit}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{money(m.pricePerUnit)}</td>
+                    <td
+                      className="px-3 py-2 text-right text-xs tabular-nums text-emerald-600 dark:text-emerald-400"
+                      title="Income — everything bought on a bill"
+                    >
+                      +{income.toLocaleString()}
+                    </td>
+                    <td
+                      className="px-3 py-2 text-right text-xs tabular-nums text-rose-600 dark:text-rose-400"
+                      title="Outgoing — consumed by production"
+                    >
+                      {outgoing === 0 ? "—" : `−${outgoing.toLocaleString()}`}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       <span
                         className={cn(
@@ -413,7 +483,16 @@ export default function MaterialsSheet({
                       </span>
                     </td>
                   </tr>
-                ))
+                  {open && (
+                    <tr>
+                      <td colSpan={11} className="p-0">
+                        <StockMovementList row={movementRow} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
+                  );
+                })
               )}
             </tbody>
           </table>

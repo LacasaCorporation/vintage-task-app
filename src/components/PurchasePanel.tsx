@@ -25,7 +25,6 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import ContactDialog from "@/components/ContactDialog";
-import StockMovementPanel from "@/components/StockMovementPanel";
 import VendorField from "@/components/VendorField";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
@@ -968,9 +967,6 @@ export default function PurchasePanel({
           </div>
         </form>
       )}
-
-      {/* stock movement, only on the list tab when no bill is open */}
-      {tab === "list" && viewed === null && <StockMovementPanel />}
 
       <ContactDialog
         kind="vendor"
