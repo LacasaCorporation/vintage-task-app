@@ -112,7 +112,7 @@ export default function PrimaryNav({
   // place the sidebar starts
   const [inventoryOpen, setInventoryOpen] = useState(false);
   // the Accounts drill-down opens on its own whenever you are inside it
-  const [accountsOpen, setAccountsOpen] = useState(false);
+  const [accountsExpanded, setAccountsExpanded] = useState(false);
   const inCosting = section === "costing";
   const projectCount = useMemo(
     () => new Set(finishedGoods.map((fg) => fg.projectName ?? "Standalone")).size,
@@ -127,7 +127,14 @@ export default function PrimaryNav({
    * the chart is open, one child when any other page is.
    */
   const accountsActive = inAccounting && view?.tab === "accounts";
-  const accountsExpanded = inAccounting || accountsOpen;
+  // Entering Accounts opens the list once. After that the row is an ordinary
+  // disclosure again, so a second click can close it — folding "you are
+  // inside it" into the same expression would pin it open for good.
+  const [wasInAccounting, setWasInAccounting] = useState(inAccounting);
+  if (wasInAccounting !== inAccounting) {
+    setWasInAccounting(inAccounting);
+    if (inAccounting) setAccountsExpanded(true);
+  }
 
   return (
     <div className="flex flex-col gap-0.5">
@@ -182,8 +189,9 @@ export default function PrimaryNav({
           >
             <button
               type="button"
-              onClick={() => setAccountsOpen((v) => !v)}
+              onClick={() => setAccountsExpanded((v) => !v)}
               aria-expanded={accountsExpanded}
+              title={accountsExpanded ? "Hide the Accounts pages" : "Show the Accounts pages"}
               aria-label={
                 accountsExpanded ? "Hide the Accounts pages" : "Show the Accounts pages"
               }
@@ -198,7 +206,22 @@ export default function PrimaryNav({
             </button>
             <button
               type="button"
-              onClick={() => onSelectView({ kind: "accounting", tab: "accounts" })}
+              onClick={() => {
+                // already showing the chart with the list open: this click
+                // closes it, the same as the chevron
+                if (accountsActive && accountsExpanded) {
+                  setAccountsExpanded(false);
+                  return;
+                }
+                setAccountsExpanded(true);
+                onSelectView({ kind: "accounting", tab: "accounts" });
+              }}
+              title={
+                accountsActive && accountsExpanded
+                  ? "Hide the Accounts pages"
+                  : "Open the chart of accounts"
+              }
+              aria-expanded={accountsExpanded}
               aria-current={accountsActive ? "page" : undefined}
               className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
             >
