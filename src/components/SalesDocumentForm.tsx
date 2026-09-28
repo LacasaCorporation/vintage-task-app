@@ -146,6 +146,7 @@ function SalesDocEditor({
   const firm = useQuery(api.settings.firmProfile) as FirmProfile | null;
   const taxDefault = useQuery(api.sales.postingDefaults);
   const customers = useQuery(api.contacts.listCustomers);
+  const addCustomer = useMutation(api.contacts.createCustomer);
 
   // Every field starts from the record being opened, not from a blank form
   // that is filled in a moment later. Reading the record once, at mount, is
@@ -163,6 +164,63 @@ function SalesDocEditor({
   const [customerAddress, setCustomerAddress] = useState(() =>
     seed ? text("customerAddress" in seed ? seed.customerAddress : "") : "",
   );
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [newCustomerAddress, setNewCustomerAddress] = useState("");
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
+  const [savingCustomer, setSavingCustomer] = useState(false);
+
+  /** Walk-in first, then the firm's customers alphabetically. */
+  const customerItems = useMemo<PickerItem[]>(
+    () => [
+      { id: "", label: "Walk-in / not listed", keywords: "walk in none" },
+      ...((customers ?? []) as CustomerDoc[]).map((c) => ({
+        id: c._id as string,
+        label: c.name,
+        sub: [c.contactName, c.phone, c.email].filter(Boolean).join(" · ") || undefined,
+        hint: c.address ? "has address" : undefined,
+        keywords: [c.address, c.note].filter(Boolean).join(" "),
+      })),
+    ],
+    [customers],
+  );
+
+  /** Choosing a customer fills the printed name and address from the record. */
+  const pickCustomer = (id: string) => {
+    setCustomerId(id as Id<"customers"> | "");
+    if (id === "") return;
+    const c = (customers ?? []).find((x) => x._id === id);
+    if (c) {
+      setCustomerName(c.name);
+      setCustomerAddress(c.address ?? "");
+    }
+  };
+
+  /** Add a customer from inside the document, then select it. */
+  const createAndPickCustomer = async () => {
+    const name = newCustomerName.trim();
+    if (name === "") return;
+    setSavingCustomer(true);
+    try {
+      const id = await addCustomer({
+        name,
+        address: newCustomerAddress.trim() || undefined,
+      });
+      setCustomerId(id);
+      setCustomerName(name);
+      if (newCustomerAddress.trim() !== "") {
+        setCustomerAddress(newCustomerAddress.trim());
+      }
+      setNewCustomerName("");
+      setNewCustomerAddress("");
+      setNewCustomerOpen(false);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not add that customer.",
+      );
+    } finally {
+      setSavingCustomer(false);
+    }
+  };
   const [poRef, setPoRef] = useState(() =>
     seed ? text("poRef" in seed ? seed.poRef : "") : "",
   );
@@ -334,7 +392,13 @@ function SalesDocEditor({
         : "Add at least one product to the document."
       : realLines.some((l) => l.price < 0)
         ? "A unit price can't be negative."
-        : null;
+        : realLines.some(
+            (l) =>
+              l.price === 0 &&
+              (l.productId === "" ? 0 : (listById.get(l.productId)?.price ?? 0)) > 0,
+          )
+          ? "A line is at 0.00 although the costing sheet has a rate — set it, or clear the product."
+          : null;
 
   const setLine = (i: number, patch: Partial<DraftLine>) =>
     setLines((prev) => prev.map((l, n) => (n === i ? { ...l, ...patch } : l)));
@@ -630,27 +694,28 @@ function SalesDocEditor({
                 <label className={LABEL} htmlFor="doc-customer">
                   {kind === "delivery" ? "Deliver to" : "Customer"}
                 </label>
-                <select
-                  id="doc-customer"
+                <ItemPicker
+                  items={customerItems}
                   value={customerId}
-                  onChange={(e) => {
-                    const id = e.target.value as Id<"customers"> | "";
-                    setCustomerId(id);
-                    const c = (customers ?? []).find((x) => x._id === id);
-                    if (c) {
-                      setCustomerName(c.name);
-                      setCustomerAddress(c.address ?? "");
-                    }
+                  onChange={pickCustomer}
+                  aria-label={kind === "delivery" ? "Deliver to" : "Customer"}
+                  placeholder="Walk-in / not listed"
+                  searchPlaceholder="Search customers…"
+                  emptyLabel="No customer by that name."
+                  createNewLabel={`Add customer “${newCustomerName.trim() || "new"}”`}
+                  onCreateNew={(term) => {
+                    setNewCustomerName(term);
+                    setNewCustomerAddress("");
+                    setNewCustomerOpen(true);
                   }}
-                  className={cn(FIELD, "w-full")}
-                >
-                  <option value="">Walk-in / not listed</option>
-                  {(customers ?? []).map((c: CustomerDoc) => (
-                    <option key={c._id} value={c._id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                  className="w-full"
+                />
+                {customerId === "" && customerName.trim() !== "" && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Saved under a one-off name — link it to a customer record to
+                    keep their history together.
+                  </p>
+                )}
               </div>
               <div>
                 <label className={LABEL} htmlFor="doc-date">
@@ -1040,6 +1105,72 @@ function SalesDocEditor({
             }}
           />
         )}
+        {/* add a customer without leaving the document */}
+        <Dialog
+          open={newCustomerOpen}
+          onOpenChange={(o) =>
+            !o && !savingCustomer && setNewCustomerOpen(false)
+          }
+        >
+          <DialogContent className="sm:max-w-[min(100%,420px)]">
+            <DialogTitle>New customer</DialogTitle>
+            <DialogDescription>
+              Saved to your customer list and selected on this document.
+            </DialogDescription>
+            <div className="grid gap-3">
+              <div>
+                <label className={LABEL} htmlFor="new-customer-name">
+                  Name
+                </label>
+                <Input
+                  id="new-customer-name"
+                  value={newCustomerName}
+                  autoFocus
+                  placeholder="Customer or company name"
+                  className={cn(FIELD, "w-full")}
+                  onChange={(e) => setNewCustomerName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className={LABEL} htmlFor="new-customer-address">
+                  Address
+                </label>
+                <Textarea
+                  id="new-customer-address"
+                  value={newCustomerAddress}
+                  rows={2}
+                  placeholder="Optional"
+                  className={cn(FIELD, "w-full resize-y")}
+                  onChange={(e) => setNewCustomerAddress(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 rounded-lg text-xs"
+                  disabled={savingCustomer}
+                  onClick={() => setNewCustomerOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 rounded-lg text-xs"
+                  disabled={savingCustomer || newCustomerName.trim() === ""}
+                  onClick={() => void createAndPickCustomer()}
+                >
+                  {savingCustomer && (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  )}
+                  Add customer
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );
