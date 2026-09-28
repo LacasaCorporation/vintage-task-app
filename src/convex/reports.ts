@@ -1,6 +1,7 @@
 import { query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { moneyAccountIds } from "./accountingDefaults";
+import { costByProduct } from "../lib/product-cost";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -932,9 +933,15 @@ export type ValuationRow = {
   category: string;
   unit: string;
   qty: number;
-  /** The rate the value was struck at. */
-  rate: number;
+  /** What one unit costs — the material's price, or the sheet's build cost. */
+  cost: number;
+  /** What one unit sells for. A raw material has no sale price of its own. */
+  price: number;
   value: number;
+  /** Where the rate came from, so no figure here is ever a guess. */
+  basis: "purchase" | "costing" | "invoice" | "none";
+  /** The rate the value was struck at — the same figure as `price`. */
+  rate: number;
   /** Nothing on record prices this line, so it is shown at zero. */
   unpriced: boolean;
 };
@@ -975,12 +982,19 @@ export type StockAnalysis = {
 /**
  * What the stock is worth, and what moved.
  *
- * Materials are valued at their own price per unit, which is the rate the
- * business buys at. A product has no price of its own — it is whatever it
- * last went out for — so it is valued at the last invoiced price and, when a
- * product has never been invoiced, it is reported as unpriced rather than
- * quietly valued at nothing. Inventories are normally valued at cost; that
- * would need a costing method chosen once and applied to every issue.
+ * The rates come from the costing sheets, which is where the business already
+ * records them: a product's cost is the sum of its sheet lines, and its sale
+ * price is that cost marked up. Re-deriving a price here from invoice history
+ * instead would value a perfectly well-costed product at nothing simply
+ * because it has not been sold yet — and would quietly disagree with the
+ * figure on the product's own sheet.
+ *
+ * Both rates are reported side by side, and the stock is valued on the sale
+ * price, which is the rule the products list already uses. Valuing finished
+ * goods at cost instead would need a costing method — weighted average or
+ * FIFO — chosen once and applied to every issue; that is a decision about the
+ * business, so the cost column is here for anyone who wants to read it that
+ * way and the choice is not made silently.
  */
 export const stockAnalysis = query({
   args: { from: v.number(), to: v.number() },
@@ -1009,7 +1023,16 @@ export const stockAnalysis = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
 
-    // the last price each product went out for, newest invoice wins
+    // the costing sheets are the source of truth for a product's rates, read
+    // through the same helper the product list uses so the two cannot drift
+    const items = await ctx.db
+      .query("costingItems")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const sheetCost = costByProduct(items);
+
+    // the last price a product went out for, for one that was sold but never
+    // costed. Newest invoice wins.
     const invoices = await ctx.db
       .query("sales")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
@@ -1024,6 +1047,7 @@ export const stockAnalysis = query({
     const materialRows: ValuationRow[] = materials
       .map((m) => {
         const qty = round(m.stock ?? 0);
+        const cost = round(m.pricePerUnit);
         return {
           key: m._id,
           code: m.code ?? "",
@@ -1031,9 +1055,13 @@ export const stockAnalysis = query({
           category: m.category ?? "",
           unit: m.unit,
           qty,
-          rate: round(m.pricePerUnit),
-          value: round(qty * m.pricePerUnit),
-          unpriced: m.pricePerUnit === 0,
+          cost,
+          // a raw material is bought, not sold: its purchase price is both
+          price: cost,
+          value: round(qty * cost),
+          basis: cost > 0 ? ("purchase" as const) : ("none" as const),
+          rate: cost,
+          unpriced: cost === 0,
         };
       })
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
@@ -1041,7 +1069,14 @@ export const stockAnalysis = query({
     const productRows: ValuationRow[] = products
       .map((p) => {
         const qty = round(p.stock ?? 0);
-        const rate = round(lastPrice.get(p._id) ?? 0);
+        const built = round(sheetCost.get(p._id) ?? 0);
+        const invoiced = round(lastPrice.get(p._id) ?? 0);
+        // the sheet prices one piece, so its line total is already per unit
+        const cost = built;
+        const price =
+          built > 0
+            ? round(cost * (1 + (p.markupPct ?? 0) / 100))
+            : invoiced;
         return {
           key: p._id,
           code: p.code ?? "",
@@ -1049,9 +1084,17 @@ export const stockAnalysis = query({
           category: p.category ?? "",
           unit: p.unit ?? "pcs",
           qty,
-          rate,
-          value: round(qty * rate),
-          unpriced: rate === 0,
+          cost,
+          price,
+          value: round(qty * price),
+          basis:
+            built > 0
+              ? ("costing" as const)
+              : invoiced > 0
+                ? ("invoice" as const)
+                : ("none" as const),
+          rate: price,
+          unpriced: price === 0,
         };
       })
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
@@ -1067,13 +1110,21 @@ export const stockAnalysis = query({
 
     const materialById = new Map(materials.map((m) => [m._id, m]));
     const productById = new Map(products.map((p) => [p._id, p]));
+    // movements are valued on the same rates as the shelves, so a unit that
+    // came in and a unit still on hand are worth the same figure here
+    const materialRate = new Map(
+      materialRows.map((r) => [r.key, r.price] as const),
+    );
+    const productRate = new Map(
+      productRows.map((r) => [r.key, r.price] as const),
+    );
 
     const movement: MovementRow[] = [
       ...stockMovements
         .filter((m) => m.at >= from && m.at <= to)
         .map((m) => {
           const material = materialById.get(m.materialId);
-          const rate = material?.pricePerUnit ?? 0;
+          const rate = materialRate.get(m.materialId) ?? 0;
           return {
             key: m._id,
             at: m.at,
@@ -1085,7 +1136,7 @@ export const stockAnalysis = query({
             unit: m.unit,
             source: m.source,
             ref: m.ref ?? "",
-            rate: round(rate),
+            rate,
             value: round(m.qty * rate),
           };
         }),
@@ -1093,7 +1144,7 @@ export const stockAnalysis = query({
         .filter((p) => p.at >= from && p.at <= to)
         .map((p) => {
           const product = productById.get(p.productId);
-          const rate = round(lastPrice.get(p.productId) ?? 0);
+          const rate = productRate.get(p.productId) ?? 0;
           return {
             key: p._id,
             at: p.at,
