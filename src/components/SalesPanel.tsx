@@ -1,45 +1,46 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   CheckCircle2,
   Eye,
   FileText,
-  List,
   Loader2,
   Pencil,
   Plus,
+  Printer,
   Receipt,
-  Save,
   Send,
   Trash2,
+  Truck,
   Users,
   X,
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
-import { toLocalInput } from "@/lib/task-utils";
 import PageTabs from "@/components/PageTabs";
-import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
+import SalesDocumentForm, {
+  type SalesDocTarget,
+} from "@/components/SalesDocumentForm";
+import {
+  printDocument,
+  printableInvoice,
+  printableNote,
+  printableQuotation,
+  type FirmProfile,
+  type SalesDocRecord,
+} from "@/components/SalesDocumentPrint";
 
 type FgDoc = Doc<"finishedGoods">;
 type QuotationDoc = Doc<"quotations">;
 type SaleDoc = Doc<"sales">;
 type CustomerDoc = Doc<"customers">;
 
-type Tab = "sales" | "quotes" | "bill" | "quote" | "customers";
+type Tab = "sales" | "quotes" | "deliveries" | "customers";
 
-/** One line being typed on the new document. */
-type DraftLine = { productId: Id<"finishedGoods"> | ""; qty: string; price: string };
-
-const emptyLine = (): DraftLine => ({ productId: "", qty: "1", price: "" });
-const todayInput = () => toLocalInput(new Date());
-const num = (value: string) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
 const QUOTE_STATUS: Record<
   NonNullable<QuotationDoc["status"]>,
@@ -73,125 +74,49 @@ export default function SalesPanel({
   const quotations = useQuery(api.sales.listQuotations);
   const sales = useQuery(api.sales.listSales);
   const customers = useQuery(api.contacts.listCustomers);
-  const { format: money } = useWorkspaceCurrency();
+  const { format: money, symbol } = useWorkspaceCurrency();
 
   /** Searchable options for the per-line product pickers. */
-  const productOptions = useMemo<PickerItem[]>(
-    () =>
-      products.map((p) => ({
-        id: p._id,
-        label: p.name,
-        sub: [p.code, p.projectName].filter((v) => !!v && v !== "").join(" · ") || undefined,
-        hint: p.unit ?? undefined,
-        keywords: `${(p.stock ?? 0).toLocaleString()} in stock`,
-      })),
-    [products],
-  );
 
-  const createQuote = useMutation(api.sales.createQuotation);
   const setQuoteStatus = useMutation(api.sales.updateQuotation);
   const convertQuote = useMutation(api.sales.convertToSale);
   const dropQuote = useMutation(api.sales.removeQuotation);
-  const createSale = useMutation(api.sales.createSale);
   const setSalePaid = useMutation(api.sales.setSalePaid);
   const dropSale = useMutation(api.sales.removeSale);
 
   const [tab, setTab] = useState<Tab>("sales");
   const [viewingSale, setViewingSale] = useState<Id<"sales"> | null>(null);
   const [viewingQuote, setViewingQuote] = useState<Id<"quotations"> | null>(null);
-  const [draft, setDraft] = useState<DraftLine[]>([emptyLine()]);
-  const [customerId, setCustomerId] = useState<Id<"customers"> | "">("");
-  const [customerName, setCustomerName] = useState("");
-  const [address, setAddress] = useState("");
-  const [date, setDate] = useState(todayInput());
-  const [note, setNote] = useState("");
-  const [discount, setDiscount] = useState("0");
-  const [tax, setTax] = useState("0");
-  const [saving, setSaving] = useState(false);
+  /**
+   * The document being written, read or printed. One dialog serves all of
+   * it, so a quotation, an invoice and a delivery note are always built the
+   * same way and always print from the same sheet.
+   */
+  const [doc, setDoc] = useState<SalesDocTarget | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const resetForm = () => {
-    setDraft([emptyLine()]);
-    setCustomerId("");
-    setCustomerName("");
-    setAddress("");
-    setDate(todayInput());
-    setNote("");
-    setDiscount("0");
-    setTax("0");
-  };
+  const notes = useQuery(api.sales.listDeliveryNotes);
+  const dropNote = useMutation(api.sales.removeDeliveryNote);
+  const firm = useQuery(api.settings.firmProfile) as FirmProfile | null;
 
-  const customerOf = (id: Id<"customers"> | "") =>
-    (customers ?? []).find((c) => c._id === id);
-
-  /** Price the draft the same way the server will, so the total is honest. */
-  const draftTotals = useMemo(() => {
-    let total = 0;
-    for (const line of draft) {
-      if (line.productId === "") continue;
-      total += num(line.qty) * num(line.price);
+  /** Open a saved document to read it, or put it on the printer. */
+  const openOrPrint = (record: SalesDocRecord, print: boolean) => {
+    const printable =
+      "deliveredAt" in record
+        ? printableNote(record)
+        : "soldAt" in record
+          ? printableInvoice(record)
+          : printableQuotation(record);
+    if (print) {
+      const opened = printDocument(printable, firm, symbol);
+      if (!opened) toast.error("Allow pop-ups to print this document.");
+      return;
     }
-    const d = Math.min(100, Math.max(0, num(discount)));
-    const t = Math.max(0, num(tax));
-    const grand = total - (total * d) / 100 + ((total * (100 - d)) / 100) * (t / 100);
-    return { total, grand: Math.round(grand * 100) / 100 };
-  }, [draft, discount, tax]);
+    setDoc({ mode: "view", doc: printable });
+  };
 
   const openQuote = quotations?.find((q) => q._id === viewingQuote) ?? null;
   const openSale = sales?.find((s) => s._id === viewingSale) ?? null;
-
-  const submit = async (kind: "quotation" | "sale") => {
-    const lines = draft
-      .filter((l) => l.productId !== "")
-      .map((l) => ({
-        productId: l.productId as Id<"finishedGoods">,
-        qty: num(l.qty),
-        unitPrice: num(l.price),
-      }));
-    if (lines.length === 0) {
-      toast.error("Add at least one product.");
-      return;
-    }
-    if (lines.some((l) => l.qty <= 0)) {
-      toast.error("Every line needs a quantity above zero.");
-      return;
-    }
-    const customer = customerId === "" ? undefined : (customerId as Id<"customers">);
-    const name = customerOf(customerId)?.name ?? customerName.trim();
-    if (!name) {
-      toast.error("Choose a customer or type a name.");
-      return;
-    }
-    const at = date.trim() === "" ? Date.now() : new Date(date).getTime();
-    setSaving(true);
-    try {
-      const common = {
-        customerId: customer,
-        customerName: name,
-        customerAddress: address.trim() || undefined,
-        discountPct: num(discount),
-        taxPct: num(tax),
-        note: note.trim() || undefined,
-        lines,
-      };
-      if (kind === "quotation") {
-        await createQuote({ ...common, quotedAt: at });
-        toast.success(`Quotation raised for ${name}.`);
-        setTab("quotes");
-      } else {
-        await createSale({ ...common, soldAt: at });
-        toast.success(`Sales bill raised for ${name}.`);
-        setTab("sales");
-      }
-      resetForm();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Couldn't save the document.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const setStatus = async (
     id: Id<"quotations">,
@@ -265,37 +190,34 @@ export default function SalesPanel({
         <PageTabs
           label="Sales sections"
           value={tab}
-          onChange={(id) => {
-            setTab(id);
-            if (id === "sales") setViewingSale(null);
-            if (id === "quotes") setViewingQuote(null);
-            if (id === "bill" || id === "quote") resetForm();
-          }}
+          onChange={setTab}
           tabs={[
-            { id: "sales", label: "Sales bills", icon: Receipt, count: sales?.length ?? 0 },
+            { id: "sales", label: "Invoices", icon: Receipt, count: sales?.length ?? 0 },
             { id: "quotes", label: "Quotations", icon: FileText, count: quotations?.length ?? 0 },
-            { id: "bill", label: "Sales bill entry", icon: List },
-            { id: "quote", label: "Quotation entry", icon: Send },
+            { id: "deliveries", label: "Delivery notes", icon: Truck, count: notes?.length ?? 0 },
             { id: "customers", label: "Customers", icon: Users, count: customers?.length ?? 0 },
           ]}
         />
-        {canCreate && (tab === "bill" || tab === "quote") && (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => void submit(tab === "quote" ? "quotation" : "sale")}
-            disabled={saving}
-            className="h-9 rounded-xl px-3 text-sm"
-          >
-            {saving ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : tab === "quote" ? (
-              <Send className="size-4" />
-            ) : (
-              <Save className="size-4" />
-            )}
-            {tab === "quote" ? "Save quotation" : "Save sales bill"}
-          </Button>
+        {canCreate && (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9 rounded-xl px-3 text-sm"
+              onClick={() => setDoc({ mode: "new", kind: "quotation" })}
+            >
+              <Send className="size-4" /> New quotation
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-9 rounded-xl px-3 text-sm"
+              onClick={() => setDoc({ mode: "new", kind: "invoice" })}
+            >
+              <Plus className="size-4" /> New invoice
+            </Button>
+          </div>
         )}
       </div>
 
@@ -489,186 +411,6 @@ export default function SalesPanel({
       )}
 
       {/* ── Entry form, shared by a quotation and a sales bill ──────── */}
-      {(tab === "bill" || tab === "quote") && (
-        <section className="rounded-2xl border bg-card p-4 shadow-sm">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium">Customer</label>
-              <select
-                value={customerId}
-                onChange={(e) => {
-                  const id = e.target.value as Id<"customers"> | "";
-                  setCustomerId(id);
-                  const c = customerOf(id);
-                  if (c) setCustomerName(c.name);
-                }}
-                className="h-9 w-full rounded-lg border bg-card px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option value="">Type a name…</option>
-                {(customers ?? []).map((c: CustomerDoc) => (
-                  <option key={c._id} value={c._id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium">Name</label>
-              <Input
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="Customer name"
-                className="h-9 rounded-lg text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium">
-                {tab === "quote" ? "Quoted on" : "Sold on"}
-              </label>
-              <Input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="h-9 rounded-lg text-sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium">Address</label>
-              <Input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="Optional"
-                className="h-9 rounded-lg text-sm"
-              />
-            </div>
-          </div>
-
-          {/* lines */}
-          <div className="mt-3 space-y-1.5">
-            {draft.map((line, i) => {
-              return (
-                <div key={i} className="flex flex-wrap items-center gap-1.5">
-                  <ItemPicker
-                    className="min-w-[180px] flex-1"
-                    items={productOptions}
-                    value={line.productId}
-                    onChange={(id) => {
-                      const next = [...draft];
-                      next[i] = { ...line, productId: id as Id<"finishedGoods"> | "" };
-                      setDraft(next);
-                    }}
-                    placeholder="Choose or search product…"
-                    searchPlaceholder="Search name, code or project…"
-                    emptyLabel="No product matches that."
-                    aria-label="Product"
-                  />
-                  <Input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={line.qty}
-                    onChange={(e) => {
-                      const next = [...draft];
-                      next[i] = { ...line, qty: e.target.value };
-                      setDraft(next);
-                    }}
-                    aria-label="Quantity"
-                    className="h-9 w-20 rounded-lg text-sm"
-                  />
-                  <Input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={line.price}
-                    onChange={(e) => {
-                      const next = [...draft];
-                      next[i] = { ...line, price: e.target.value };
-                      setDraft(next);
-                    }}
-                    aria-label="Unit price"
-                    placeholder="Price"
-                    className="h-9 w-28 rounded-lg text-sm"
-                  />
-                  <span className="w-24 text-right text-sm font-medium tabular-nums">
-                    {money(num(line.qty) * num(line.price))}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="Remove line"
-                    title="Remove line"
-                    className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:text-destructive"
-                    onClick={() =>
-                      setDraft(draft.length > 1 ? draft.filter((_, j) => j !== i) : [emptyLine()])
-                    }
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </div>
-              );
-            })}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setDraft([...draft, emptyLine()])}
-              className="h-8 rounded-lg text-xs"
-            >
-              <Plus className="size-3.5" /> Add line
-            </Button>
-          </div>
-
-          {/* totals */}
-          <div className="mt-3 grid gap-3 border-t border-border/60 pt-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium">Note</label>
-              <Textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows={2}
-                placeholder="Optional"
-                className="rounded-lg text-sm"
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Discount %</label>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="any"
-                    value={discount}
-                    onChange={(e) => setDiscount(e.target.value)}
-                    className="h-9 rounded-lg text-sm"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium">Tax %</label>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={tax}
-                    onChange={(e) => setTax(e.target.value)}
-                    className="h-9 rounded-lg text-sm"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span className="tabular-nums">{money(draftTotals.total)}</span>
-              </div>
-              <div className="flex items-center justify-between px-3 text-sm font-semibold">
-                <span>Total</span>
-                <span className="font-display text-base tabular-nums text-primary">
-                  {money(draftTotals.grand)}
-                </span>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
 
       {/* ── Customers ──────────────────────────────────────────────── */}
       {tab === "customers" && (
@@ -707,25 +449,215 @@ export default function SalesPanel({
         </section>
       )}
 
+      {/* ── Delivery notes ─────────────────────────────────────────── */}
+      {tab === "deliveries" && (
+        <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+          <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5">
+            <h2 className="text-sm font-semibold">
+              Delivery notes
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                goods handed over — no money moves on these
+              </span>
+            </h2>
+          </div>
+          {notes === undefined ? (
+            <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+              Reading the delivery book…
+            </div>
+          ) : notes.length === 0 ? (
+            <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+              No delivery note has been raised. Open an invoice and choose
+              <strong> Deliver</strong> to record the goods leaving.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border/60 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                    <th className="px-4 py-2">Note</th>
+                    <th className="px-3 py-2">Customer</th>
+                    <th className="px-3 py-2">Delivered</th>
+                    <th className="px-3 py-2">From invoice</th>
+                    <th className="px-3 py-2 text-right">Items</th>
+                    <th className="px-3 py-2 text-right">Value</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {notes.map((n) => {
+                    const invoice = (sales ?? []).find((x) => x._id === n.saleId);
+                    return (
+                      <tr key={n._id} className="transition-colors hover:bg-accent/40">
+                        <td className="px-4 py-2 font-mono text-xs">{n.number}</td>
+                        <td className="px-3 py-2 text-xs font-medium">
+                          {n.customerName ?? "Customer"}
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          {new Date(n.deliveredAt).toLocaleDateString()}
+                          {n.deliveredBy && (
+                            <span className="ml-1 text-muted-foreground">
+                              · {n.deliveredBy}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
+                          {invoice?.number ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right text-xs tabular-nums">
+                          {n.lines.length}
+                        </td>
+                        <td className="px-3 py-2 text-right text-xs font-medium tabular-nums">
+                          {money(n.total)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                              n.status === "delivered"
+                                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                            )}
+                          >
+                            {n.status === "delivered" ? "Delivered" : "Pending"}
+                          </span>
+                          {n.receivedBy && (
+                            <span className="ml-1 text-[11px] text-muted-foreground">
+                              · {n.receivedBy}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              title="Read this delivery note"
+                              aria-label="Read delivery note"
+                              onClick={() => openOrPrint(n, false)}
+                              className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                              <Eye className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              title="Print for the driver to sign"
+                              aria-label="Print delivery note"
+                              onClick={() => openOrPrint(n, true)}
+                              className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                              <Printer className="size-3.5" />
+                            </button>
+                            {canDelete && (
+                              <button
+                                type="button"
+                                title="Withdraw this note and put the goods back"
+                                aria-label="Delete delivery note"
+                                onClick={() =>
+                                  void dropNote({ id: n._id }).catch((e) =>
+                                    toast.error(
+                                      e instanceof Error
+                                        ? e.message
+                                        : "Couldn't delete the note.",
+                                    ),
+                                  )
+                                }
+                                className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-rose-600"
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* ── Open document ──────────────────────────────────────────── */}
       {(openSale || openQuote) && (
         <section className="rounded-2xl border bg-card p-4 shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-1.5 text-sm font-semibold">
               <Eye className="size-3.5" />
-              {openSale ? "Sales bill" : "Quotation"}
+              {openSale ? "Invoice" : "Quotation"}
+              <span className="font-mono text-xs font-normal text-muted-foreground">
+                {(openSale ?? openQuote)?.number}
+              </span>
             </h2>
-            <button
-              type="button"
-              aria-label="Close"
-              onClick={() => {
-                setViewingSale(null);
-                setViewingQuote(null);
-              }}
-              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent"
-            >
-              <X className="size-3.5" />
-            </button>
+            <div className="flex items-center gap-1.5">
+              {/* print, correct and ship — the three things you do with one */}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 rounded-lg text-xs"
+                onClick={() => {
+                  if (!openSale && !openQuote) return;
+                  openOrPrint((openSale ?? openQuote) as SalesDocRecord, true);
+                }}
+              >
+                <Printer className="size-3.5" /> Print
+              </Button>
+              {canEdit && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 rounded-lg text-xs"
+                  disabled={openSale?.isPaid === true}
+                  title={
+                    openSale?.isPaid === true
+                      ? "A settled invoice is not editable — delete it and raise a new one"
+                      : "Edit this document"
+                  }
+                  onClick={() => {
+                    const record = openSale ?? openQuote;
+                    if (!record) return;
+                    setViewingSale(null);
+                    setViewingQuote(null);
+                    setDoc({
+                      mode: "edit",
+                      kind: "soldAt" in record ? "invoice" : "quotation",
+                      id: record._id as
+                        | Id<"sales">
+                        | Id<"quotations">,
+                    });
+                  }}
+                >
+                  <Pencil className="size-3.5" /> Edit
+                </Button>
+              )}
+              {canCreate && openSale && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 rounded-lg text-xs"
+                  onClick={() => {
+                    setViewingSale(null);
+                    setDoc({ mode: "newDelivery", saleId: openSale._id });
+                  }}
+                >
+                  <Truck className="size-3.5" /> Deliver
+                </Button>
+              )}
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => {
+                  setViewingSale(null);
+                  setViewingQuote(null);
+                }}
+                className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
           </div>
           {openSale
             ? documentView(
@@ -791,6 +723,15 @@ export default function SalesPanel({
                 </div>,
               )}
         </section>
+      )}
+
+      {/* ── the document dialog ───────────────────────────────────── */}
+      {doc !== null && (
+        <SalesDocumentForm
+          target={doc}
+          products={products ?? []}
+          onClose={() => setDoc(null)}
+        />
       )}
     </div>
   );

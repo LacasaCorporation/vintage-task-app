@@ -33,7 +33,7 @@ async function sellStock(
 /** Next sequential number in a series: QT0001, SAL0002, … */
 async function nextNumber(
   ctx: MutationCtx,
-  table: "quotations" | "sales",
+  table: "quotations" | "sales" | "deliveryNotes",
   ownerId: Id<"users">,
   prefix: string,
 ): Promise<string> {
@@ -308,6 +308,8 @@ export const createSale = mutation({
     soldAt: v.optional(v.number()),
     dueAt: v.optional(v.number()),
     note: v.optional(v.string()),
+    poRef: v.optional(v.string()),
+    terms: v.optional(v.string()),
     currency: v.optional(v.string()),
     discountPct: v.optional(v.number()),
     taxPct: v.optional(v.number()),
@@ -344,6 +346,8 @@ export const createSale = mutation({
       customerName: args.customerName?.trim() || undefined,
       customerAddress: args.customerAddress?.trim() || undefined,
       soldAt: args.soldAt ?? Date.now(),
+      poRef: args.poRef?.trim().slice(0, 60) || undefined,
+      terms: args.terms?.trim().slice(0, 500) || undefined,
       dueAt: args.dueAt,
       note: args.note?.trim().slice(0, 500) || undefined,
       currency:
@@ -482,5 +486,408 @@ export const removeSale = mutation({
       });
     }
     await ctx.db.delete(id);
+  },
+});
+
+/* ── editing an invoice ───────────────────────────────────────────── */
+
+/**
+ * Correct a posted invoice.
+ *
+ * An invoice is not a draft — it is already in the ledger and the goods are
+ * already off the shelf. So an edit is done the only honest way: the old
+ * posting is reversed and the old stock is put back, then the new one is
+ * posted as if it had been raised fresh. Anything else would leave the
+ * ledger showing one invoice and the stock ledger showing another.
+ *
+ * A settled invoice is not editable. Once the money has moved, changing the
+ * goods underneath it is a credit note, not an edit.
+ */
+export const updateSale = mutation({
+  args: {
+    id: v.id("sales"),
+    customerId: v.optional(v.id("customers")),
+    customerName: v.optional(v.string()),
+    customerAddress: v.optional(v.string()),
+    soldAt: v.optional(v.number()),
+    dueAt: v.optional(v.number()),
+    note: v.optional(v.string()),
+    poRef: v.optional(v.string()),
+    terms: v.optional(v.string()),
+    discountPct: v.optional(v.number()),
+    taxPct: v.optional(v.number()),
+    lines: lineValidator,
+  },
+  handler: async (ctx, args) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "edit");
+    const sale = await ctx.db.get(args.id);
+    if (sale === null) throw new Error("That invoice no longer exists.");
+    if (sale.ownerId !== userId) throw new Error("Not your invoice.");
+    if (sale.isPaid === true)
+      throw new Error(
+        "This invoice is already settled. Delete it and raise a new one, so the ledger keeps both events.",
+      );
+    if (args.lines.length === 0)
+      throw new Error("An invoice needs at least one line.");
+
+    const resolved = [];
+    for (const line of args.lines) {
+      const product = await ctx.db.get(line.productId);
+      if (product === null || product.ownerId !== userId)
+        throw new Error("A product on this invoice no longer exists.");
+      if (line.qty <= 0)
+        throw new Error(`Quantity for “${product.name}” must be more than zero.`);
+      if (line.unitPrice < 0) throw new Error("Unit price can't be negative.");
+      resolved.push({
+        productId: product._id,
+        name: product.name,
+        unit: product.unit,
+        qty: line.qty,
+        unitPrice: line.unitPrice,
+      });
+    }
+
+    // undo everything the old version did …
+    await reverseEntry(ctx, userId, sale.entryId);
+    for (const line of sale.lines) {
+      if (!(line.qty > 0)) continue;
+      const product = await ctx.db.get(line.productId);
+      if (product === null || product.ownerId !== userId) continue;
+      await unsellStock(ctx, {
+        ownerId: userId,
+        product,
+        qty: line.qty,
+        ref: sale.number,
+      });
+    }
+
+    // … then do it again with the new one
+    const { total } = priceLines(resolved, args.discountPct, args.taxPct);
+    const fields = {
+      customerId: args.customerId,
+      customerName: args.customerName?.trim() || undefined,
+      customerAddress: args.customerAddress?.trim() || undefined,
+      soldAt: args.soldAt ?? sale.soldAt,
+      dueAt: args.dueAt,
+      note: args.note?.trim().slice(0, 500) || undefined,
+      poRef: args.poRef?.trim().slice(0, 60) || undefined,
+      terms: args.terms?.trim().slice(0, 500) || undefined,
+      discountPct: args.discountPct,
+      taxPct: args.taxPct,
+      lines: resolved,
+      total,
+      entryId: undefined,
+    };
+    await ctx.db.patch(args.id, fields);
+    await sellStock(ctx, userId, resolved, sale.number);
+    const updated = await ctx.db.get(args.id);
+    if (updated !== null) {
+      await ctx.db.patch(args.id, { entryId: await postSale(ctx, userId, updated) });
+    }
+    return args.id;
+  },
+});
+
+/** Edit a quotation. A quotation that became an invoice is kept as it was. */
+export const updateQuotationLines = mutation({
+  args: {
+    id: v.id("quotations"),
+    customerId: v.optional(v.id("customers")),
+    customerName: v.optional(v.string()),
+    customerAddress: v.optional(v.string()),
+    quotedAt: v.optional(v.number()),
+    validUntil: v.optional(v.number()),
+    note: v.optional(v.string()),
+    poRef: v.optional(v.string()),
+    terms: v.optional(v.string()),
+    discountPct: v.optional(v.number()),
+    taxPct: v.optional(v.number()),
+    lines: lineValidator,
+  },
+  handler: async (ctx, args) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "edit");
+    const quote = await ctx.db.get(args.id);
+    if (quote === null) throw new Error("That quotation no longer exists.");
+    if (quote.ownerId !== userId) throw new Error("Not your quotation.");
+    if (quote.invoicedAs !== undefined)
+      throw new Error(
+        "This quotation has already been invoiced. Change the invoice instead.",
+      );
+    if (args.lines.length === 0)
+      throw new Error("A quotation needs at least one line.");
+
+    const resolved = [];
+    for (const line of args.lines) {
+      const product = await ctx.db.get(line.productId);
+      if (product === null || product.ownerId !== userId)
+        throw new Error("A product on this quotation no longer exists.");
+      if (line.qty <= 0)
+        throw new Error(`Quantity for “${product.name}” must be more than zero.`);
+      if (line.unitPrice < 0) throw new Error("Unit price can't be negative.");
+      resolved.push({
+        productId: product._id,
+        name: product.name,
+        unit: product.unit,
+        qty: line.qty,
+        unitPrice: line.unitPrice,
+      });
+    }
+    const { total } = priceLines(resolved, args.discountPct, args.taxPct);
+    await ctx.db.patch(args.id, {
+      customerId: args.customerId,
+      customerName: args.customerName?.trim() || undefined,
+      customerAddress: args.customerAddress?.trim() || undefined,
+      quotedAt: args.quotedAt ?? quote.quotedAt,
+      validUntil: args.validUntil,
+      note: args.note?.trim().slice(0, 500) || undefined,
+      poRef: args.poRef?.trim().slice(0, 60) || undefined,
+      terms: args.terms?.trim().slice(0, 500) || undefined,
+      discountPct: args.discountPct,
+      taxPct: args.taxPct,
+      lines: resolved,
+      total,
+    });
+    return args.id;
+  },
+});
+
+/* ── delivery notes ───────────────────────────────────────────────── */
+
+/**
+ * Every delivery note, newest first.
+ *
+ * A note is created against an invoice, so its lines are the invoice's lines
+ * at the quantity that is actually going out — which may be the whole
+ * invoice, or part of it, or several deliveries against one invoice. The
+ * quantity still on the invoice is worked out from the notes already raised
+ * against it, so the same goods cannot be delivered twice.
+ */
+export const listDeliveryNotes = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return [];
+    const rows = await ctx.db
+      .query("deliveryNotes")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    return rows.sort((a, b) => b.deliveredAt - a.deliveredAt);
+  },
+});
+
+/** What is still to be delivered on an invoice, line by line. */
+export const deliveryDue = query({
+  args: { saleId: v.id("sales") },
+  handler: async (ctx, { saleId }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return [];
+    const sale = await ctx.db.get(saleId);
+    if (sale === null || sale.ownerId !== userId) return [];
+    const notes = (await ctx.db
+      .query("deliveryNotes")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect()
+    ).filter((n) => n.saleId === saleId);
+    const out = new Map<string, number>();
+    for (const note of notes) {
+      for (const line of note.lines) {
+        out.set(line.productId, (out.get(line.productId) ?? 0) + line.qty);
+      }
+    }
+    return sale.lines
+      .map((line) => ({
+        productId: line.productId,
+        name: line.name,
+        unit: line.unit,
+        unitPrice: line.unitPrice,
+        invoiced: line.qty,
+        alreadyDelivered: out.get(line.productId) ?? 0,
+        /** How much of this line is still on the shelf of the dock. */
+        due: Math.max(0, line.qty - (out.get(line.productId) ?? 0)),
+      }))
+      .filter((l) => l.due > 0);
+  },
+});
+
+/**
+ * Raise a delivery note against an invoice and take the goods off the shelf.
+ *
+ * Nothing is posted to the ledger: the invoice already said what is owed, and
+ * a second posting here would count the sale twice. What the note does move
+ * is stock, because the goods have genuinely left — that is the difference
+ * between an invoice and a delivery note, and the reason a business needs
+ * both.
+ */
+export const createDeliveryNote = mutation({
+  args: {
+    saleId: v.id("sales"),
+    deliveredAt: v.optional(v.number()),
+    deliveredBy: v.optional(v.string()),
+    docketRef: v.optional(v.string()),
+    note: v.optional(v.string()),
+    poRef: v.optional(v.string()),
+    status: v.optional(v.union(v.literal("pending"), v.literal("delivered"))),
+    receivedBy: v.optional(v.string()),
+    /** productId → how many of that line are going out on this note. */
+    quantities: v.array(v.object({ productId: v.id("finishedGoods"), qty: v.number() })),
+  },
+  handler: async (ctx, args) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "create");
+    const sale = await ctx.db.get(args.saleId);
+    if (sale === null) throw new Error("That invoice no longer exists.");
+    if (sale.ownerId !== userId) throw new Error("Not your invoice.");
+
+    const notes = (await ctx.db
+      .query("deliveryNotes")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect()
+    ).filter((n) => n.saleId === args.saleId);
+    const already = new Map<string, number>();
+    for (const note of notes) {
+      for (const line of note.lines) {
+        already.set(line.productId, (already.get(line.productId) ?? 0) + line.qty);
+      }
+    }
+
+    const lines = [];
+    for (const line of sale.lines) {
+      const asked = args.quantities.find((q) => q.productId === line.productId);
+      const qty = asked?.qty ?? 0;
+      if (!(qty > 0)) continue;
+      const outstanding = line.qty - (already.get(line.productId) ?? 0);
+      if (qty - outstanding > 0.0001) {
+        throw new Error(
+          `Only ${outstanding} of “${line.name}” are still to be delivered on this invoice.`,
+        );
+      }
+      lines.push({
+        productId: line.productId,
+        name: line.name,
+        unit: line.unit,
+        qty,
+        unitPrice: line.unitPrice,
+      });
+    }
+    if (lines.length === 0)
+      throw new Error("Nothing left to deliver on this invoice.");
+
+    const total = Math.round(
+      lines.reduce((s, l) => s + l.qty * l.unitPrice, 0) * 100,
+    ) / 100;
+    const at = args.deliveredAt ?? Date.now();
+    const noteId = await ctx.db.insert("deliveryNotes", {
+      ownerId: userId,
+      number: await nextNumber(ctx, "deliveryNotes", userId, "DN"),
+      saleId: sale._id,
+      customerId: sale.customerId,
+      customerName: sale.customerName,
+      customerAddress: sale.customerAddress,
+      deliveredBy: args.deliveredBy?.trim().slice(0, 80) || undefined,
+      docketRef: args.docketRef?.trim().slice(0, 60) || undefined,
+      deliveredAt: at,
+      note: args.note?.trim().slice(0, 500) || undefined,
+      poRef: args.poRef?.trim() || sale.poRef,
+      currency: sale.currency,
+      lines,
+      total,
+      status: args.status ?? "delivered",
+      receivedBy: args.receivedBy?.trim().slice(0, 80) || undefined,
+      receivedAt: args.status === "pending" ? undefined : at,
+    });
+
+    // the goods have left, so the shelf has to know
+    await sellStock(
+      ctx,
+      userId,
+      lines,
+      (await ctx.db.get(noteId))?.number ?? String(noteId),
+    );
+    return noteId;
+  },
+});
+
+/** Sign a note off, or record who actually received it. */
+export const updateDeliveryNote = mutation({
+  args: {
+    id: v.id("deliveryNotes"),
+    status: v.optional(
+      v.union(v.literal("pending"), v.literal("delivered")),
+    ),
+    receivedBy: v.optional(v.string()),
+    deliveredBy: v.optional(v.string()),
+    docketRef: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "edit");
+    const note = await ctx.db.get(args.id);
+    if (note === null) throw new Error("That delivery note no longer exists.");
+    if (note.ownerId !== userId) throw new Error("Not your delivery note.");
+    await ctx.db.patch(args.id, {
+      status: args.status,
+      receivedBy: args.receivedBy?.trim().slice(0, 80) || undefined,
+      deliveredBy: args.deliveredBy?.trim().slice(0, 80) || undefined,
+      docketRef: args.docketRef?.trim().slice(0, 60) || undefined,
+      receivedAt: args.status === "delivered" ? Date.now() : undefined,
+    });
+    return args.id;
+  },
+});
+
+/** Withdraw a delivery note. The goods it sent go back on the shelf. */
+export const removeDeliveryNote = mutation({
+  args: { id: v.id("deliveryNotes") },
+  handler: async (ctx, { id }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "sales", "delete");
+    const note = await ctx.db.get(id);
+    if (note === null) return;
+    if (note.ownerId !== userId) throw new Error("Not your delivery note.");
+    for (const line of note.lines) {
+      if (!(line.qty > 0)) continue;
+      const product = await ctx.db.get(line.productId);
+      if (product === null || product.ownerId !== userId) continue;
+      await unsellStock(ctx, {
+        ownerId: userId,
+        product,
+        qty: line.qty,
+        ref: note.number,
+      });
+    }
+    await ctx.db.delete(id);
+  },
+});
+
+/**
+ * Any one sales document, by id.
+ *
+ * A quotation, an invoice and a delivery note are three tables that behave
+ * alike, and the form that edits them and the sheet that prints them both
+ * need "give me whichever one this is". Returning the record itself rather
+ * than a flattened shape keeps one definition of what each document is, so
+ * the printed sheet cannot drift from the saved record.
+ */
+export const documentById = query({
+  args: {
+    id: v.union(
+      v.id("quotations"),
+      v.id("sales"),
+      v.id("deliveryNotes"),
+    ),
+  },
+  handler: async (ctx, { id }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return null;
+    const doc = await ctx.db.get(id);
+    if (doc === null || doc.ownerId !== userId) return null;
+    return doc;
   },
 });

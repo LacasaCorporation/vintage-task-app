@@ -89,6 +89,18 @@ const settings = defineTable({
   orgCreatedAt: v.optional(v.number()),
   /** Default currency symbol for the workspace, e.g. "$", "€", "£", "₹". */
   currency: v.optional(v.string()),
+  /**
+   * The firm's letterhead details. These are what a quotation, an invoice and
+   * a delivery note are printed with, so they are kept on the workspace rather
+   * than typed into each document — a letterhead that has to be retyped is a
+   * letterhead that eventually disagrees with the letterhead.
+   */
+  address: v.optional(v.string()),
+  phone: v.optional(v.string()),
+  email: v.optional(v.string()),
+  website: v.optional(v.string()),
+  /** Tax registration or VAT number, where the business has one. */
+  taxId: v.optional(v.string()),
   /** Ordered workflow statuses for Projects. Start and Finish are fixed. */
   projectStatuses: v.optional(v.array(v.string())),
   /**
@@ -569,6 +581,10 @@ const schema = defineSchema(
       quotedAt: v.number(), // ms
       validUntil: v.optional(v.number()),
       note: v.optional(v.string()),
+      /** The customer's own reference — a PO number, an enquiry number. */
+      poRef: v.optional(v.string()),
+      /** The conditions the offer is made under — printed on the quote. */
+      terms: v.optional(v.string()),
       currency: v.optional(v.string()),
       discountPct: v.optional(v.number()),
       taxPct: v.optional(v.number()),
@@ -607,6 +623,10 @@ const schema = defineSchema(
       soldAt: v.number(), // ms
       dueAt: v.optional(v.number()),
       note: v.optional(v.string()),
+      /** The customer's own reference — a PO number, a job number. */
+      poRef: v.optional(v.string()),
+      /** How the customer pays, and by when — printed on the document. */
+      terms: v.optional(v.string()),
       currency: v.optional(v.string()),
       discountPct: v.optional(v.number()),
       taxPct: v.optional(v.number()),
@@ -631,6 +651,56 @@ const schema = defineSchema(
     })
       .index("by_owner", ["ownerId"])
       .index("by_customer", ["customerId"]),
+
+    /**
+     * A delivery note: the goods actually handed over against an invoice.
+     *
+     * A delivery note is not a sale and not a quotation — it moves no money,
+     * so it posts nothing to the ledger. What it records is that the goods
+     * left the building, which is why it takes the quantity off the shelf.
+     * The invoice stays the document that says what is owed and when.
+     */
+    deliveryNotes: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // auto DN0001, DN0002, …
+      /** The invoice this delivery settles part or all of. */
+      saleId: v.optional(v.id("sales")),
+      customerId: v.optional(v.id("customers")),
+      customerName: v.optional(v.string()),
+      customerAddress: v.optional(v.string()),
+      /** The carrier, the driver, the dock — whoever handed it over. */
+      deliveredBy: v.optional(v.string()),
+      /** The consignment or docket number from the carrier. */
+      docketRef: v.optional(v.string()),
+      deliveredAt: v.number(), // ms
+      note: v.optional(v.string()),
+      poRef: v.optional(v.string()),
+      currency: v.optional(v.string()),
+      /**
+       * What went out, with the price it was invoiced at. The value is kept
+       * so the note can be valued and printed, but it is never posted: a
+       * delivery note that moved money would be a second invoice.
+       */
+      lines: v.array(
+        v.object({
+          productId: v.id("finishedGoods"),
+          name: v.string(),
+          unit: v.optional(v.string()),
+          qty: v.number(),
+          unitPrice: v.number(),
+        }),
+      ),
+      total: v.number(),
+      /** `pending` until someone signs for it; `delivered` once they have. */
+      status: v.optional(
+        v.union(v.literal("pending"), v.literal("delivered")),
+      ),
+      /** Who signed for it, and when — the part a note exists to capture. */
+      receivedBy: v.optional(v.string()),
+      receivedAt: v.optional(v.number()),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_sale", ["saleId"]),
 
     // a costing sheet for a job / project / task
     costingSheets: defineTable({

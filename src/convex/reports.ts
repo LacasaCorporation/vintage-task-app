@@ -940,10 +940,6 @@ export type ValuationRow = {
   value: number;
   /** Where the rate came from, so no figure here is ever a guess. */
   basis: "purchase" | "costing" | "invoice" | "none";
-  /** The rate the value was struck at — the same figure as `price`. */
-  rate: number;
-  /** Nothing on record prices this line, so it is shown at zero. */
-  unpriced: boolean;
 };
 
 export type MovementRow = {
@@ -1060,8 +1056,6 @@ export const stockAnalysis = query({
           price: cost,
           value: round(qty * cost),
           basis: cost > 0 ? ("purchase" as const) : ("none" as const),
-          rate: cost,
-          unpriced: cost === 0,
         };
       })
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
@@ -1093,8 +1087,6 @@ export const stockAnalysis = query({
               : invoiced > 0
                 ? ("invoice" as const)
                 : ("none" as const),
-          rate: price,
-          unpriced: price === 0,
         };
       })
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));

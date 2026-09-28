@@ -3,7 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { activeFirmSettings, firmTeam, ownedFirmSettings } from "./org";
+import { activeFirmSettings, firmTeam, ownedFirmSettings, scopeUserId } from "./org";
 import { permissionsValidator } from "./schema";
 import type {
   ActionKey,
@@ -1121,5 +1121,31 @@ export const setWorkspaceName = mutation({
     await ctx.db.patch(settingsDoc._id, {
       workspaceName: clean || undefined,
     });
+  },
+});
+
+/**
+ * The firm's letterhead, for anything that gets printed.
+ *
+ * Only the fields a customer sees, and only if they are set: a document with
+ * a blank line where the phone number would go is worse than a document that
+ * simply does not claim to have one.
+ */
+export const firmProfile = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return null;
+    const s = await getSettings(ctx, userId);
+    if (s === null) return null;
+    return {
+      name: s.workspaceName ?? "",
+      logo: s.logo,
+      address: s.address,
+      phone: s.phone,
+      email: s.email,
+      website: s.website,
+      taxId: s.taxId,
+    };
   },
 });
