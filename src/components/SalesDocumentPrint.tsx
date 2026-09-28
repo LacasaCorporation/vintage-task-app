@@ -285,9 +285,10 @@ export function documentHtml(
       <tr>
         <td style="width: 8mm;" class="muted">${i + 1}</td>
         <td class="name">${esc(l.name)}</td>
-        <td class="r muted" style="width: 22mm;">${qtyFmt(l.qty)} ${esc(l.unit ?? "")}</td>
+        <td class="r" style="width: 18mm;">${qtyFmt(l.qty)}</td>
+        <td class="muted" style="width: 16mm;">${esc(l.unit ?? "")}</td>
         <td class="r" style="width: 26mm;">${money(l.unitPrice)}</td>
-        <td class="r" style="width: 28mm; font-weight: 600;">${money(
+        <td class="r" style="width: 30mm; font-weight: 600;">${money(
           l.qty * l.unitPrice,
         )}</td>
       </tr>`,
@@ -300,9 +301,10 @@ export function documentHtml(
         <tr>
           <th style="width: 8mm;">#</th>
           <th>Description</th>
-          <th class="r" style="width: 22mm;">Qty</th>
-          <th class="r" style="width: 26mm;">Unit price</th>
-          <th class="r" style="width: 28mm;">Amount</th>
+          <th class="r" style="width: 18mm;">Qty</th>
+          <th style="width: 16mm;">Unit</th>
+          <th class="r" style="width: 26mm;">Rate</th>
+          <th class="r" style="width: 30mm;">Amount</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -326,7 +328,7 @@ export function documentHtml(
       : `
       <div class="totals">
         <table>
-          <tr><td>Subtotal</td><td class="r">${money(t.net)}</td></tr>
+          <tr><td>Sub total</td><td class="r">${money(t.net)}</td></tr>
           ${
             t.discountPct > 0
               ? `<tr><td>Discount (${t.discountPct}%)</td><td class="r">−${money(
@@ -336,7 +338,7 @@ export function documentHtml(
           }
           ${
             t.taxPct > 0
-              ? `<tr><td>Tax (${t.taxPct}%)</td><td class="r">${money(
+              ? `<tr><td>Tax amount (${t.taxPct}%)</td><td class="r">${money(
                   t.tax,
                 )}</td></tr>`
               : ""

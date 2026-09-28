@@ -251,17 +251,46 @@ function SalesDocEditor({
    */
   const taxValue = tax === "" ? String(taxDefault?.taxPct ?? 0) : tax;
 
-  const pickerItems = useMemo<PickerItem[]>(
-    () =>
-      products.map((p) => ({
+  /**
+   * The picker carries the rate, so the price is known before a line is even
+   * added rather than discovered afterwards that the sheet says something
+   * else.
+   */
+  /**
+   * What each product sells for, from its costing sheet.
+   *
+   * The rate is offered rather than demanded: choosing a product fills the
+   * rate in, because the sheet already knows the answer and a figure typed by
+   * hand every time is a figure that eventually disagrees with it. It stays
+   * editable, because a one-off price for a one-off invoice is a legitimate
+   * thing to want, and a form that refuses it just gets worked around.
+   */
+  const priceList = useQuery(api.sales.priceList);
+  const listById = useMemo(
+    () => new Map((priceList ?? []).map((e) => [e.productId, e])),
+    [priceList],
+  );
+
+  const pickerItems = useMemo<PickerItem[]>(() => {
+    const priced_ = new Map((priceList ?? []).map((e) => [e.productId, e]));
+    return products.map((p) => {
+      const entry = priced_.get(p._id);
+      return {
         id: p._id as string,
         label: p.name,
-        hint: [p.code, p.unit, p.stock !== undefined ? `${p.stock} in stock` : undefined]
+        hint: [
+          p.code,
+          p.unit,
+          p.stock !== undefined ? `${p.stock} in stock` : undefined,
+          entry && entry.hasSheet && entry.price > 0
+            ? `${symbol}${entry.price.toFixed(2)} on the sheet`
+            : undefined,
+        ]
           .filter(Boolean)
           .join(" · "),
-      })),
-    [products],
-  );
+      };
+    });
+  }, [products, priceList, symbol]);
 
   const byId = useMemo(
     () => new Map(products.map((p) => [p._id, p])),
@@ -311,9 +340,22 @@ function SalesDocEditor({
     setLines((prev) => prev.map((l, n) => (n === i ? { ...l, ...patch } : l)));
 
   const chooseProduct = (i: number, id: string) => {
-    // a typed price is never overwritten: the last thing an invoicing form
-    // should do is refuse a price someone has already entered
-    setLine(i, { productId: id as Id<"finishedGoods"> });
+    const entry = listById.get(id as Id<"finishedGoods">);
+    const current = lines[i];
+    // an empty or untouched rate takes the sheet's price; a rate someone has
+    // deliberately typed is left exactly as it is
+    const keepTyped = current.price !== "" && current.price !== "0";
+    setLine(i, {
+      productId: id as Id<"finishedGoods">,
+      price:
+        keepTyped || !entry || entry.price <= 0 ? current.price : String(entry.price),
+    });
+  };
+
+  /** Put a line back onto the rate its costing sheet says. */
+  const restoreListPrice = (i: number) => {
+    const entry = listById.get(lines[i].productId as Id<"finishedGoods">);
+    if (entry) setLine(i, { price: String(entry.price) });
   };
 
   /* ── save ─────────────────────────────────────────────────────── */
@@ -713,18 +755,25 @@ function SalesDocEditor({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className={HEAD}>
+                      <th className="w-8 px-2 py-2 text-right">#</th>
                       <th className="px-2 py-2 text-left">Item</th>
-                      <th className="w-28 px-2 py-2 text-right">Qty</th>
-                      <th className="w-32 px-2 py-2 text-right">Unit price</th>
-                      <th className="w-32 px-2 py-2 text-right">Amount</th>
+                      <th className="w-24 px-2 py-2 text-right">Qty</th>
+                      <th className="w-20 px-2 py-2 text-left">Unit</th>
+                      <th className="w-32 px-2 py-2 text-right">Rate</th>
+                      <th className="w-36 px-2 py-2 text-right">Amount</th>
                       <th className="w-10" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
                     {lines.map((l, i) => {
                       const p = priced[i];
+                      const entry =
+                        l.productId === "" ? undefined : listById.get(l.productId);
                       return (
                         <tr key={i}>
+                          <td className="px-2 py-1.5 text-right text-xs tabular-nums text-muted-foreground">
+                            {i + 1}
+                          </td>
                           <td className="px-2 py-1.5">
                             <ItemPicker
                               items={pickerItems}
@@ -732,6 +781,27 @@ function SalesDocEditor({
                               onChange={(id) => chooseProduct(i, id)}
                               placeholder="Choose a product…"
                             />
+                            {entry && entry.hasSheet && l.price !== "" && (
+                              Number(l.price) !== entry.price ? (
+                                <button
+                                  type="button"
+                                  onClick={() => restoreListPrice(i)}
+                                  title="This rate is not the one on the costing sheet — click to go back to it"
+                                  className="mt-0.5 text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+                                >
+                                  sheet rate {money(entry.price)}
+                                </button>
+                              ) : (
+                                <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                                  from costing sheet
+                                </span>
+                              )
+                            )}
+                            {entry && !entry.hasSheet && (
+                              <span className="mt-0.5 block text-[10px] text-amber-700 dark:text-amber-400">
+                                no costing sheet — set a rate
+                              </span>
+                            )}
                           </td>
                           <td className="px-2 py-1.5">
                             <Input
@@ -740,8 +810,12 @@ function SalesDocEditor({
                               step="any"
                               value={l.qty}
                               onChange={(e) => setLine(i, { qty: e.target.value })}
+                              aria-label="Quantity"
                               className={cn(FIELD, "h-8 w-full py-1 text-right text-xs")}
                             />
+                          </td>
+                          <td className="px-2 py-1.5 text-xs text-muted-foreground">
+                            {p?.unit ?? "—"}
                           </td>
                           <td className="px-2 py-1.5">
                             <Input
@@ -752,10 +826,14 @@ function SalesDocEditor({
                               onChange={(e) =>
                                 setLine(i, { price: e.target.value })
                               }
+                              aria-label="Rate"
+                              placeholder={
+                                entry ? String(entry.price) : "0.00"
+                              }
                               className={cn(FIELD, "h-8 w-full py-1 text-right text-xs")}
                             />
                           </td>
-                          <td className="px-2 py-1.5 text-right text-xs tabular-nums">
+                          <td className="px-2 py-1.5 text-right text-xs font-medium tabular-nums">
                             {money((p?.qty ?? 0) * (p?.price ?? 0))}
                           </td>
                           <td className="px-2 py-1.5 text-right">
@@ -844,14 +922,16 @@ function SalesDocEditor({
               <p className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
                 Summary
               </p>
-              <dl className="mt-2 space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">Subtotal</dt>
-                  <dd className="tabular-nums">{money(totals.net)}</dd>
+              <dl className="mt-2 space-y-2 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <dt className="text-muted-foreground">Sub total</dt>
+                  <dd className="tabular-nums font-medium">
+                    {money(totals.net)}
+                  </dd>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <dt className="text-muted-foreground">Discount</dt>
-                  <dd className="flex items-center gap-1.5">
+                  <dt className="flex items-center gap-1 text-muted-foreground">
+                    Discount
                     <Input
                       type="number"
                       min="0"
@@ -859,35 +939,49 @@ function SalesDocEditor({
                       value={discount}
                       onChange={(e) => setDiscount(e.target.value)}
                       aria-label="Discount percent"
-                      className={cn(FIELD, "h-7 w-16 py-0.5 text-right text-xs")}
+                      className={cn(FIELD, "h-7 w-14 py-0.5 text-right text-xs")}
                     />
-                    <span className="tabular-nums text-muted-foreground">
-                      −{money(totals.discount)}
-                    </span>
+                    %
+                  </dt>
+                  <dd className="tabular-nums text-muted-foreground">
+                    {totals.discount === 0 ? "—" : `−${money(totals.discount)}`}
                   </dd>
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <dt className="text-muted-foreground">Tax</dt>
-                  <dd className="flex items-center gap-1.5">
+                <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2">
+                  <dt className="text-muted-foreground">
+                    Tax amount
                     <Input
                       type="number"
                       min="0"
                       value={taxValue}
                       onChange={(e) => setTax(e.target.value)}
                       aria-label="Tax percent"
-                      className={cn(FIELD, "h-7 w-16 py-0.5 text-right text-xs")}
+                      className={cn(FIELD, "ml-2 h-7 w-14 py-0.5 text-right text-xs")}
                     />
-                    <span className="tabular-nums text-muted-foreground">
-                      {money(totals.tax)}
-                    </span>
+                    %
+                  </dt>
+                  <dd className="tabular-nums font-medium">
+                    {totals.tax === 0 ? "—" : money(totals.tax)}
                   </dd>
                 </div>
-                <div className="flex justify-between border-t pt-2 text-base font-semibold">
+                <div className="flex items-center justify-between border-t pt-2 text-base font-semibold">
                   <dt>Total</dt>
-                  <dd className="tabular-nums text-primary">{money(totals.grand)}</dd>
+                  <dd className="tabular-nums text-primary">
+                    {money(totals.grand)}
+                  </dd>
                 </div>
               </dl>
             </div>
+
+            {/* the arithmetic, shown so the total is never a surprise */}
+            <p className="rounded-xl border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+              {money(totals.net)}
+              {totals.discount > 0 ? ` − ${money(totals.discount)}` : ""}
+              {totals.tax > 0 ? ` + ${money(totals.tax)} tax` : ""} ={" "}
+              <strong className="text-foreground">{money(totals.grand)}</strong>{" "}
+              over {realLines.length}{" "}
+              {realLines.length === 1 ? "line" : "lines"}
+            </p>
 
             {kind === "delivery" ? (
               <p className="rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-800 dark:text-violet-300">

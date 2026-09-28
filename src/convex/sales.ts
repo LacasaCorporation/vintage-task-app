@@ -5,6 +5,7 @@ import { postSale, postSaleReceipt, reverseEntry } from "./ledger";
 import { defaultTaxPct } from "./accountingDefaults";
 import { getSettings } from "./settings";
 import { currencySymbol } from "../lib/currency";
+import { costByProduct } from "../lib/product-cost";
 import { returnStock as unsellStock, sellStock as logSale } from "./productStock";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -889,5 +890,59 @@ export const documentById = query({
     const doc = await ctx.db.get(id);
     if (doc === null || doc.ownerId !== userId) return null;
     return doc;
+  },
+});
+
+/**
+ * What each product sells for, straight off its costing sheet.
+ *
+ * The costing sheet is where the business has already worked out what a
+ * product costs and what margin it wants, so the invoicing form offers that
+ * figure rather than making somebody retype it on every invoice — a rate that
+ * is typed by hand is a rate that eventually disagrees with the sheet it came
+ * from.
+ *
+ * This is the *charge*, not the *valuation*. Stock is valued at weighted
+ * average cost, which is a different question: what a thing costs the
+ * business is not what it is worth to a customer. The two deliberately do
+ * not share a number, so repricing a product changes what it sells for
+ * without silently rewriting the value of stock already on the shelf.
+ */
+export const priceList = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return [];
+    const products = await ctx.db
+      .query("finishedGoods")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const items = await ctx.db
+      .query("costingItems")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    // the same helper the product screen reads, so the sheet, the product
+    // list and an invoice off the same product can never disagree
+    const cost = costByProduct(items);
+
+    return products
+      .map((p) => {
+        const buildCost = cost.get(p._id) ?? 0;
+        const markup = p.markupPct ?? 0;
+        return {
+          productId: p._id,
+          name: p.name,
+          unit: p.unit ?? "pcs",
+          /** What one piece costs to build, per the sheet. */
+          cost: Math.round(buildCost * 100) / 100,
+          /** What one piece sells for: cost marked up by the sheet's margin. */
+          price:
+            Math.round(buildCost * (1 + markup / 100) * 100) / 100,
+          markupPct: markup,
+          /** No sheet lines yet, so the form must ask rather than guess. */
+          hasSheet: cost.has(p._id),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
   },
 });
