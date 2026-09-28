@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
@@ -28,17 +29,16 @@ import {
   Truck,
   UserPlus,
   Users,
-  X,
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import PageTabs from "@/components/PageTabs";
 import ContactDialog, { type Contact } from "@/components/ContactDialog";
+import StatusSelect from "@/components/StatusSelect";
 import CustomerLedgerDialog from "@/components/CustomerLedgerDialog";
-import SalesDocumentForm, {
-  type SalesDocTarget,
-} from "@/components/SalesDocumentForm";
+import { type SalesDocTarget } from "@/components/SalesDocumentForm";
+
 import {
   printDocument,
   printableInvoice,
@@ -48,7 +48,6 @@ import {
   type SalesDocRecord,
 } from "@/components/SalesDocumentPrint";
 
-type FgDoc = Doc<"finishedGoods">;
 type QuotationDoc = Doc<"quotations">;
 type SaleDoc = Doc<"sales">;
 type CustomerDoc = Doc<"customers">;
@@ -68,6 +67,49 @@ const QUOTE_STATUS: Record<
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/**
+ * A document is a page, not a popup.
+ *
+ * Everything the sales list can raise — a quotation, an invoice, a delivery
+ * note against a chosen invoice, a new invoice for a customer who owes money —
+ * is an address. Back works, refresh works, and a link can be sent to someone.
+ */
+function docPath(target: SalesDocTarget): string {
+  if (target.mode === "newDelivery")
+    return `/sales/delivery-notes/new?invoice=${target.saleId}`;
+  if (target.mode === "view") return "/dashboard?view=sales"; // read mode has its own path
+  if (target.mode === "new") {
+    const section = target.kind === "quotation" ? "quotations" : "invoices";
+    const q = new URLSearchParams();
+    const c = target.customer;
+    if (c) {
+      if (c.id) q.set("customer", c.id);
+      if (c.name) q.set("name", c.name);
+      if (c.address) q.set("address", c.address);
+    }
+    const search = q.toString();
+    return `/sales/${section}/new${search === "" ? "" : `?${search}`}`;
+  }
+  const section =
+    target.kind === "invoice"
+      ? "invoices"
+      : target.kind === "delivery"
+        ? "delivery-notes"
+        : "quotations";
+  return `/sales/${section}/${target.id}`;
+}
+
+/** Where a document already on file lives. */
+function recordPath(record: SalesDocRecord, view: boolean): string {
+  const section =
+    "deliveredAt" in record
+      ? "delivery-notes"
+      : "soldAt" in record
+        ? "invoices"
+        : "quotations";
+  return `/sales/${section}/${record._id}${view ? "?view=1" : ""}`;
+}
+
 const chipBase =
   "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium";
 
@@ -77,12 +119,10 @@ const chipBase =
  * offer; turning it into a bill copies its lines across.
  */
 export default function SalesPanel({
-  products,
   canCreate,
   canEdit,
   canDelete,
 }: {
-  products: FgDoc[];
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
@@ -91,6 +131,7 @@ export default function SalesPanel({
   const sales = useQuery(api.sales.listSales);
   const customers = useQuery(api.contacts.listCustomers);
   const { format: money, symbol } = useWorkspaceCurrency();
+  const navigate = useNavigate();
 
   /** Searchable options for the per-line product pickers. */
 
@@ -105,14 +146,10 @@ export default function SalesPanel({
   const dropCustomer = useMutation(api.contacts.removeCustomer);
 
   const [tab, setTab] = useState<Tab>("sales");
-  const [viewingSale, setViewingSale] = useState<Id<"sales"> | null>(null);
-  const [viewingQuote, setViewingQuote] = useState<Id<"quotations"> | null>(null);
   /**
-   * The document being written, read or printed. One dialog serves all of
-   * it, so a quotation, an invoice and a delivery note are always built the
-   * same way and always print from the same sheet.
+   * The document being written, read or printed now has a page of its own, so
+   * nothing is held open over the list any more.
    */
-  const [doc, setDoc] = useState<SalesDocTarget | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [contactOpen, setContactOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -225,11 +262,9 @@ export default function SalesPanel({
       if (!opened) toast.error("Allow pop-ups to print this document.");
       return;
     }
-    setDoc({ mode: "view", doc: printable });
+    navigate(recordPath(record, true));
   };
 
-  const openQuote = quotations?.find((q) => q._id === viewingQuote) ?? null;
-  const openSale = sales?.find((s) => s._id === viewingSale) ?? null;
 
   const setStatus = async (
     id: Id<"quotations">,
@@ -252,7 +287,6 @@ export default function SalesPanel({
     try {
       await convertQuote({ id: quote._id });
       toast.success(`${quote.number} turned into a sales bill.`);
-      setViewingQuote(null);
       setTab("sales");
     } catch (error) {
       toast.error(
@@ -262,39 +296,6 @@ export default function SalesPanel({
       setBusyId(null);
     }
   };
-
-  /** The document preview, shared by a quotation and a sales bill. */
-  const documentView = (
-    doc: { number: string; customerName?: string; total: number; lines: { name: string; qty: number; unitPrice: number; unit?: string }[]; note?: string; [k: string]: unknown },
-    extra?: React.ReactNode,
-  ) => (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-sm">{doc.number}</span>
-        <span className="text-sm text-muted-foreground">
-          {doc.customerName ?? "Customer"}
-        </span>
-        <span className="ml-auto font-display text-base font-bold tabular-nums text-primary">
-          {money(doc.total)}
-        </span>
-      </div>
-      <ul className="divide-y divide-border/60 rounded-xl border">
-        {doc.lines.map((line, i) => (
-          <li key={`${doc.number}-${i}`} className="flex items-center gap-2 px-3 py-2 text-sm">
-            <span className="min-w-0 flex-1 truncate">{line.name}</span>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {line.qty} {line.unit ?? ""} × {money(line.unitPrice)}
-            </span>
-            <span className="w-24 text-right text-sm font-medium tabular-nums">
-              {money(line.qty * line.unitPrice)}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {doc.note && <p className="text-xs text-muted-foreground">{doc.note}</p>}
-      {extra}
-    </div>
-  );
 
   return (
     <div className="mt-4 space-y-4">
@@ -322,7 +323,7 @@ export default function SalesPanel({
                 size="sm"
                 variant="outline"
                 className="h-9 rounded-xl px-3 text-sm"
-                onClick={() => setDoc({ mode: "new", kind: "quotation" })}
+                onClick={() => navigate(docPath({ mode: "new", kind: "quotation" }))}
               >
                 <Send className="size-4" /> New quotation
               </Button>
@@ -356,7 +357,7 @@ export default function SalesPanel({
                         <DropdownMenuItem
                           key={s._id}
                           onSelect={() =>
-                            setDoc({ mode: "newDelivery", saleId: s._id })
+                            navigate(docPath({ mode: "newDelivery", saleId: s._id }))
                           }
                           className="flex items-center gap-2"
                         >
@@ -390,10 +391,12 @@ export default function SalesPanel({
                 size="sm"
                 className="h-9 rounded-xl px-3 text-sm"
                 onClick={() =>
-                  setDoc({
-                    mode: "new",
-                    kind: tab === "quotes" ? "quotation" : "invoice",
-                  })
+                  navigate(
+                    docPath({
+                      mode: "new",
+                      kind: tab === "quotes" ? "quotation" : "invoice",
+                    }),
+                  )
                 }
               >
                 <Plus className="size-4" />
@@ -443,7 +446,8 @@ export default function SalesPanel({
                   {sales.map((sale: SaleDoc) => (
                     <tr
                       key={sale._id}
-                      onClick={() => setViewingSale(sale._id)}
+                      onClick={() => navigate(recordPath(sale, true))}
+                      title={`Open ${sale.number}`}
                       className="cursor-pointer transition-colors hover:bg-accent/40"
                     >
                       <td className="px-4 py-2 font-mono text-xs">{sale.number}</td>
@@ -470,26 +474,115 @@ export default function SalesPanel({
                         </span>
                       </td>
                       <td className="px-2 py-1 text-right">
-                        {canDelete && (
-                        <button
-                          type="button"
-                          title="Delete sales bill"
-                          aria-label={`Delete ${sale.number}`}
-                          className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:text-destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void dropSale({ id: sale._id }).catch((error) =>
-                              toast.error(
-                                error instanceof Error
-                                  ? error.message
-                                  : "Couldn't delete the bill.",
-                              ),
-                            );
-                          }}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                        )}
+                        <div className="flex items-center justify-end gap-0.5">
+                          <button
+                            type="button"
+                            title="Edit this invoice"
+                            aria-label={`Edit ${sale.number}`}
+                            className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+                            disabled={sale.isPaid === true || !canEdit}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(
+                                docPath({
+                                  mode: "edit",
+                                  kind: "invoice",
+                                  id: sale._id,
+                                }),
+                              );
+                            }}
+                          >
+                            <Pencil className="size-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            title="Print this invoice"
+                            aria-label={`Print ${sale.number}`}
+                            className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openOrPrint(sale, true);
+                            }}
+                          >
+                            <Printer className="size-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            title={sale.isPaid ? "Mark unpaid" : "Mark paid"}
+                            aria-label={`Mark ${sale.number} ${sale.isPaid ? "unpaid" : "paid"}`}
+                            className={cn(
+                              "grid size-6 place-items-center rounded-md transition-colors",
+                              sale.isPaid
+                                ? "text-emerald-600 hover:bg-accent dark:text-emerald-400"
+                                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                            )}
+                            disabled={busyId === sale._id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBusyId(sale._id);
+                              void setSalePaid({
+                                id: sale._id,
+                                paid: sale.isPaid !== true,
+                              })
+                                .then(() =>
+                                  toast.success(
+                                    sale.isPaid
+                                      ? `${sale.number} is unpaid again.`
+                                      : `${sale.number} marked paid.`,
+                                  ),
+                                )
+                                .catch((error) =>
+                                  toast.error(
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Couldn't update the bill.",
+                                  ),
+                                )
+                                .finally(() => setBusyId(null));
+                            }}
+                          >
+                            <CheckCircle2 className="size-3.5" />
+                          </button>
+                          {canCreate && (
+                            <button
+                              type="button"
+                              title="Deliver against this invoice"
+                              aria-label={`Deliver ${sale.number}`}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(
+                                  docPath({
+                                    mode: "newDelivery",
+                                    saleId: sale._id,
+                                  }),
+                                );
+                              }}
+                            >
+                              <Truck className="size-3.5" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              title="Delete sales bill"
+                              aria-label={`Delete ${sale.number}`}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void dropSale({ id: sale._id }).catch((error) =>
+                                  toast.error(
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Couldn't delete the bill.",
+                                  ),
+                                );
+                              }}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -541,7 +634,8 @@ export default function SalesPanel({
                     return (
                       <tr
                         key={quote._id}
-                        onClick={() => setViewingQuote(quote._id)}
+                        onClick={() => navigate(recordPath(quote, true))}
+                        title={`Open ${quote.number}`}
                         className="cursor-pointer transition-colors hover:bg-accent/40"
                       >
                         <td className="px-4 py-2 font-mono text-xs">{quote.number}</td>
@@ -564,24 +658,85 @@ export default function SalesPanel({
                           {money(quote.total)}
                         </td>
                         <td className="px-2 py-1 text-right">
-                          <button
-                            type="button"
-                            title="Delete quotation"
-                            aria-label={`Delete ${quote.number}`}
-                            className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void dropQuote({ id: quote._id }).catch((error) =>
-                                toast.error(
-                                  error instanceof Error
-                                    ? error.message
-                                    : "Couldn't delete the quotation.",
-                                ),
-                              );
-                            }}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </button>
+                          <div className="flex items-center justify-end gap-0.5">
+                            <span onClick={(e) => e.stopPropagation()}>
+                              <StatusSelect
+                                value={quote.status ?? "draft"}
+                                statuses={["draft", "sent", "accepted", "rejected"]}
+                                title="Where this quote has got to"
+                                onChange={(next: string) =>
+                                  void setStatus(
+                                    quote._id,
+                                    next as NonNullable<QuotationDoc["status"]>,
+                                  )
+                                }
+                              />
+                            </span>
+                            <button
+                              type="button"
+                              title="Edit this quotation"
+                              aria-label={`Edit ${quote.number}`}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+                              disabled={!canEdit}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(
+                                  docPath({
+                                    mode: "edit",
+                                    kind: "quotation",
+                                    id: quote._id,
+                                  }),
+                                );
+                              }}
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              title="Print this quotation"
+                              aria-label={`Print ${quote.number}`}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openOrPrint(quote, true);
+                              }}
+                            >
+                              <Printer className="size-3.5" />
+                            </button>
+                            {canCreate && quote.invoicedAs === undefined && (
+                              <button
+                                type="button"
+                                title="Turn into a sales bill"
+                                aria-label={`Convert ${quote.number} to an invoice`}
+                                className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                disabled={busyId === quote._id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void convert(quote);
+                                }}
+                              >
+                                <Receipt className="size-3.5" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              title="Delete quotation"
+                              aria-label={`Delete ${quote.number}`}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void dropQuote({ id: quote._id }).catch((error) =>
+                                  toast.error(
+                                    error instanceof Error
+                                      ? error.message
+                                      : "Couldn't delete the quotation.",
+                                  ),
+                                );
+                              }}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -767,11 +922,16 @@ export default function SalesPanel({
                                   aria-label={`New quotation for ${row.name}`}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setDoc({
-                                      mode: "new",
-                                      kind: "quotation",
-                                      customer: { id: saved._id, name: saved.name },
-                                    });
+                                    navigate(
+                                      docPath({
+                                        mode: "new",
+                                        kind: "quotation",
+                                        customer: {
+                                          id: saved._id,
+                                          name: saved.name,
+                                        },
+                                      }),
+                                    );
                                   }}
                                   className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
                                 >
@@ -982,162 +1142,6 @@ export default function SalesPanel({
         </section>
       )}
 
-      {/* ── Open document ──────────────────────────────────────────── */}
-      {(openSale || openQuote) && (
-        <section className="rounded-2xl border bg-card p-4 shadow-sm">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-              <Eye className="size-3.5" />
-              {openSale ? "Invoice" : "Quotation"}
-              <span className="font-mono text-xs font-normal text-muted-foreground">
-                {(openSale ?? openQuote)?.number}
-              </span>
-            </h2>
-            <div className="flex items-center gap-1.5">
-              {/* print, correct and ship — the three things you do with one */}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-7 rounded-lg text-xs"
-                onClick={() => {
-                  if (!openSale && !openQuote) return;
-                  openOrPrint((openSale ?? openQuote) as SalesDocRecord, true);
-                }}
-              >
-                <Printer className="size-3.5" /> Print
-              </Button>
-              {canEdit && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 rounded-lg text-xs"
-                  disabled={openSale?.isPaid === true}
-                  title={
-                    openSale?.isPaid === true
-                      ? "A settled invoice is not editable — delete it and raise a new one"
-                      : "Edit this document"
-                  }
-                  onClick={() => {
-                    const record = openSale ?? openQuote;
-                    if (!record) return;
-                    setViewingSale(null);
-                    setViewingQuote(null);
-                    setDoc({
-                      mode: "edit",
-                      kind: "soldAt" in record ? "invoice" : "quotation",
-                      id: record._id as
-                        | Id<"sales">
-                        | Id<"quotations">,
-                    });
-                  }}
-                >
-                  <Pencil className="size-3.5" /> Edit
-                </Button>
-              )}
-              {canCreate && openSale && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 rounded-lg text-xs"
-                  onClick={() => {
-                    setViewingSale(null);
-                    setDoc({ mode: "newDelivery", saleId: openSale._id });
-                  }}
-                >
-                  <Truck className="size-3.5" /> Deliver
-                </Button>
-              )}
-              <button
-                type="button"
-                aria-label="Close"
-                onClick={() => {
-                  setViewingSale(null);
-                  setViewingQuote(null);
-                }}
-                className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          </div>
-          {openSale
-            ? documentView(
-                openSale,
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={openSale.isPaid ? "outline" : "default"}
-                    className="h-8 rounded-lg text-xs"
-                    onClick={() =>
-                      void setSalePaid({ id: openSale._id, paid: !openSale.isPaid })
-                    }
-                  >
-                    Mark {openSale.isPaid ? "unpaid" : "paid"}
-                  </Button>
-                  {canEdit && (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <Pencil className="size-3" /> Edit lines from the quotation it came from
-                    </span>
-                  )}
-                </div>,
-              )
-            : openQuote &&
-              documentView(
-                openQuote,
-                <div className="flex flex-wrap items-center gap-2">
-                  {openQuote.invoicedAs === undefined ? (
-                    <>
-                      {(["draft", "sent", "accepted", "rejected"] as const).map(
-                        (s) => (
-                          <Button
-                            key={s}
-                            type="button"
-                            size="sm"
-                            variant={openQuote.status === s ? "default" : "outline"}
-                            className="h-8 rounded-lg text-xs"
-                            disabled={busyId === openQuote._id}
-                            onClick={() => void setStatus(openQuote._id, s)}
-                          >
-                            {QUOTE_STATUS[s].label}
-                          </Button>
-                        ),
-                      )}
-                      {canCreate && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="h-8 rounded-lg text-xs"
-                          disabled={busyId === openQuote._id}
-                          onClick={() => void convert(openQuote)}
-                        >
-                          <Receipt className="size-3.5" /> Turn into sales bill
-                        </Button>
-                      )}
-                    </>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
-                      <CheckCircle2 className="size-3.5" />
-                      Already on a sales bill
-                    </span>
-                  )}
-                </div>,
-              )}
-        </section>
-      )}
-
-      {/* ── the document dialog ───────────────────────────────────── */}
-      {doc !== null && (
-        <SalesDocumentForm
-          target={doc}
-          products={products ?? []}
-          onClose={() => setDoc(null)}
-        />
-      )}
-
       {/* ── customer master + the statement behind a balance ──────── */}
       <ContactDialog
         kind="customer"
@@ -1171,15 +1175,17 @@ export default function SalesPanel({
             else toast.error("That invoice is no longer on file.");
           }}
           onNewInvoice={() =>
-            setDoc({
-              mode: "new",
-              kind: "invoice",
-              customer: {
-                id: ledgerCustomer._id,
-                name: ledgerCustomer.name,
-                address: ledgerCustomer.address,
-              },
-            })
+            navigate(
+              docPath({
+                mode: "new",
+                kind: "invoice",
+                customer: {
+                  id: ledgerCustomer._id,
+                  name: ledgerCustomer.name,
+                  address: ledgerCustomer.address,
+                },
+              }),
+            )
           }
         />
       )}

@@ -86,6 +86,12 @@ const TITLE: Record<SalesDocKind, string> = {
 export default function SalesDocumentForm(props: {
   target: SalesDocTarget;
   products: FgDoc[];
+  /**
+   * Where the document lives. "dialog" is the popup the sales list used to
+   * open; "page" is the same form on its own route, which is how a quotation,
+   * an invoice and a delivery note are reached now.
+   */
+  layout?: "dialog" | "page";
   onClose: () => void;
   onSaved?: (doc: SalesDocRecord) => void;
 }) {
@@ -133,15 +139,52 @@ export default function SalesDocumentForm(props: {
  * surprise on save, but the server prices the document again on the way in.
  * A figure that only the browser believed would not survive a reload.
  */
+/**
+ * The frame around the document.
+ *
+ * The document itself has always been the same on screen; only the container
+ * changed, so it is written once and wrapped here. On a page it is a plain
+ * column with room to breathe; in the list it is still a dialog, for the one
+ * place a document is opened over what raised it.
+ */
+function EditorShell({
+  layout = "dialog",
+  onClose,
+  children,
+}: {
+  layout?: "dialog" | "page";
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  if (layout === "page") {
+    return (
+      <div className="mx-auto w-full max-w-[1180px] px-4 pb-16">
+        <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+          {children}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[94vh] gap-0 overflow-y-auto p-0 sm:max-w-[min(100%,1100px)]">
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function SalesDocEditor({
   target,
   products,
+  layout = "dialog",
   onClose,
   onSaved,
   initial,
 }: {
   target: SalesDocTarget;
   products: FgDoc[];
+  layout?: "dialog" | "page";
   onClose: () => void;
   onSaved?: (doc: SalesDocRecord) => void;
   /** The record being opened, read once by the parent. */
@@ -558,59 +601,63 @@ function SalesDocEditor({
   if (readOnly) {
     const doc = target.doc;
     return (
-      <Dialog open onOpenChange={(o) => !o && onClose()}>
-        <DialogContent className="max-h-[92vh] gap-0 overflow-y-auto p-0 sm:max-w-[min(100%,860px)]">
+      <EditorShell layout={layout} onClose={onClose}>
+        {layout === "page" ? (
+          <span className="sr-only">
+            {TITLE[doc.kind]} {doc.number}
+          </span>
+        ) : (
           <DialogTitle className="sr-only">
             {TITLE[doc.kind]} {doc.number}
           </DialogTitle>
-          <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
-            <p className="flex items-center gap-2 text-sm font-semibold">
-              <span className={cn("rounded-md px-1.5 py-0.5 text-xs", DOC_TONE[doc.kind])}>
-                {TITLE[doc.kind]}
-              </span>
-              <span className="font-mono text-xs text-muted-foreground">
-                {doc.number}
-              </span>
-            </p>
-            <div className="flex items-center gap-1.5">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 rounded-lg text-xs"
-                onClick={() => {
-                  const opened = printDocument(doc, firm, symbol);
-                  if (!opened)
-                    toast.error("Allow pop-ups to print this document.");
-                }}
-              >
-                <Printer className="size-3.5" /> Print
-              </Button>
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Close"
-                className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
+        )}
+        <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
+          <p className="flex items-center gap-2 text-sm font-semibold">
+            <span className={cn("rounded-md px-1.5 py-0.5 text-xs", DOC_TONE[doc.kind])}>
+              {TITLE[doc.kind]}
+            </span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {doc.number}
+            </span>
+          </p>
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-lg text-xs"
+              onClick={() => {
+                const opened = printDocument(doc, firm, symbol);
+                if (!opened)
+                  toast.error("Allow pop-ups to print this document.");
+              }}
+            >
+              <Printer className="size-3.5" /> Print
+            </Button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={layout === "page" ? "Back" : "Close"}
+              className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
+            >
+              <X className="size-4" />
+            </button>
           </div>
-          <div className="space-y-4 p-4">
-            <ViewSheet doc={doc} firm={firm} money={money} />
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-lg"
-                onClick={onClose}
-              >
-                Close
-              </Button>
-            </div>
+        </div>
+        <div className="space-y-4 p-4">
+          <ViewSheet doc={doc} firm={firm} money={money} />
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-lg"
+              onClick={onClose}
+            >
+              {layout === "page" ? "Back to sales" : "Close"}
+            </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </EditorShell>
     );
   }
 
@@ -622,14 +669,21 @@ function SalesDocEditor({
         : "Received on";
 
   return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[94vh] gap-0 overflow-y-auto p-0 sm:max-w-[min(100%,1100px)]">
-        <DialogTitle className="sr-only">
-          {editing ? "Edit" : "New"} {TITLE[kind].toLowerCase()}
-        </DialogTitle>
-        <DialogDescription className="sr-only">
-          {PRINT_HINT[kind]}
-        </DialogDescription>
+    <EditorShell layout={layout} onClose={onClose}>
+      {layout === "page" ? (
+        <span className="sr-only">
+          {editing ? "Edit" : "New"} {TITLE[kind].toLowerCase()}. {PRINT_HINT[kind]}
+        </span>
+      ) : (
+        <>
+          <DialogTitle className="sr-only">
+            {editing ? "Edit" : "New"} {TITLE[kind].toLowerCase()}
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            {PRINT_HINT[kind]}
+          </DialogDescription>
+        </>
+      )}
 
         {/* ── the document header ── */}
         <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b bg-card px-4 py-3">
@@ -1183,8 +1237,7 @@ function SalesDocEditor({
             </div>
           </DialogContent>
         </Dialog>
-      </DialogContent>
-    </Dialog>
+    </EditorShell>
   );
 
   /** The document as it would print, before it has been saved. */

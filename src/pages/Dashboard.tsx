@@ -448,8 +448,11 @@ export default function Dashboard() {
   const addProjectM = useMutation(api.costing.addProject);
   const updateProjectM = useMutation(api.costing.updateProject);
   const removeProjectM = useMutation(api.costing.removeProject);
-  const [costingView, setCostingView] = useState<CostingView>({
-    kind: "projects",
+  const [costingView, setCostingView] = useState<CostingView>(() => {
+    // a document page links back to the list it was raised from
+    const asked = new URLSearchParams(window.location.search).get("view");
+    if (asked === "sales") return { kind: "sales" };
+    return { kind: "projects" };
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   type ProjectFields = {

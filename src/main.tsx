@@ -45,6 +45,9 @@ function lazyRoute<P>(loader: () => Promise<{ default: React.ComponentType<P> }>
 const Landing = lazyRoute(() => import("./pages/Landing.tsx"));
 const AuthPage = lazyRoute(() => import("./pages/Auth.tsx"));
 const Dashboard = lazyRoute(() => import("./pages/Dashboard.tsx"));
+const SalesDocumentPage = lazyRoute(
+  () => import("./pages/SalesDocumentPage.tsx"),
+);
 const NotFound = lazyRoute(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -178,6 +181,14 @@ createRoot(document.getElementById("root")!).render(
                   element={
                     <RequireAuth>
                       <Dashboard />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/sales/:section/:id?"
+                  element={
+                    <RequireAuth>
+                      <SalesDocumentPage />
                     </RequireAuth>
                   }
                 />

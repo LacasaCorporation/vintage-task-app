@@ -692,7 +692,6 @@ export default function CostingPanel({
         />
       ) : view?.kind === "sales" && canViewSales ? (
         <SalesPanel
-          products={finishedGoods ?? []}
           canCreate={canCreatePurchase}
           canEdit={canEditPurchase}
           canDelete={canDeletePurchase}
