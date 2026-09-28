@@ -1,8 +1,27 @@
-import type { Doc } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 
 export type TaskDoc = Doc<"tasks">;
 export type StepDoc = Doc<"taskSteps">;
 export type Priority = "high" | "medium" | "low";
+
+/**
+ * Ranking and colours for a priority.
+ *
+ * These sat in the flagged-lists screen, which is a large file of boards and
+ * lists; the task list only wanted the two lookup tables, and importing them
+ * from there dragged the whole screen into the first download.
+ */
+export const PRIORITY_RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
+
+export const PRIORITY_META: Record<Priority, { dot: string; chip: string }> = {
+  high: { dot: "bg-rose-500", chip: "bg-rose-500/10 text-rose-700 dark:text-rose-400" },
+  medium: { dot: "bg-amber-500", chip: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+  low: { dot: "bg-sky-500", chip: "bg-sky-500/10 text-sky-700 dark:text-sky-400" },
+};
+
+/** Which list a task belongs to; how a list of tasks is ordered. */
+export type ListId = Id<"taskLists">;
+export type SortMode = "manual" | "due" | "priority" | "created";
 export type Recurrence = "daily" | "weekly" | "monthly";
 
 export const PRIORITIES: { value: Priority; label: string; dot: string; chip: string }[] = [

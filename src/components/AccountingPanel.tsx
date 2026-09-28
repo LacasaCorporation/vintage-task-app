@@ -3,8 +3,6 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  BookOpen,
-  CalendarDays,
   Eye,
   Landmark,
   Loader2,
@@ -13,7 +11,6 @@ import {
   Scale,
   ScrollText,
   Trash2,
-  Wallet,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -29,28 +26,8 @@ import JournalEntryForm, {
 } from "@/components/JournalEntryForm";
 import type { AccountType } from "@/convex/accounting";
 
-/** The sub-pages of the accounting module, in the order the sidebar lists them. */
-export type AccountingTab =
-  | "accounts"
-  | "journal"
-  | "receipt"
-  | "cashbook"
-  | "daybook"
-  | "balance";
-
-export const ACCOUNTING_TABS: {
-  id: AccountingTab;
-  label: string;
-  icon: typeof BookOpen;
-  hint: string;
-}[] = [
-  { id: "accounts", label: "Chart of accounts", icon: BookOpen, hint: "Every ledger account and its running balance" },
-  { id: "balance", label: "Opening balance", icon: Scale, hint: "Opening balances — assets against liabilities and equity" },
-  { id: "journal", label: "Journal entry", icon: ScrollText, hint: "A balanced debit and credit posting" },
-  { id: "receipt", label: "Receipt / payment", icon: Wallet, hint: "Money received from a customer, or paid to a supplier" },
-  { id: "cashbook", label: "Cash book", icon: Landmark, hint: "Cash and bank movement only" },
-  { id: "daybook", label: "Day book", icon: CalendarDays, hint: "Every posting, by day" },
-];
+export { ACCOUNTING_TABS, type AccountingTab } from "@/lib/accounting-tabs";
+import { ACCOUNTING_TABS, type AccountingTab } from "@/lib/accounting-tabs";
 
 /** The kinds an entry can be filed under. */
 type EntryKind = "journal" | "opening" | "receipt" | "payment" | "expense";

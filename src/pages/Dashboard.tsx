@@ -4,26 +4,44 @@ import { useAuth } from "@/hooks/use-auth";
 import FirmSwitcher from "@/components/FirmSwitcher";
 import { FirmMark } from "@/components/FirmLogoPicker";
 import { Button } from "@/components/ui/button";
-import NotesSidebar from "@/components/NotesSidebar";
 import TasksSidebar from "@/components/TasksSidebar";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
-import NotesPanel from "@/components/NotesPanel";
 import TasksPanel from "@/components/TasksPanel";
 import PrimaryNav, { type PrimarySection } from "@/components/PrimaryNav";
 import type { CostingView } from "@/components/CostingSidebar";
-import CostingPanel from "@/components/CostingPanel";
-import SettingsPanel from "@/components/SettingsPanel";
-import SettingsSidebar from "@/components/SettingsSidebar";
 import { format } from "date-fns";
 import { LogOut, Menu, NotebookPen, Settings, X } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import type { PromptField } from "@/components/AppDialogs";
 import { cn } from "@/lib/utils";
 import { canItem, type ActionKey, type GranularPerms, type ItemKey, type SectionKey } from "@/lib/permissions";
+
+/**
+ * The heavy sections are fetched when you open them, not on sign-in.
+ *
+ * Costing alone pulls in sales, purchasing, projects, reports and accounting,
+ * and settings is the largest screen in the app — all of it used to be in the
+ * first download whether or not it was ever opened. Tasks is the section the
+ * app starts on, so that one stays eager and paints immediately.
+ */
+const CostingPanel = lazy(() => import("@/components/CostingPanel"));
+const SettingsPanel = lazy(() => import("@/components/SettingsPanel"));
+const SettingsSidebar = lazy(() => import("@/components/SettingsSidebar"));
+const NotesPanel = lazy(() => import("@/components/NotesPanel"));
+const NotesSidebar = lazy(() => import("@/components/NotesSidebar"));
+
+/** A quiet placeholder while a section's own code arrives. */
+function SectionLoading({ label }: { label: string }) {
+  return (
+    <p className="py-16 text-center text-sm text-muted-foreground">
+      Opening {label}…
+    </p>
+  );
+}
 
 type Section = "tasks" | "notes" | "costing" | "settings";
 type NotebookId = Id<"notebooks">;
@@ -740,7 +758,11 @@ export default function Dashboard() {
             canViewAccounting={canDoItem("accounting", "view")}
           />
 
-          {section === "settings" && <SettingsSidebar />}
+          {section === "settings" && (
+            <Suspense fallback={null}>
+              <SettingsSidebar />
+            </Suspense>
+          )}
           {section === "tasks" && (
             <TasksSidebar
               lists={taskLists ?? []}
@@ -816,7 +838,9 @@ export default function Dashboard() {
               Notes
             </span>
           </div>
-          <div className="px-3 py-3">{notebookTree}</div>
+          <div className="px-3 py-3">
+            <Suspense fallback={null}>{notebookTree}</Suspense>
+          </div>
         </aside>
       )}
 
@@ -868,7 +892,7 @@ export default function Dashboard() {
                   here it follows the navigation list instead */}
               {section === "notes" && (
                 <div className="mt-3 border-t border-border/60 pt-3">
-                  {notebookTree}
+                  <Suspense fallback={null}>{notebookTree}</Suspense>
                 </div>
               )}
             </div>
@@ -973,8 +997,11 @@ export default function Dashboard() {
           )}
 
           {section === "settings" ? (
-            <SettingsPanel />
+            <Suspense fallback={<SectionLoading label="settings" />}>
+              <SettingsPanel />
+            </Suspense>
           ) : section === "costing" ? (
+            <Suspense fallback={<SectionLoading label="costing" />}>
             <CostingPanel
               materials={materials ?? []}
               finishedGoods={finishedGoods ?? []}
@@ -1004,6 +1031,7 @@ export default function Dashboard() {
               canEditProject={canDoItem("projects", "edit")}
               canDeleteProject={canDoItem("projects", "delete")}
             />
+            </Suspense>
           ) : section === "tasks" ? (
             <TasksPanel
               activeView={activeTaskView}
@@ -1017,16 +1045,18 @@ export default function Dashboard() {
               canDeleteSteps={canDoItem("taskSteps", "delete")}
             />
           ) : (
-            <NotesPanel
-              activePage={activePage}
-              pagesLoading={pages === undefined}
-              onNewPage={() => handleNewPage()}
-              onFlagTask={handleFlagTask}
-              tasks={allTasks ?? []}
-              canCreate={canDoItem("notePages", "create")}
-              canEdit={canDoItem("notePages", "edit")}
-              canFlag={canDoItem("flagToTask", "create")}
-            />
+            <Suspense fallback={<SectionLoading label="notes" />}>
+              <NotesPanel
+                activePage={activePage}
+                pagesLoading={pages === undefined}
+                onNewPage={() => handleNewPage()}
+                onFlagTask={handleFlagTask}
+                tasks={allTasks ?? []}
+                canCreate={canDoItem("notePages", "create")}
+                canEdit={canDoItem("notePages", "edit")}
+                canFlag={canDoItem("flagToTask", "create")}
+              />
+            </Suspense>
           )}
         </main>
 

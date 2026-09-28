@@ -9,7 +9,15 @@ import StatusSelect from "@/components/StatusSelect";
 import AssigneeChip from "@/components/AssigneeChip";
 import { assigneesOfTask } from "@/lib/task-people";
 import type { Priority } from "@/lib/task-utils";
-import { daysLeftLabel, formatDueLabel, toLocalInput } from "@/lib/task-utils";
+import {
+  PRIORITY_META,
+  PRIORITY_RANK,
+  daysLeftLabel,
+  formatDueLabel,
+  toLocalInput,
+  type ListId,
+  type SortMode,
+} from "@/lib/task-utils";
 import {
   AlertTriangle,
   Briefcase,
@@ -44,18 +52,12 @@ import {
   projectStatusesOrDefaults,
 } from "@/lib/project-statuses";
 
-export type ListId = Id<"taskLists">;
-export type SortMode = "manual" | "due" | "priority" | "created";
 export type JobDoc = Doc<"projectJobs">;
 export type FgDoc = Doc<"finishedGoods">;
 
-export const PRIORITY_RANK: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
-
-export const PRIORITY_META: Record<Priority, { dot: string; chip: string }> = {
-  high: { dot: "bg-rose-500", chip: "bg-rose-500/10 text-rose-700 dark:text-rose-400" },
-  medium: { dot: "bg-amber-500", chip: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  low: { dot: "bg-sky-500", chip: "bg-sky-500/10 text-sky-700 dark:text-sky-400" },
-};
+// the shared lookups live with the rest of the task helpers, so a screen that
+// only needs a colour doesn't have to load this one
+export { PRIORITY_META, PRIORITY_RANK, type ListId, type SortMode };
 
 /** Sort flagged jobs like the main todo list (custom/due/priority/newest). */
 export function sortJobs(jobs: JobDoc[], mode: SortMode): JobDoc[] {

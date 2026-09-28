@@ -2,16 +2,9 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import MaterialsSheet from "@/components/MaterialsSheet";
 import CreateMaterialDialog from "@/components/CreateMaterialDialog";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
-import ProductForm from "@/components/ProductForm";
-import ProjectsSheet from "@/components/ProjectsSheet";
 import type { CostingView } from "@/components/CostingSidebar";
-import PurchasePanel from "@/components/PurchasePanel";
-import SalesPanel from "@/components/SalesPanel";
-import AccountingPanel from "@/components/AccountingPanel";
-import ReportsPanel from "@/components/ReportsPanel";
 import {
   ChevronDown,
   ChevronRight,
@@ -29,7 +22,7 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -41,6 +34,31 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+
+/**
+ * Every working area is its own chunk.
+ *
+ * Sales, purchasing, projects, the materials sheet, reports and accounting
+ * were all in one file's graph, so opening the costing tab downloaded the lot
+ * even when only the products list was wanted. Each one now arrives when its
+ * sidebar row is opened, and the sheet beside it stays put while it does.
+ */
+const MaterialsSheet = lazy(() => import("@/components/MaterialsSheet"));
+const ProjectsSheet = lazy(() => import("@/components/ProjectsSheet"));
+const PurchasePanel = lazy(() => import("@/components/PurchasePanel"));
+const SalesPanel = lazy(() => import("@/components/SalesPanel"));
+const AccountingPanel = lazy(() => import("@/components/AccountingPanel"));
+const ReportsPanel = lazy(() => import("@/components/ReportsPanel"));
+const ProductForm = lazy(() => import("@/components/ProductForm"));
+
+/** A quiet placeholder for the moment a working area is being fetched. */
+function AreaLoading({ label }: { label: string }) {
+  return (
+    <p className="py-16 text-center text-sm text-muted-foreground">
+      Opening {label}…
+    </p>
+  );
+}
 
 type FgDoc = Doc<"finishedGoods">;
 type MaterialDoc = Doc<"rawMaterials">;
@@ -684,27 +702,36 @@ export default function CostingPanel({
 
       {/* ── Views ────────────────────────────────────────────────────── */}
       {view?.kind === "purchase" && canViewPurchase ? (
-        <PurchasePanel
-          materials={materials}
-          canCreate={canCreatePurchase}
-          canEdit={canEditPurchase}
-          canDelete={canDeletePurchase}
-        />
+        <Suspense fallback={<AreaLoading label="purchasing" />}>
+          <PurchasePanel
+            materials={materials}
+            canCreate={canCreatePurchase}
+            canEdit={canEditPurchase}
+            canDelete={canDeletePurchase}
+          />
+        </Suspense>
       ) : view?.kind === "sales" && canViewSales ? (
-        <SalesPanel
-          canCreate={canCreatePurchase}
-          canEdit={canEditPurchase}
-          canDelete={canDeletePurchase}
-        />
+        <Suspense fallback={<AreaLoading label="sales" />}>
+          <SalesPanel
+            canCreate={canCreatePurchase}
+            canEdit={canEditPurchase}
+            canDelete={canDeletePurchase}
+          />
+        </Suspense>
       ) : view?.kind === "accounting" && canViewAccounting ? (
-        <AccountingPanel
-          tab={view.tab}
-          onTabChange={(tab) => onSelectView({ kind: "accounting", tab })}
-        />
+        <Suspense fallback={<AreaLoading label="accounting" />}>
+          <AccountingPanel
+            tab={view.tab}
+            onTabChange={(tab) => onSelectView({ kind: "accounting", tab })}
+          />
+        </Suspense>
       ) : view?.kind === "reports" && canViewAccounting ? (
-        <ReportsPanel />
+        <Suspense fallback={<AreaLoading label="reports" />}>
+          <ReportsPanel />
+        </Suspense>
       ) : view?.kind === "materials" && canViewMaterials ? (
         <div className="mt-4">
+          <Suspense fallback={<AreaLoading label="the materials sheet" />}>
           <MaterialsSheet
             materials={materials}
             loading={materials === undefined}
@@ -714,9 +741,11 @@ export default function CostingPanel({
             canImportExport={canImportExport}
             canImport={canImport}
           />
+          </Suspense>
         </div>
       ) : view === null || view?.kind === "projects" ? (
         <div className="mt-4">
+          <Suspense fallback={<AreaLoading label="projects" />}>
           <ProjectsSheet
             finishedGoods={finishedGoods}
             loading={loading}
@@ -734,6 +763,7 @@ export default function CostingPanel({
             }
             onOpenProduct={(fgId) => onSelectView({ kind: "fg", fgId })}
           />
+          </Suspense>
         </div>
       ) : (view?.kind === "fg" || sheetId !== null) && activeFg ? (
         <Dialog
@@ -1293,13 +1323,15 @@ export default function CostingPanel({
         </div>
       ) : (
         <div className="mt-4">
-          <ProductForm
-            finishedGoods={finishedGoods}
-            activeFgId={activeFgId}
-            onSelectFg={(id) => onSelectView({ kind: "fg", fgId: id })}
-            onOpenSheet={(id) => setSheetId(id)}
-            initialProject={view?.kind === "products" ? projectFocus : null}
-          />
+          <Suspense fallback={<AreaLoading label="products" />}>
+            <ProductForm
+              finishedGoods={finishedGoods}
+              activeFgId={activeFgId}
+              onSelectFg={(id) => onSelectView({ kind: "fg", fgId: id })}
+              onOpenSheet={(id) => setSheetId(id)}
+              initialProject={view?.kind === "products" ? projectFocus : null}
+            />
+          </Suspense>
         </div>
       )}
 

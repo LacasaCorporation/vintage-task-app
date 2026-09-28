@@ -2,9 +2,6 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import TaskDetail from "@/components/TaskDetail";
-import StepDetail from "@/components/StepDetail";
-import AddSubtaskDialog from "@/components/AddSubtaskDialog";
 import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
 import { useAppDialogs } from "@/components/AppDialogs";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
@@ -38,18 +35,29 @@ import {
   Trash2,
   User,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import AssigneeChip from "@/components/AssigneeChip";
 import { cn } from "@/lib/utils";
+// the priority lookups come from the small helpers file rather than the
+// flagged-lists screen, which is large and not needed to draw a task
 import {
   PRIORITY_META,
   PRIORITY_RANK,
   daysLeftLabel,
   type ListId,
   type SortMode,
-} from "@/components/FlaggedLists";
+} from "@/lib/task-utils";
+
+/**
+ * The detail pane is a screen of its own and only opens when a task or a step
+ * is clicked, so it — and the subtask dialog with it — arrives then. The list
+ * itself paints without waiting for either.
+ */
+const TaskDetail = lazy(() => import("@/components/TaskDetail"));
+const StepDetail = lazy(() => import("@/components/StepDetail"));
+const AddSubtaskDialog = lazy(() => import("@/components/AddSubtaskDialog"));
 
 export default function TasksPanel({
   activeView,
@@ -1079,6 +1087,7 @@ export default function TasksPanel({
 
             {/* detail editor (slides in beside the list on wide screens) */}
             {openStep !== null ? (
+              <Suspense fallback={null}>
               <StepDetail
                 step={openStep}
                 task={openStepTask}
@@ -1093,7 +1102,9 @@ export default function TasksPanel({
                 }}
                 onClose={() => setOpenStepId(null)}
               />
+              </Suspense>
             ) : openTask && (
+              <Suspense fallback={null}>
               <TaskDetail
                 task={openTask}
                 canEdit={canEdit}
@@ -1103,6 +1114,7 @@ export default function TasksPanel({
                 canDeleteSteps={canDeleteSteps}
                 onClose={() => setOpenTaskId(null)}
               />
+              </Suspense>
             )}
           </div>
         )}
@@ -1113,6 +1125,7 @@ export default function TasksPanel({
 
       {/* the “+ Subtask” popup — a dialog, so the list is not permanently
           shortened by a row of empty inputs under every open task */}
+      <Suspense fallback={null}>
       <AddSubtaskDialog
         key={stepDialogTask ?? "none"}
         open={stepDialogTask !== null}
@@ -1128,6 +1141,7 @@ export default function TasksPanel({
           });
         }}
       />
+      </Suspense>
 
       {doneCount > 0 && !showDone && (
         <p className="mt-3 text-center text-xs text-muted-foreground">

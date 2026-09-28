@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { CostingView } from "@/components/CostingSidebar";
-import { ACCOUNTING_TABS } from "@/components/AccountingPanel";
+import { ACCOUNTING_TABS } from "@/lib/accounting-tabs";
 import { cn } from "@/lib/utils";
 
 type FgDoc = Doc<"finishedGoods">;
