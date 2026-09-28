@@ -55,7 +55,12 @@ const blankLine = (): DraftLine => ({ productId: "", qty: "1", price: "" });
 
 /** What the form is being used for right now. */
 export type SalesDocTarget =
-  | { mode: "new"; kind: "quotation" | "invoice" }
+  | {
+      mode: "new";
+      kind: "quotation" | "invoice";
+      /** Pre-fills the customer — raised from a statement or a customer row. */
+      customer?: { id?: Id<"customers">; name: string; address?: string };
+    }
   | { mode: "newDelivery"; saleId: Id<"sales"> }
   | {
       mode: "edit";
@@ -154,15 +159,22 @@ function SalesDocEditor({
   // late — and it is why the editor is remounted when the record changes.
   const seed = initial;
   const text = (value: unknown) => (typeof value === "string" ? value : "");
+  /** A new document raised straight from a customer carries them in already. */
+  const preset = target.mode === "new" ? target.customer : undefined;
 
-  const [customerId, setCustomerId] = useState<Id<"customers"> | "">(
-    seed && "customerId" in seed ? (seed.customerId ?? "") : "",
-  );
+  const [customerId, setCustomerId] = useState<Id<"customers"> | "">(() => {
+    if (seed && "customerId" in seed) return seed.customerId ?? "";
+    return preset?.id ?? "";
+  });
   const [customerName, setCustomerName] = useState(() =>
-    seed ? text("customerName" in seed ? seed.customerName : "") : "",
+    seed
+      ? text("customerName" in seed ? seed.customerName : "")
+      : (preset?.name ?? ""),
   );
   const [customerAddress, setCustomerAddress] = useState(() =>
-    seed ? text("customerAddress" in seed ? seed.customerAddress : "") : "",
+    seed
+      ? text("customerAddress" in seed ? seed.customerAddress : "")
+      : (preset?.address ?? ""),
   );
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerAddress, setNewCustomerAddress] = useState("");

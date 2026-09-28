@@ -1,20 +1,32 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { Button } from "@/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   CheckCircle2,
+  ChevronDown,
   Eye,
   FileText,
   Loader2,
+  Mail,
   Pencil,
+  Phone,
   Plus,
   Printer,
   Receipt,
   Send,
   Trash2,
   Truck,
+  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -22,6 +34,8 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import PageTabs from "@/components/PageTabs";
+import ContactDialog, { type Contact } from "@/components/ContactDialog";
+import CustomerLedgerDialog from "@/components/CustomerLedgerDialog";
 import SalesDocumentForm, {
   type SalesDocTarget,
 } from "@/components/SalesDocumentForm";
@@ -51,6 +65,8 @@ const QUOTE_STATUS: Record<
   accepted: { label: "Accepted", chip: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
   rejected: { label: "Rejected", chip: "bg-rose-500/10 text-rose-700 dark:text-rose-400" },
 };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const chipBase =
   "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium";
@@ -84,6 +100,10 @@ export default function SalesPanel({
   const setSalePaid = useMutation(api.sales.setSalePaid);
   const dropSale = useMutation(api.sales.removeSale);
 
+  const addCustomer = useMutation(api.contacts.createCustomer);
+  const editCustomer = useMutation(api.contacts.updateCustomer);
+  const dropCustomer = useMutation(api.contacts.removeCustomer);
+
   const [tab, setTab] = useState<Tab>("sales");
   const [viewingSale, setViewingSale] = useState<Id<"sales"> | null>(null);
   const [viewingQuote, setViewingQuote] = useState<Id<"quotations"> | null>(null);
@@ -94,6 +114,99 @@ export default function SalesPanel({
    */
   const [doc, setDoc] = useState<SalesDocTarget | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const [ledgerCustomer, setLedgerCustomer] = useState<CustomerDoc | null>(null);
+  /** Fixed for the life of the panel, so a re-render can't reclassify a due date. */
+  const [now] = useState(() => Date.now());
+
+  /**
+   * Who owes what, one row per customer.
+   *
+   * An invoice can be raised against a saved customer or against a name typed
+   * on the spot, so the book is keyed by customer id where there is one and by
+   * the name itself otherwise — otherwise the one-off invoices would vanish
+   * from the statement and the balance would be quietly wrong.
+   */
+  const customerLedger = useMemo(() => {
+    const rows = new Map<
+      string,
+      {
+        key: string;
+        customer: CustomerDoc | null;
+        name: string;
+        invoices: SaleDoc[];
+        invoiced: number;
+        received: number;
+        owing: number;
+        oldestDue: number | null;
+      }
+    >();
+
+    const rowFor = (key: string, customer: CustomerDoc | null, name: string) => {
+      const existing = rows.get(key);
+      if (existing) return existing;
+      const fresh = {
+        key,
+        customer,
+        name,
+        invoices: [] as SaleDoc[],
+        invoiced: 0,
+        received: 0,
+        owing: 0,
+        oldestDue: null as number | null,
+      };
+      rows.set(key, fresh);
+      return fresh;
+    };
+
+    // saved customers first, so a customer who has never been invoiced still
+    // shows up in the list rather than only appearing once they buy something
+    for (const c of customers ?? []) rowFor(c._id as string, c, c.name);
+
+    for (const s of sales ?? []) {
+      const name = s.customerName ?? "Walk-in / not listed";
+      const key =
+        s.customerId !== undefined
+          ? (s.customerId as string)
+          : `name:${name.toLowerCase()}`;
+      const known = (customers ?? []).find((c) => c._id === s.customerId);
+      const row = rowFor(key, known ?? null, name);
+      row.invoices.push(s);
+      row.invoiced = round2(row.invoiced + s.total);
+      if (s.isPaid === true) row.received = round2(row.received + s.total);
+      if (
+        s.isPaid !== true &&
+        s.dueAt !== undefined &&
+        s.dueAt < now &&
+        (row.oldestDue === null || s.dueAt < row.oldestDue)
+      ) {
+        row.oldestDue = s.dueAt;
+      }
+    }
+
+    return [...rows.values()]
+      .map((row) => ({
+        ...row,
+        invoiced: round2(row.invoiced),
+        received: round2(row.received),
+        owing: round2(row.invoiced - row.received),
+      }))
+      .sort((a, b) =>
+        a.owing !== b.owing
+          ? b.owing - a.owing
+          : a.name.localeCompare(b.name),
+      );
+  }, [customers, sales, now]);
+
+  const bookTotal = useMemo(
+    () => ({
+      invoiced: round2(customerLedger.reduce((s, r) => s + r.invoiced, 0)),
+      received: round2(customerLedger.reduce((s, r) => s + r.received, 0)),
+      owing: round2(customerLedger.reduce((s, r) => s + r.owing, 0)),
+    }),
+    [customerLedger],
+  );
 
   const notes = useQuery(api.sales.listDeliveryNotes);
   const dropNote = useMutation(api.sales.removeDeliveryNote);
@@ -200,23 +313,93 @@ export default function SalesPanel({
         />
         {canCreate && (
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-9 rounded-xl px-3 text-sm"
-              onClick={() => setDoc({ mode: "new", kind: "quotation" })}
-            >
-              <Send className="size-4" /> New quotation
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className="h-9 rounded-xl px-3 text-sm"
-              onClick={() => setDoc({ mode: "new", kind: "invoice" })}
-            >
-              <Plus className="size-4" /> New invoice
-            </Button>
+            {/* One create action per tab, so whatever is on screen is what you
+                can add to it. The second button is the other way into sales:
+                an invoice is often raised from an accepted quote. */}
+            {tab === "sales" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 rounded-xl px-3 text-sm"
+                onClick={() => setDoc({ mode: "new", kind: "quotation" })}
+              >
+                <Send className="size-4" /> New quotation
+              </Button>
+            )}
+            {tab === "deliveries" ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-9 rounded-xl px-3 text-sm"
+                  >
+                    <Truck className="size-4" /> New delivery note
+                    <ChevronDown className="size-3.5 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-72">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    Deliver against which invoice?
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {(sales ?? []).length === 0 ? (
+                    <p className="px-2 py-3 text-xs text-muted-foreground">
+                      Raise an invoice first — a delivery note takes its items
+                      from one.
+                    </p>
+                  ) : (
+                    [...(sales ?? [])]
+                      .sort((a, b) => b.soldAt - a.soldAt)
+                      .map((s) => (
+                        <DropdownMenuItem
+                          key={s._id}
+                          onSelect={() =>
+                            setDoc({ mode: "newDelivery", saleId: s._id })
+                          }
+                          className="flex items-center gap-2"
+                        >
+                          <span className="font-mono text-xs">{s.number}</span>
+                          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                            {s.customerName ?? "Walk-in / not listed"}
+                          </span>
+                          <span className="text-xs tabular-nums text-muted-foreground">
+                            {money(s.total)}
+                          </span>
+                        </DropdownMenuItem>
+                      ))
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : tab === "customers" ? (
+              <Button
+                type="button"
+                size="sm"
+                className="h-9 rounded-xl px-3 text-sm"
+                onClick={() => {
+                  setEditingContact(null);
+                  setContactOpen(true);
+                }}
+              >
+                <UserPlus className="size-4" /> New customer
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                className="h-9 rounded-xl px-3 text-sm"
+                onClick={() =>
+                  setDoc({
+                    mode: "new",
+                    kind: tab === "quotes" ? "quotation" : "invoice",
+                  })
+                }
+              >
+                <Plus className="size-4" />
+                {tab === "quotes" ? "New quotation" : "New invoice"}
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -412,39 +595,260 @@ export default function SalesPanel({
 
       {/* ── Entry form, shared by a quotation and a sales bill ──────── */}
 
-      {/* ── Customers ──────────────────────────────────────────────── */}
+      {/* ── Customers, with what each of them owes ─────────────────── */}
       {tab === "customers" && (
         <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
-          <div className="border-b border-border/60 px-4 py-2.5">
-            <h2 className="text-sm font-semibold">Customers</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
+            <h2 className="text-sm font-semibold">
+              Customers
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {customerLedger.length} on the book · {money(bookTotal.invoiced)}{" "}
+                invoiced · {money(bookTotal.received)} received ·{" "}
+                <span
+                  className={cn(
+                    "font-medium",
+                    bookTotal.owing > 0
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-emerald-600 dark:text-emerald-400",
+                  )}
+                >
+                  {money(bookTotal.owing)} outstanding
+                </span>
+              </span>
+            </h2>
+            <span className="hidden text-[11px] text-muted-foreground sm:inline">
+              Click a row for its statement
+            </span>
           </div>
-          {customers === undefined ? (
+          {customers === undefined || sales === undefined ? (
             <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Loading customers…
+              <Loader2 className="size-4 animate-spin" /> Reading the sales book…
             </div>
-          ) : customers.length === 0 ? (
+          ) : customerLedger.length === 0 ? (
             <div className="px-4 py-12 text-center">
               <Users className="mx-auto size-7 text-muted-foreground/40" />
               <p className="mt-2 text-sm font-medium">No customers yet</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Add them on the Projects → Customers tab, then quote to them here.
+                Add one here and it becomes available on every quote, invoice
+                and delivery note.
               </p>
+              {canCreate && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="mt-3 h-8 rounded-lg text-xs"
+                  onClick={() => {
+                    setEditingContact(null);
+                    setContactOpen(true);
+                  }}
+                >
+                  <UserPlus className="size-3.5" /> New customer
+                </Button>
+              )}
             </div>
           ) : (
-            <ul className="divide-y divide-border/60">
-              {customers.map((c: CustomerDoc) => (
-                <li key={c._id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                  <Users className="size-3.5 shrink-0 text-muted-foreground/60" />
-                  <span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>
-                  {c.email && (
-                    <span className="truncate text-xs text-muted-foreground">{c.email}</span>
-                  )}
-                  {c.phone && (
-                    <span className="text-xs text-muted-foreground">{c.phone}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border/60 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+                    <th className="px-4 py-2">Customer</th>
+                    <th className="px-3 py-2">Contact</th>
+                    <th className="px-3 py-2 text-right">Invoices</th>
+                    <th className="px-3 py-2 text-right">Invoiced</th>
+                    <th className="px-3 py-2 text-right">Received</th>
+                    <th className="px-3 py-2 text-right">Balance</th>
+                    <th className="w-24 px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {customerLedger.map((row) => {
+                    const saved = row.customer;
+                    return (
+                      <tr
+                        key={row.key}
+                        onClick={() =>
+                          saved
+                            ? setLedgerCustomer(saved)
+                            : toast.error(
+                                "That name was typed on the invoice rather than saved — add a customer to keep a statement.",
+                              )
+                        }
+                        title={
+                          saved
+                            ? `Open the ${row.name} statement`
+                            : "Raised under a one-off name"
+                        }
+                        className={cn(
+                          "group/customer transition-colors",
+                          saved ? "cursor-pointer hover:bg-accent/40" : "",
+                        )}
+                      >
+                        <td className="px-4 py-2.5">
+                          <p className="font-medium">
+                            <span className="underline decoration-transparent underline-offset-2 transition-colors group-hover/customer:decoration-current">
+                              {row.name}
+                            </span>
+                            {saved === null && (
+                              <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                not saved
+                              </span>
+                            )}
+                          </p>
+                          {row.oldestDue !== null && (
+                            <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                              overdue since{" "}
+                              {new Date(row.oldestDue).toLocaleDateString()}
+                            </p>
+                          )}
+                          {!saved && row.owing > 0 && (
+                            <p className="text-[11px] text-muted-foreground">
+                              link this name to a customer to get a statement
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-xs whitespace-nowrap text-muted-foreground">
+                          {row.invoices.length > 0 ? (
+                            <span className="space-y-0.5 block">
+                              {saved?.contactName ? (
+                                <span className="block">{saved.contactName}</span>
+                              ) : null}
+                              {saved?.phone && (
+                                <span className="flex items-center gap-1">
+                                  <Phone className="size-2.5" />
+                                  {saved.phone}
+                                </span>
+                              )}
+                              {saved?.email && (
+                                <span className="flex items-center gap-1">
+                                  <Mail className="size-2.5" />
+                                  <span className="block max-w-36 truncate">
+                                    {saved.email}
+                                  </span>
+                                </span>
+                              )}
+                              {!saved?.contactName && !saved?.phone && !saved?.email && (
+                                <span>—</span>
+                              )}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs tabular-nums">
+                          {row.invoices.length}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-medium tabular-nums">
+                          {row.invoices.length > 0 ? money(row.invoiced) : "—"}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-xs tabular-nums text-emerald-600 dark:text-emerald-400">
+                          {row.received > 0
+                            ? money(row.received)
+                            : row.invoices.length > 0
+                              ? "—"
+                              : ""}
+                        </td>
+                        <td
+                          className={cn(
+                            "px-3 py-2.5 text-right font-semibold tabular-nums",
+                            row.owing > 0
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          {row.invoices.length > 0 ? money(row.owing) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {saved && (
+                              <>
+                                <button
+                                  type="button"
+                                  title={`Quote for ${row.name}`}
+                                  aria-label={`New quotation for ${row.name}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDoc({
+                                      mode: "new",
+                                      kind: "quotation",
+                                      customer: { id: saved._id, name: saved.name },
+                                    });
+                                  }}
+                                  className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                  <Send className="size-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  title={`Edit ${row.name}`}
+                                  aria-label={`Edit ${row.name}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingContact(saved);
+                                    setContactOpen(true);
+                                  }}
+                                  className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+                                >
+                                  <Pencil className="size-3.5" />
+                                </button>
+                                {canDelete && (
+                                  <button
+                                    type="button"
+                                    title={`Delete ${row.name}`}
+                                    aria-label={`Delete ${row.name}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void dropCustomer({
+                                        id: saved._id,
+                                      }).catch((err) =>
+                                        toast.error(
+                                          err instanceof Error
+                                            ? err.message
+                                            : "Couldn't delete the customer.",
+                                        ),
+                                      );
+                                    }}
+                                    className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-rose-600"
+                                  >
+                                    <Trash2 className="size-3.5" />
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-border/60 bg-muted/30 text-sm font-semibold">
+                    <td className="px-4 py-2.5" colSpan={2}>
+                      Total
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-xs tabular-nums">
+                      {customerLedger.reduce((s, r) => s + r.invoices.length, 0)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {money(bookTotal.invoiced)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                      {money(bookTotal.received)}
+                    </td>
+                    <td
+                      className={cn(
+                        "px-3 py-2.5 text-right tabular-nums",
+                        bookTotal.owing > 0
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-emerald-600 dark:text-emerald-400",
+                      )}
+                    >
+                      {money(bookTotal.owing)}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           )}
         </section>
       )}
@@ -731,6 +1135,52 @@ export default function SalesPanel({
           target={doc}
           products={products ?? []}
           onClose={() => setDoc(null)}
+        />
+      )}
+
+      {/* ── customer master + the statement behind a balance ──────── */}
+      <ContactDialog
+        kind="customer"
+        open={contactOpen}
+        onOpenChange={(next) => {
+          setContactOpen(next);
+          if (!next) setEditingContact(null);
+        }}
+        contacts={customers as Contact[] | undefined}
+        editTarget={editingContact}
+        onCreate={async (args) => addCustomer(args)}
+        onUpdate={async (id, args) => {
+          await editCustomer({ id: id as Id<"customers">, ...args });
+        }}
+        onRemove={async (id) => {
+          await dropCustomer({ id: id as Id<"customers"> });
+        }}
+      />
+      {ledgerCustomer !== null && (
+        <CustomerLedgerDialog
+          customer={ledgerCustomer}
+          sales={(sales ?? []).filter(
+            (s) => s.customerId === ledgerCustomer._id,
+          )}
+          money={money}
+          canCreate={canCreate}
+          onClose={() => setLedgerCustomer(null)}
+          onOpenInvoice={(id) => {
+            const sale = (sales ?? []).find((s) => s._id === id);
+            if (sale) openOrPrint(sale, false);
+            else toast.error("That invoice is no longer on file.");
+          }}
+          onNewInvoice={() =>
+            setDoc({
+              mode: "new",
+              kind: "invoice",
+              customer: {
+                id: ledgerCustomer._id,
+                name: ledgerCustomer.name,
+                address: ledgerCustomer.address,
+              },
+            })
+          }
         />
       )}
     </div>
