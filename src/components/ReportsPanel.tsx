@@ -1614,25 +1614,31 @@ type ValuationRow = {
   category: string;
   unit: string;
   qty: number;
-  /** What one unit costs — the material's price, or the sheet's build cost. */
+  /**
+   * What one unit costs on a moving weighted average. The value is struck on
+   * this, never on the sale price.
+   */
   cost: number;
-  /** What one unit sells for. A raw material has no sale price of its own. */
+  /** What one unit sells for — reference only. */
   price: number;
   value: number;
-  /** Where the rate came from, so no figure here is ever a guess. */
-  basis: "purchase" | "costing" | "invoice" | "none";
+  basis: "average" | "price" | "costing" | "invoice" | "none";
+  /** How much was ever bought, which is what the average is taken over. */
+  bought: number;
+  /** The most recent purchase price, beside the average it produced. */
+  lastCost: number;
 };
 
 /** Where a rate came from, said out loud rather than left to be guessed. */
-function BasisChip({ basis }: { basis: ValuationRow["basis"] }) {
-  if (basis === "none") {
+function BasisChip({ row }: { row: ValuationRow }) {
+  if (row.basis === "none") {
     return (
       <span className="ml-2 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-        no rate on record
+        no cost on record
       </span>
     );
   }
-  if (basis === "invoice") {
+  if (row.basis === "invoice") {
     return (
       <span
         title="This product has no costing sheet, so it is valued at the price it last went out for."
@@ -1642,7 +1648,54 @@ function BasisChip({ basis }: { basis: ValuationRow["basis"] }) {
       </span>
     );
   }
+  if (row.basis === "price") {
+    return (
+      <span
+        title="Nothing has been bought against this material yet, so the catalogue price stands in for the average."
+        className="ml-2 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+      >
+        catalogue price
+      </span>
+    );
+  }
   return null;
+}
+
+/**
+ * The average, shown as what it is: an average over what was bought.
+ *
+ * The latest purchase price sits beside it, because that is the number a
+ * manager will remember, and when it has drifted from the average the
+ * difference is worth seeing rather than smoothing away.
+ */
+function AverageNote({
+  row,
+  money,
+}: {
+  row: ValuationRow;
+  money: (n: number) => string;
+}) {
+  if (row.basis !== "average" || row.bought <= 0) return null;
+  const drift =
+    row.cost > 0 ? Math.abs(row.lastCost - row.cost) / row.cost : 0;
+  return (
+    <span
+      className="ml-2 text-[11px] text-muted-foreground"
+      title={`Weighted average of everything ever bought, against the most recent purchase price.`}
+    >
+      avg over {row.bought}
+      {drift >= 0.01 && (
+        <span
+          className={cn(
+            "ml-1 font-medium",
+            row.lastCost > row.cost ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400",
+          )}
+        >
+          · last {money(row.lastCost)}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function ValuationTable({
@@ -1659,8 +1712,7 @@ function ValuationTable({
   /** A raw material is bought, not sold, so it has no sale price of its own. */
   showSalePrice: boolean;
 }) {
-  const atCost = rows.reduce((s, r) => s + r.cost * r.qty, 0);
-  const atPrice = rows.reduce((s, r) => s + r.value, 0);
+  const atCost = rows.reduce((s, r) => s + r.value, 0);
   const unpriced = rows.filter((r) => r.basis === "none").length;
 
   return (
@@ -1692,7 +1744,7 @@ function ValuationTable({
                 showSalePrice ? num(r.price) : "",
                 num(r.value),
               ]),
-              ["Total", "", "", "", "", num(atCost), "", num(atPrice)],
+              ["Total", "", "", "", "", num(atCost), "", num(atCost)],
             ])
           }
         />
@@ -1707,18 +1759,23 @@ function ValuationTable({
               <th className={CELL_LEFT}>Code</th>
               <th className={CELL_LEFT}>Name</th>
               <th className={TH_R}>Qty on hand</th>
-              <th className={TH_R} title="What one unit costs">
-                Cost
+              <th
+                className={TH_R}
+                title="Moving weighted average of what one unit costs"
+              >
+                Avg cost
               </th>
               {showSalePrice && (
                 <th
                   className={TH_R}
-                  title="Cost marked up by the product's margin"
+                  title="What it sells for — reference only, never the value"
                 >
                   Sales price
                 </th>
               )}
-              <th className={TH_R}>Value</th>
+              <th className={TH_R} title="Quantity on hand × average cost">
+                Value at cost
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border/60">
@@ -1734,7 +1791,8 @@ function ValuationTable({
                       {r.category}
                     </span>
                   )}
-                  <BasisChip basis={r.basis} />
+                  <BasisChip row={r} />
+                  <AverageNote row={r} money={money} />
                 </td>
                 <td className={CELL}>
                   {r.qty} {r.unit}
@@ -1756,18 +1814,18 @@ function ValuationTable({
           <tfoot>
             <tr className={TOTAL}>
               <td className={CELL_LEFT} colSpan={3}>
-                Total {title.toLowerCase()}
+                Total {title.toLowerCase()} at average cost
               </td>
               <td className={CELL}>{money(atCost)}</td>
               {showSalePrice && <td />}
-              <td className={CELL}>{money(atPrice)}</td>
+              <td className={CELL}>{money(atCost)}</td>
             </tr>
           </tfoot>
         </TableWrap>
       )}
       {unpriced > 0 && (
         <p className="border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground">
-          {unpriced} {unpriced === 1 ? "line has" : "lines have"} no rate on
+          {unpriced} {unpriced === 1 ? "line has" : "lines have"} no cost on
           record and {unpriced === 1 ? "is" : "are"} carried at zero rather than
           at a guess.
         </p>
@@ -1856,7 +1914,7 @@ function MovementTable({
               <th className={CELL_LEFT}>Item</th>
               <th className={TH_R}>In</th>
               <th className={TH_R}>Out</th>
-              <th className={TH_R}>Rate</th>
+              <th className={TH_R} title="Weighted average cost at the time">Cost rate</th>
               <th className={TH_R}>Value</th>
               <th className={CELL_LEFT}>Source</th>
               <th className={CELL_LEFT}>Reference</th>
@@ -1925,11 +1983,10 @@ function MovementTable({
         </TableWrap>
       )}
       <p className="border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground">
-        Movements are valued on the same rates as the shelves — a material at
-        its purchase price, a product at the sales price on its costing sheet —
-        so a unit that came in and a unit still on hand are worth the same
-        figure here. Quantities are not totalled: a shelf holds boards, metres
-        and pieces, and adding those together means nothing.
+        Movements are valued at the same weighted average cost as the shelves,
+        so a unit that came in and a unit still on hand carry the same figure
+        here. Quantities are not totalled: a shelf holds boards, metres and
+        pieces, and adding those together means nothing.
       </p>
     </Panel>
   );
@@ -1960,9 +2017,10 @@ function StockReports({ range }: { range: Range }) {
   const unpriced =
     data.materials.filter((r) => r.basis === "none").length +
     data.products.filter((r) => r.basis === "none").length;
-  const atCost =
+  /** What the same stock would fetch, for comparison against what it cost. */
+  const atPrice =
     data.materials.reduce((s, r) => s + r.cost * r.qty, 0) +
-    data.products.reduce((s, r) => s + r.cost * r.qty, 0);
+    data.products.reduce((s, r) => s + r.price * r.qty, 0);
 
   return (
     <div className="space-y-4">
@@ -1978,24 +2036,24 @@ function StockReports({ range }: { range: Range }) {
           label="Raw materials"
           value={money(data.materialTotal)}
           tone="text-amber-600 dark:text-amber-400"
-          hint="At purchase price per unit"
+          hint="At weighted average cost"
         />
         <Tile
           label="Finished goods"
           value={money(data.productTotal)}
           tone="text-sky-600 dark:text-sky-400"
-          hint="At the sales price on the costing sheet"
+          hint="At weighted average cost"
         />
         <Tile
           label="Stock on hand"
           value={money(data.total)}
-          hint="Both shelves together"
+          hint="Both shelves, at cost"
         />
         <Tile
-          label="Same stock at cost"
-          value={money(atCost)}
+          label="If it all sold at list"
+          value={money(atPrice)}
           tone="text-muted-foreground"
-          hint="What it would cost to replace"
+          hint={`Stock at cost is ${money(data.total)}`}
         />
       </div>
 
@@ -2026,14 +2084,19 @@ function StockReports({ range }: { range: Range }) {
             />
           </div>
           <p className="text-[11px] text-muted-foreground">
-            A product's cost and sales price come from its costing sheet — the
-            same figures shown on the sheet itself, read through the same
-            helper — so the two can never disagree. Stock is valued on the sales
-            price, which is the rule the products list already uses; the tile
-            above also gives the total at cost, because a business that values
-            inventory at cost should choose that deliberately. Doing it properly
-            needs a costing method — weighted average or FIFO — chosen once and
-            applied to every issue.
+            Stock is valued on a <strong>moving weighted average cost</strong>.
+            A material bought at two prices is neither of them, so its cost is
+            the average of everything ever bought, and issuing stock does not
+            change what the rest of it cost. A finished product is costed from
+            its recipe, but priced at its materials' weighted averages rather
+            than at whatever each line was copied at when the recipe was typed
+            — so the finished-goods shelf cannot drift away from the
+            raw-material shelf it was made from. Sale price is shown beside the
+            cost for reference and is never the value: what a thing fetches is
+            somebody else's number, while what it cost is this business's
+            stock. A material never bought against falls back to its catalogue
+            price and says so, and a product never costed falls back to the
+            price it last went out for.
           </p>
         </>
       ) : (

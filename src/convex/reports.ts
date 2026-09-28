@@ -1,7 +1,6 @@
 import { query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { moneyAccountIds } from "./accountingDefaults";
-import { costByProduct } from "../lib/product-cost";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -933,13 +932,28 @@ export type ValuationRow = {
   category: string;
   unit: string;
   qty: number;
-  /** What one unit costs — the material's price, or the sheet's build cost. */
+  /**
+   * What one unit costs, on a moving weighted average. Stock is valued on
+   * this and never on what it sells for: what a thing costs the business is
+   * what it is worth, and what it happens to fetch today is a different
+   * number entirely.
+   */
   cost: number;
-  /** What one unit sells for. A raw material has no sale price of its own. */
+  /** What one unit sells for. Shown for reference; never the value. */
   price: number;
   value: number;
-  /** Where the rate came from, so no figure here is ever a guess. */
-  basis: "purchase" | "costing" | "invoice" | "none";
+  /**
+   * How the cost was arrived at, so no figure here is ever a guess.
+   * `average` — weighted across everything bought.
+   * `price` — nothing has been bought, so the catalogue price stands in.
+   * `costing` — a recipe, priced at its materials' weighted averages.
+   * `invoice` — never costed, so the last price it went out for.
+   */
+  basis: "average" | "price" | "costing" | "invoice" | "none";
+  /** How much was ever bought, which is what the average is over. */
+  bought: number;
+  /** The most recent purchase price, against the average it produced. */
+  lastCost: number;
 };
 
 export type MovementRow = {
@@ -978,19 +992,18 @@ export type StockAnalysis = {
 /**
  * What the stock is worth, and what moved.
  *
- * The rates come from the costing sheets, which is where the business already
- * records them: a product's cost is the sum of its sheet lines, and its sale
- * price is that cost marked up. Re-deriving a price here from invoice history
- * instead would value a perfectly well-costed product at nothing simply
- * because it has not been sold yet — and would quietly disagree with the
- * figure on the product's own sheet.
+ * Stock is valued on a **moving weighted average cost**, for both shelves.
+ * A material bought at two prices is neither of them, so its cost is the
+ * average of everything ever bought; issuing stock does not change what the
+ * rest of it cost, which is exactly what "moving average" means. A finished
+ * product is costed from its recipe, but priced at its materials' weighted
+ * averages rather than at whatever price each line was copied at when the
+ * recipe was typed — otherwise the finished-goods shelf would quietly
+ * disagree with the raw-material shelf it was made from.
  *
- * Both rates are reported side by side, and the stock is valued on the sale
- * price, which is the rule the products list already uses. Valuing finished
- * goods at cost instead would need a costing method — weighted average or
- * FIFO — chosen once and applied to every issue; that is a decision about the
- * business, so the cost column is here for anyone who wants to read it that
- * way and the choice is not made silently.
+ * Sale price is reported beside the cost for reference and is never the
+ * value. What a thing fetches is somebody else's number; what it cost is
+ * this business's stock.
  */
 export const stockAnalysis = query({
   args: { from: v.number(), to: v.number() },
@@ -1019,13 +1032,67 @@ export const stockAnalysis = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
 
-    // the costing sheets are the source of truth for a product's rates, read
-    // through the same helper the product list uses so the two cannot drift
+    /**
+     * The moving weighted average cost of every raw material.
+     *
+     * A material bought at two prices is neither of them. The average is
+     * taken over everything ever bought — the same figure a moving-average
+     * ledger would arrive at, because issuing stock does not change what the
+     * remaining stock cost. Where nothing has been bought the catalogue
+     * price stands in, and says so.
+     */
+    const billLines = await ctx.db
+      .query("purchaseLines")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const averages = new Map<
+      Id<"rawMaterials">,
+      { value: number; qty: number; last: number }
+    >();
+    for (const line of billLines) {
+      const a = averages.get(line.materialId) ?? {
+        value: 0,
+        qty: 0,
+        last: 0,
+      };
+      a.value += line.qty * line.unitCost;
+      a.qty += line.qty;
+      a.last = line.unitCost;
+      averages.set(line.materialId, a);
+    }
+    const weighted = (id: Id<"rawMaterials">, fallback: number) => {
+      const a = averages.get(id);
+      return a !== undefined && a.qty > 0 ? round(a.value / a.qty) : fallback;
+    };
+
+    /**
+     * A product is costed from its recipe, but priced at its materials'
+     * weighted averages rather than at whatever each line happened to be
+     * copied at when the recipe was typed. Otherwise a product built from
+     * materials that have since been repriced would keep reporting the old
+     * cost forever, and the finished-goods shelf would disagree with the
+     * raw-material shelf it was made from. A line with no material behind it
+     * — labour, a fee — is the business's own number and is left alone.
+     */
     const items = await ctx.db
       .query("costingItems")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
-    const sheetCost = costByProduct(items);
+    const materialById0 = new Map(materials.map((m) => [m._id, m]));
+    const sheetCost = new Map<Id<"finishedGoods">, number>();
+    const sheetHas = new Set<Id<"finishedGoods">>();
+    for (const item of items) {
+      if (item.fgId === undefined) continue;
+      const unit =
+        item.materialId !== undefined
+          ? weighted(
+              item.materialId,
+              materialById0.get(item.materialId)?.pricePerUnit ?? 0,
+            )
+          : item.unitPrice;
+      sheetCost.set(item.fgId, (sheetCost.get(item.fgId) ?? 0) + item.qty * unit);
+      sheetHas.add(item.fgId);
+    }
 
     // the last price a product went out for, for one that was sold but never
     // costed. Newest invoice wins.
@@ -1043,7 +1110,9 @@ export const stockAnalysis = query({
     const materialRows: ValuationRow[] = materials
       .map((m) => {
         const qty = round(m.stock ?? 0);
-        const cost = round(m.pricePerUnit);
+        const a = averages.get(m._id);
+        const fromBills = a !== undefined && a.qty > 0;
+        const cost = weighted(m._id, round(m.pricePerUnit));
         return {
           key: m._id,
           code: m.code ?? "",
@@ -1052,10 +1121,19 @@ export const stockAnalysis = query({
           unit: m.unit,
           qty,
           cost,
-          // a raw material is bought, not sold: its purchase price is both
+          // a raw material is bought, not sold, so it has no price of its own
           price: cost,
+          // the value is the cost. What it would fetch is somebody else's
+          // number, not this business's stock.
           value: round(qty * cost),
-          basis: cost > 0 ? ("purchase" as const) : ("none" as const),
+          basis:
+            cost === 0
+              ? ("none" as const)
+              : fromBills
+                ? ("average" as const)
+                : ("price" as const),
+          bought: round(a?.qty ?? 0),
+          lastCost: round(a?.last ?? 0),
         };
       })
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
@@ -1063,14 +1141,12 @@ export const stockAnalysis = query({
     const productRows: ValuationRow[] = products
       .map((p) => {
         const qty = round(p.stock ?? 0);
+        // the sheet prices one piece, so its line total is already per unit
         const built = round(sheetCost.get(p._id) ?? 0);
         const invoiced = round(lastPrice.get(p._id) ?? 0);
-        // the sheet prices one piece, so its line total is already per unit
-        const cost = built;
+        const cost = built > 0 ? built : invoiced;
         const price =
-          built > 0
-            ? round(cost * (1 + (p.markupPct ?? 0) / 100))
-            : invoiced;
+          built > 0 ? round(cost * (1 + (p.markupPct ?? 0) / 100)) : invoiced;
         return {
           key: p._id,
           code: p.code ?? "",
@@ -1080,13 +1156,15 @@ export const stockAnalysis = query({
           qty,
           cost,
           price,
-          value: round(qty * price),
-          basis:
-            built > 0
-              ? ("costing" as const)
-              : invoiced > 0
-                ? ("invoice" as const)
-                : ("none" as const),
+          // valued on the weighted average cost, not on the sale price
+          value: round(qty * cost),
+          basis: built > 0
+            ? ("costing" as const)
+            : invoiced > 0
+              ? ("invoice" as const)
+              : ("none" as const),
+          bought: 0,
+          lastCost: 0,
         };
       })
       .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
@@ -1104,11 +1182,13 @@ export const stockAnalysis = query({
     const productById = new Map(products.map((p) => [p._id, p]));
     // movements are valued on the same rates as the shelves, so a unit that
     // came in and a unit still on hand are worth the same figure here
+    // movements carry the same cost the shelves do, so a unit that came in
+    // and a unit still on hand are valued alike
     const materialRate = new Map(
-      materialRows.map((r) => [r.key, r.price] as const),
+      materialRows.map((r) => [r.key, r.cost] as const),
     );
     const productRate = new Map(
-      productRows.map((r) => [r.key, r.price] as const),
+      productRows.map((r) => [r.key, r.cost] as const),
     );
 
     const movement: MovementRow[] = [
