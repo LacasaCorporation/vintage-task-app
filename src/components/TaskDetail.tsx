@@ -1,4 +1,5 @@
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -112,6 +113,7 @@ export default function TaskDetail({
   const addStep = useMutation(api.tasks.addStep);
   const toggleStepM = useMutation(api.tasks.toggleStep);
   const removeStepM = useMutation(api.tasks.removeStep);
+  const updateStepM = useMutation(api.tasks.updateStep);
   const addAttachment = useMutation(api.tasks.addAttachment);
   const removeAttachment = useMutation(api.tasks.removeAttachment);
 
@@ -164,6 +166,11 @@ export default function TaskDetail({
   const [titleError, setTitleError] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState("");
   const [stepDraft, setStepDraft] = useState("");
+  // A step name is a draft too, so a double-click renames it in place without
+  // the row collapsing while it is being typed into.
+  const [renamingStepId, setRenamingStepId] = useState<Id<"taskSteps"> | null>(null);
+  const [stepRenameDraft, setStepRenameDraft] = useState("");
+  const [stepRenameError, setStepRenameError] = useState<string | null>(null);
   const [dueDraft, setDueDraft] = useState(
     task.dueAt !== undefined ? toLocalInput(new Date(task.dueAt)) : defaultDueLocal(),
   );
@@ -176,6 +183,36 @@ export default function TaskDetail({
     [task.attachments],
   );
   const doneSteps = (steps ?? []).filter((s) => s.isCompleted).length;
+
+  /** Save a step name typed into its row — empty names are refused, not lost. */
+  const commitStepRename = async (stepId: Id<"taskSteps">) => {
+    const step = (steps ?? []).find((s) => s._id === stepId);
+    if (step === undefined) {
+      setRenamingStepId(null);
+      return;
+    }
+    const next = stepRenameDraft.trim();
+    if (next.length === 0) {
+      setStepRenameError("A subtask needs a name.");
+      toast.error("A subtask needs a name.");
+      return;
+    }
+    if (next === step.text) {
+      setRenamingStepId(null);
+      setStepRenameError(null);
+      return;
+    }
+    try {
+      await updateStepM({ id: stepId, text: next });
+      setRenamingStepId(null);
+      setStepRenameError(null);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Couldn't rename that subtask.";
+      setStepRenameError(message);
+      toast.error(message);
+    }
+  };
 
   const saveTitle = async () => {
     const next = titleDraft.trim();
@@ -688,14 +725,52 @@ export default function TaskDetail({
                         }
                         className="size-4 rounded border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
                       />
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-sm",
-                          s.isCompleted && "text-muted-foreground line-through",
-                        )}
-                      >
-                        {s.text}
-                      </span>
+                      {renamingStepId === s._id ? (
+                        <input
+                          autoFocus
+                          value={stepRenameDraft}
+                          onChange={(e) => {
+                            setStepRenameDraft(e.target.value);
+                            setStepRenameError(null);
+                          }}
+                          onBlur={() => void commitStepRename(s._id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              setRenamingStepId(null);
+                              setStepRenameError(null);
+                            }
+                          }}
+                          aria-label={`Rename subtask “${s.text}”`}
+                          className={cn(
+                            "min-w-0 flex-1 rounded-md border bg-card px-1.5 py-0.5 text-sm outline-none focus:ring-2 focus:ring-primary/30",
+                            stepRenameError !== null
+                              ? "border-destructive"
+                              : "border-primary/50",
+                          )}
+                        />
+                      ) : (
+                        <span
+                          onDoubleClick={(e) => {
+                            // double-click a step name to rename it in place
+                            if (!mayEditSteps) return;
+                            e.preventDefault();
+                            setRenamingStepId(s._id);
+                            setStepRenameDraft(s.text);
+                            setStepRenameError(null);
+                          }}
+                          title={mayEditSteps ? "Double-click to rename" : undefined}
+                          className={cn(
+                            "min-w-0 flex-1 truncate text-sm",
+                            s.isCompleted && "text-muted-foreground line-through",
+                          )}
+                        >
+                          {s.text}
+                        </span>
+                      )}
                       {mayDeleteSteps && (
                         <button
                           type="button"

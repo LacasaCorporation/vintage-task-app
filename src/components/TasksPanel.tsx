@@ -163,6 +163,10 @@ export default function TasksPanel({
   const [renamingId, setRenamingId] = useState<Id<"tasks"> | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
+  /** The subtask being renamed in place inside a task's dropdown. */
+  const [renamingStepId, setRenamingStepId] = useState<Id<"taskSteps"> | null>(null);
+  const [stepRenameDraft, setStepRenameDraft] = useState("");
+  const [stepRenameError, setStepRenameError] = useState<string | null>(null);
 
 
   // ── reminder notifications (in-app while the app is open) ──────────
@@ -442,6 +446,39 @@ export default function TasksPanel({
       const message =
         error instanceof Error ? error.message : "Couldn't rename that task.";
       setRenameError(message);
+      toast.error(message);
+    }
+  };
+
+  /**
+   * Save a subtask name typed into its row — the same bargain as a task name:
+   * empty is refused in the field itself rather than silently dropped.
+   */
+  const commitStepRename = async (stepId: Id<"taskSteps">) => {
+    const step = (allSteps ?? []).find((s) => s._id === stepId);
+    if (step === undefined) {
+      setRenamingStepId(null);
+      return;
+    }
+    const next = stepRenameDraft.trim();
+    if (next.length === 0) {
+      setStepRenameError("A subtask needs a name.");
+      toast.error("A subtask needs a name.");
+      return;
+    }
+    if (next === step.text) {
+      setRenamingStepId(null);
+      setStepRenameError(null);
+      return;
+    }
+    try {
+      await updateStepM({ id: stepId, text: next });
+      setRenamingStepId(null);
+      setStepRenameError(null);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Couldn't rename that subtask.";
+      setStepRenameError(message);
       toast.error(message);
     }
   };
@@ -1108,24 +1145,66 @@ export default function TasksPanel({
                                           )}
                                         </span>
                                       )}
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setOpenStepId((current) =>
-                                            current === step._id ? null : step._id,
-                                          )
-                                        }
-                                        title="Open subtask details"
-                                        className={cn(
-                                          "order-1 min-w-0 max-w-[55%] cursor-pointer truncate text-left text-xs hover:underline",
-                                          step.isCompleted
-                                            ? "text-muted-foreground line-through"
-                                            : "text-foreground",
-                                          openStepId === step._id && "text-amber-700 dark:text-amber-400",
-                                        )}
-                                      >
-                                        {step.text}
-                                      </button>
+                                      {renamingStepId === step._id ? (
+                                        <input
+                                          autoFocus
+                                          value={stepRenameDraft}
+                                          onChange={(e) => {
+                                            setStepRenameDraft(e.target.value);
+                                            setStepRenameError(null);
+                                          }}
+                                          onBlur={() => void commitStepRename(step._id)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                              e.preventDefault();
+                                              e.currentTarget.blur();
+                                            } else if (e.key === "Escape") {
+                                              e.preventDefault();
+                                              setRenamingStepId(null);
+                                              setStepRenameError(null);
+                                            }
+                                          }}
+                                          aria-label={`Rename subtask “${step.text}”`}
+                                          className={cn(
+                                            "order-1 min-w-0 flex-1 rounded-md border bg-card px-1.5 py-0.5 text-xs leading-5 outline-none focus:ring-2 focus:ring-primary/30",
+                                            stepRenameError !== null
+                                              ? "border-destructive"
+                                              : "border-primary/50",
+                                          )}
+                                        />
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setOpenStepId((current) =>
+                                              current === step._id ? null : step._id,
+                                            )
+                                          }
+                                          onDoubleClick={(e) => {
+                                            // double-click a subtask name to rename it
+                                            if (!canEdit) return;
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setRenamingStepId(step._id);
+                                            setStepRenameDraft(step.text);
+                                            setStepRenameError(null);
+                                          }}
+                                          title={
+                                            canEdit
+                                              ? "Double-click to rename"
+                                              : "Open subtask details"
+                                          }
+                                          className={cn(
+                                            "order-1 min-w-0 max-w-[55%] cursor-pointer truncate text-left text-xs hover:underline",
+                                            step.isCompleted
+                                              ? "text-muted-foreground line-through"
+                                              : "text-foreground",
+                                            openStepId === step._id && "text-amber-700 dark:text-amber-400",
+                                          )}
+                                        >
+                                          {step.text}
+                                        </button>
+                                      )}
                                       {step.dueAt !== undefined && (
                                         <span
                                           className={cn(
