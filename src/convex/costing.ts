@@ -687,6 +687,28 @@ export const setProjectProjectStatus = mutation({
       throw new Error("That project no longer exists.");
     const clean = status.trim().replace(/\s+/g, " ");
     if (!clean) throw new Error("Choose a status.");
+    if (clean === PROJECT_STATUS_FINISH) {
+      const jobs = await ctx.db
+        .query("projectJobs")
+        .withIndex("by_project", (q) => q.eq("projectId", id))
+        .collect();
+      const open = jobs.filter(
+        (j) =>
+          j.status !== "completed" &&
+          j.status !== "cancelled" &&
+          j.projectStatus !== PROJECT_STATUS_FINISH,
+      );
+      if (open.length > 0) {
+        const names = open.map((j) => j.name);
+        const listed =
+          names.length <= 2
+            ? names.join(" and ")
+            : `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
+        throw new Error(
+          `${open.length} job${open.length === 1 ? " is" : "s are"} still open on this project (${listed}). Finish the jobs, and their products, before finishing the project.`,
+        );
+      }
+    }
     await ctx.db.patch(id, {
       projectStatus: clean,
       status: clean === PROJECT_STATUS_FINISH ? "completed" : clean === PROJECT_STATUS_START ? "planning" : "in_progress",

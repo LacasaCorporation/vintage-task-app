@@ -31,11 +31,20 @@ import {
   Paperclip,
   Plus,
   Repeat,
+  Search,
+  X,
   Star,
   Trash2,
   User,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import AssigneeChip from "@/components/AssigneeChip";
@@ -149,6 +158,7 @@ export default function TasksPanel({
   const [sortMode, setSortMode] = useState<SortMode>("manual");
   /** Today is a narrowing control that rides with the sort, not a view. */
   const [todayOnly, setTodayOnly] = useState(false);
+  const [query, setQuery] = useState("");
 
 
   // ── reminder notifications (in-app while the app is open) ──────────
@@ -189,6 +199,18 @@ export default function TasksPanel({
           ? (lists.find((l) => l._id === activeView)?.name ?? "List")
           : "All tasks";
 
+  /** Does a task match what is typed in the search box? */
+  const matchesQuery = useCallback(
+    (t: TaskDoc): boolean => {
+      const needle = query.trim().toLowerCase();
+      if (needle.length === 0) return true;
+      return [t.text, t.description ?? "", ...(t.tags ?? [])].some((field) =>
+        field.toLowerCase().includes(needle),
+      );
+    },
+    [query],
+  );
+
   const tasks = useMemo(() => {
     let out: TaskDoc[] = allTasks ?? [];
     if (activeView === "starred") {
@@ -200,6 +222,7 @@ export default function TasksPanel({
     // rather than taking its place
     if (todayOnly) out = out.filter((t) => isDueToday(t) || isOverdue(t));
     if (!showDone) out = out.filter((t) => !t.isCompleted);
+    out = out.filter(matchesQuery);
     const sorted = [...out];
     if (sortMode === "due") {
       sorted.sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
@@ -213,7 +236,7 @@ export default function TasksPanel({
       sorted.sort((a, b) => b._creationTime - a._creationTime);
     }
     return sorted;
-  }, [allTasks, activeView, todayOnly, showDone, sortMode]);
+  }, [allTasks, activeView, todayOnly, showDone, sortMode, matchesQuery]);
 
   const doneCount = useMemo(
     () =>
@@ -221,9 +244,10 @@ export default function TasksPanel({
         if (!t.isCompleted) return false;
         if (activeView === "starred") return t.starred;
         if (activeView && activeView !== "mine") return t.listId === activeView;
-        return todayOnly ? isDueToday(t) || isOverdue(t) : true;
+        if (todayOnly && !isDueToday(t) && !isOverdue(t)) return false;
+        return matchesQuery(t);
       }).length,
-    [allTasks, activeView, todayOnly],
+    [allTasks, activeView, todayOnly, matchesQuery],
   );
 
   const activeList = lists.find((l) => l._id === activeView) ?? null;
@@ -412,7 +436,7 @@ export default function TasksPanel({
 
   return (
     <div>
-      {/* ── Toolbar: add a task, the counts, and the completed toggle ── */}
+      {/* ── Toolbar: add a task and the counts ── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <TaskQuickAdd
@@ -432,18 +456,6 @@ export default function TasksPanel({
             ]}
           />
         </div>
-        <button
-          type="button"
-          onClick={() => setShowDone((v) => !v)}
-          className={cn(
-            "h-7 shrink-0 rounded-lg border px-2 text-[11px] font-medium transition-colors",
-            showDone
-              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-              : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
-        >
-          {showDone ? "Hiding nothing" : "Show completed"}
-        </button>
       </div>
 
       {/* ── View / sort controls ──────────────────────────────────── */}
@@ -525,6 +537,42 @@ export default function TasksPanel({
               {label}
             </button>
           ))}
+        </div>
+        {/* search and the completed toggle live with the filters */}
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search tasks…"
+              aria-label="Search tasks"
+              className="h-7 w-40 rounded-lg border border-border bg-card pr-6 pl-7 text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20 sm:w-56"
+            />
+            {query.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                className="absolute top-1/2 right-1.5 grid size-4 -translate-y-1/2 place-items-center rounded text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowDone((v) => !v)}
+            className={cn(
+              "h-7 shrink-0 rounded-lg border px-2 text-[11px] font-medium transition-colors",
+              showDone
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            {showDone ? "Hiding nothing" : "Show completed"}
+          </button>
         </div>
       </div>
 

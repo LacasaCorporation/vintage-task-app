@@ -6,8 +6,8 @@ import {
   jobHasFlaggedProduct,
   jobIdsOf,
 } from "./flagCascade";
-import type { MutationCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
   PROJECT_STATUS_FINISH,
@@ -15,6 +15,64 @@ import {
 } from "../lib/project-statuses";
 
 const MAX_NAME_LENGTH = 120;
+
+/** A product counts as finished once it is ticked off or moved to Finish. */
+export function isProductDone(f: Doc<"finishedGoods">): boolean {
+  return f.isCompleted === true || f.projectStatus === PROJECT_STATUS_FINISH;
+}
+
+/** Every product attached to a job, by either the link table or the old field. */
+export async function productsOfJob(
+  ctx: MutationCtx | QueryCtx,
+  orgId: Id<"users">,
+  jobId: Id<"projectJobs">,
+): Promise<Doc<"finishedGoods">[]> {
+  const links = await ctx.db
+    .query("jobProducts")
+    .withIndex("by_job", (q) => q.eq("jobId", jobId))
+    .collect();
+  const linked = new Set(links.map((l) => l.fgId));
+  const all = await ctx.db
+    .query("finishedGoods")
+    .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
+    .collect();
+  return all.filter(
+    (f) =>
+      linked.has(f._id) ||
+      f.jobId === jobId ||
+      (f.jobIds ?? []).includes(jobId),
+  );
+}
+
+/** The products of a job that are not finished yet — a job cannot be. */
+export async function openProductsOfJob(
+  ctx: MutationCtx | QueryCtx,
+  orgId: Id<"users">,
+  jobId: Id<"projectJobs">,
+): Promise<Doc<"finishedGoods">[]> {
+  return (await productsOfJob(ctx, orgId, jobId)).filter((f) => !isProductDone(f));
+}
+
+/** "WARDBROBE, BED and 2 more" — short enough to read inside an error toast. */
+function nameSome(names: string[]): string {
+  if (names.length <= 2) return names.join(" and ");
+  return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
+}
+
+/** The one message both routes to finishing a job with work still open. */
+async function assertJobProductsDone(
+  ctx: MutationCtx,
+  orgId: Id<"users">,
+  jobId: Id<"projectJobs">,
+): Promise<void> {
+  const open = await openProductsOfJob(ctx, orgId, jobId);
+  if (open.length === 0) return;
+  throw new Error(
+    `${open.length} product${open.length === 1 ? " is" : "s are"} still not finished (${nameSome(
+      open.map((f) => f.name),
+    )}). Finish the products first, then the job.`,
+  );
+}
 
 const JOB_STATUSES = [
   "planning",
@@ -181,6 +239,7 @@ export const setJobProjectStatus = mutation({
     if (!clean) throw new Error("Choose a status.");
     const isFinish = clean === PROJECT_STATUS_FINISH;
     const isStart = clean === PROJECT_STATUS_START;
+    if (isFinish) await assertJobProductsDone(ctx, userId, id);
     await ctx.db.patch(id, {
       projectStatus: clean,
       status: isFinish ? "completed" : isStart ? "planning" : "in_progress",
@@ -224,7 +283,7 @@ export const resumeJob = mutation({
   },
 });
 
-/** Mark a job completed. */
+/** Mark a job completed — refused while any of its products is still open. */
 export const completeJob = mutation({
   args: { id: v.id("projectJobs") },
   handler: async (ctx, { id }) => {
@@ -233,6 +292,7 @@ export const completeJob = mutation({
     const job = await ctx.db.get(id);
     if (job === null || job.ownerId !== userId)
       throw new Error("That job no longer exists.");
+    await assertJobProductsDone(ctx, userId, id);
     await ctx.db.patch(id, {
       status: "completed",
       completedAt: Date.now(),

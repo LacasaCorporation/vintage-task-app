@@ -45,7 +45,10 @@ import {
   type JobFilter,
   type ProductFilter,
 } from "@/components/ProjectsTabs";
-import { projectStatusesOrDefaults } from "@/lib/project-statuses";
+import {
+  PROJECT_STATUS_FINISH,
+  projectStatusesOrDefaults,
+} from "@/lib/project-statuses";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import {
   JobDialog,
@@ -1068,6 +1071,13 @@ export default function ProjectsSheet({
                                 : allJobProducts.filter((f) => f.isFlagged)
                               : allJobProducts;
                           const products = allJobProducts.length;
+                          // a job can only be finished once every product is,
+                          // so the count of finished ones is shown up front
+                          const doneProducts = allJobProducts.filter(
+                            (f) =>
+                              f.isCompleted === true ||
+                              f.projectStatus === PROJECT_STATUS_FINISH,
+                          ).length;
                           // a flagged product holds its job's flag: the job
                           // cannot be unflagged until the product is
                           const hasFlaggedProduct = allJobProducts.some(
@@ -1126,8 +1136,28 @@ export default function ProjectsSheet({
                                   {job.assignee}
                                 </span>
                               )}
-                              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                {products} product{products === 1 ? "" : "s"}
+                              <span
+                                className={cn(
+                                  "rounded-full px-1.5 py-0.5 text-[10px]",
+                                  products === 0
+                                    ? "bg-muted text-muted-foreground"
+                                    : doneProducts === products
+                                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                      : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+                                )}
+                                title={
+                                  products === 0
+                                    ? "No products on this job yet"
+                                    : `${doneProducts} of ${products} finished${
+                                        doneProducts < products
+                                          ? " — the job cannot be finished yet"
+                                          : ""
+                                      }`
+                                }
+                              >
+                                {products === 0
+                                  ? "0 products"
+                                  : `${doneProducts}/${products} products done`}
                               </span>
                               {allJobProducts.length > 0 && (
                                 <MoneyBracket
