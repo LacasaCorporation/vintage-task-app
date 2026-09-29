@@ -124,6 +124,27 @@ export async function firmTeam(
 }
 
 /**
+ * Who the caller may hand work to: their own down line, and — for the firm
+ * owner and admins — anybody else in the firm. A lead can therefore give a job
+ * to a peer instead of being stuck inside their own tree, while an ordinary
+ * member still can't pass work sideways.
+ */
+export async function assignableIds(
+  ctx: Ctx,
+  userId: Id<"users">,
+): Promise<Set<Id<"users">>> {
+  const out = new Set<Id<"users">>(await firmTeam(ctx, userId));
+  const firm = await activeFirmSettings(ctx, userId);
+  if (firm === null) return out;
+  const me = firm.members.find((m) => m.userId === userId);
+  const role = me?.role;
+  if (firm.ownerId === userId || role === "super" || role === "admin") {
+    for (const m of firm.members) out.add(m.userId);
+  }
+  return out;
+}
+
+/**
  * Everyone above this person in the firm's management chain, nearest first.
  * The counterpart to firmTeam (which walks down): together they decide who can
  * see a task and who may be given one.

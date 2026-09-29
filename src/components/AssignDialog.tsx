@@ -19,7 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { assigneesOfTask, downLineOf } from "@/lib/task-people";
+import { assigneesOfTask, downLineOf, type Person } from "@/lib/task-people";
 import { messageFrom } from "@/lib/errors";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -198,6 +198,13 @@ function AssignBody({
     () => myTeam.map((id) => peopleById.get(id)).filter((p) => p !== undefined),
     [myTeam, peopleById],
   );
+  // Anyone else in the firm who is not under the caller — a peer on another
+  // branch of the tree. They are listed too: a lead can hand work sideways, and
+  // hiding them made it look as though the firm had nobody else in it.
+  const others = useMemo(
+    () => people.filter((p) => !teamSet.has(p.userId)),
+    [people, teamSet],
+  );
 
   const [picked, setPicked] = useState<Id<"users">[] | null>(null);
   const [pickedGroups, setPickedGroups] = useState<Id<"userGroups">[] | null>(
@@ -306,6 +313,41 @@ function AssignBody({
     }
   };
 
+  const personRow = (person: Person) => (
+    <li
+      key={person.userId}
+      className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-accent"
+    >
+      <Checkbox
+        checked={selectionSet.has(person.userId)}
+        disabled={!canEdit}
+        onCheckedChange={() => toggle(person.userId)}
+        aria-label={`Assign to ${person.label}`}
+        className="size-3.5 rounded-[3px]"
+      />
+      <button
+        type="button"
+        disabled={!canEdit}
+        onClick={() => toggle(person.userId)}
+        className="min-w-0 flex-1 truncate text-left text-sm"
+      >
+        {person.label}
+      </button>
+      {person.isFirmOwner && <Crown className="size-3 shrink-0 text-primary" />}
+      {downLineOf(people, person.userId).length > 1 && (
+        <button
+          type="button"
+          disabled={!canEdit}
+          onClick={() => toggleWhole(downLineOf(people, person.userId))}
+          title={`${person.label} and everyone below`}
+          className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+        >
+          +{downLineOf(people, person.userId).length - 1}
+        </button>
+      )}
+    </li>
+  );
+
   const dirty =
     (picked !== null &&
       (picked.length !== assignees.length ||
@@ -372,6 +414,15 @@ function AssignBody({
                 onClick={() => toggleWhole(myTeam)}
                 label={`My whole team (${myTeam.length})`}
               />
+              {others.length > 0 && (
+                <Chip
+                  active={people.every((p) => selectionSet.has(p.userId))}
+                  onClick={() =>
+                    toggleWhole(people.map((p) => p.userId))
+                  }
+                  label={`Everyone here (${people.length})`}
+                />
+              )}
               {rows
                 .filter((p) => teamSet.has(p.userId) && p.managerId === peopleData.me)
                 .map((p) => {
@@ -387,44 +438,33 @@ function AssignBody({
                 })}
             </div>
 
-            <ul className="max-h-64 space-y-0.5 overflow-y-auto">
-              {rows.map((person) => (
-                <li
-                  key={person.userId}
-                  className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-accent"
-                >
-                  <Checkbox
-                    checked={selectionSet.has(person.userId)}
-                    disabled={!canEdit}
-                    onCheckedChange={() => toggle(person.userId)}
-                    aria-label={`Assign to ${person.label}`}
-                    className="size-3.5 rounded-[3px]"
-                  />
-                  <button
-                    type="button"
-                    disabled={!canEdit}
-                    onClick={() => toggle(person.userId)}
-                    className="min-w-0 flex-1 truncate text-left text-sm"
-                  >
-                    {person.label}
-                  </button>
-                  {person.isFirmOwner && (
-                    <Crown className="size-3 shrink-0 text-primary" />
-                  )}
-                  {downLineOf(people, person.userId).length > 1 && (
-                    <button
-                      type="button"
-                      disabled={!canEdit}
-                      onClick={() => toggleWhole(downLineOf(people, person.userId))}
-                      title={`${person.label} and everyone below`}
-                      className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                    >
-                      +{downLineOf(people, person.userId).length - 1}
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  My team
+                </p>
+                <ul className="max-h-48 space-y-0.5 overflow-y-auto">
+                  {rows.map(personRow)}
+                </ul>
+              </div>
+              {others.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Others in the firm
+                  </p>
+                  <ul className="max-h-48 space-y-0.5 overflow-y-auto">
+                    {others.map(personRow)}
+                  </ul>
+                </div>
+              )}
+              {people.length <= 1 && (
+                <p className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                  You are the only person in this firm so far. Add the others in
+                  Settings → Members (by email) — they join this list, and you
+                  can hand work straight to them.
+                </p>
+              )}
+            </div>
           </div>
         ) : tab === "groups" ? (
           <div className="space-y-2">

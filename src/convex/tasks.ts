@@ -1,7 +1,13 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { activeFirmSettings, firmAncestors, firmTeam, scopeUserId } from "./org";
+import {
+  activeFirmSettings,
+  assignableIds,
+  firmAncestors,
+  firmTeam,
+  scopeUserId,
+} from "./org";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
@@ -387,9 +393,9 @@ export const assign = mutation({
         "Only the task owner, their manager, or the firm owner can assign this task.",
       );
     }
-    const down = new Set(await firmTeam(ctx, userId));
+    const allowed = await assignableIds(ctx, userId);
     const targets = [...new Set(userIds)];
-    if (targets.some((id) => !down.has(id))) {
+    if (targets.some((id) => !allowed.has(id))) {
       throw new Error(
         "You can only assign a task to yourself or to someone who reports to you.",
       );

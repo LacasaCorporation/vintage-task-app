@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { firmAncestors, firmTeam, scopeUserId } from "./org";
+import { assignableIds, firmAncestors, scopeUserId } from "./org";
 
 /**
  * The task features a flagged product was missing: being assigned to people or
@@ -275,9 +275,9 @@ export const assign = mutation({
         "Only the person who added this product, their manager, or the firm owner can assign it.",
       );
     }
-    const down = new Set(await firmTeam(ctx, userId));
+    const allowed = await assignableIds(ctx, userId);
     const targets = [...new Set(userIds)];
-    if (targets.some((who) => !down.has(who))) {
+    if (targets.some((who) => !allowed.has(who))) {
       throw new Error(
         "You can only assign a product to yourself or to someone who reports to you.",
       );
