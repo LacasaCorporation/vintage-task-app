@@ -1182,6 +1182,260 @@ export const remove = mutation({
       .withIndex("by_task", (q) => q.eq("taskId", id))
       .collect();
     for (const s of steps) await ctx.db.delete(s._id);
+    // the conversation and the reported problems go with the task
+    const comments = await ctx.db
+      .query("taskComments")
+      .withIndex("by_task", (q) => q.eq("taskId", id))
+      .collect();
+    for (const c of comments) await ctx.db.delete(c._id);
+    const issues = await ctx.db
+      .query("taskIssues")
+      .withIndex("by_task", (q) => q.eq("taskId", id))
+      .collect();
+    for (const i of issues) await ctx.db.delete(i._id);
+    await ctx.db.delete(id);
+  },
+});
+
+// ── Conversation ────────────────────────────────────────────────────────
+
+/**
+ * How one person is named in a comment or issue: their name, else the
+ * username they sign in with, else their email. Same order as the sidebar.
+ */
+async function personLabel(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<"users">,
+): Promise<string> {
+  const user = await ctx.db.get(userId);
+  if (user?.name !== undefined && user.name !== "") return user.name;
+  const login = await ctx.db
+    .query("credentials")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .first();
+  return login?.username ?? user?.email ?? "Someone";
+}
+
+/** Reject work on a task that isn't the caller's firm (or has gone). */
+async function requireTask(
+  ctx: QueryCtx | MutationCtx,
+  taskId: Id<"tasks">,
+): Promise<{ orgId: Id<"users">; task: Doc<"tasks">; userId: Id<"users"> }> {
+  const orgId = await scopeUserId(ctx);
+  if (orgId === null) throw new Error("Sign in first.");
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) throw new Error("Sign in first.");
+  const task = await ctx.db.get(taskId);
+  if (task === null || task.ownerId !== orgId) {
+    throw new Error("That task is no longer in your firm.");
+  }
+  return { orgId, task, userId };
+}
+
+/**
+ * A task's chat history, oldest first. Everyone in the firm who can open the
+ * task can read and write on it, so a site conversation lives with the job
+ * rather than in a separate inbox.
+ */
+export const listComments = query({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, { taskId }) => {
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) return [];
+    const task = await ctx.db.get(taskId);
+    if (task === null || task.ownerId !== orgId) return [];
+    const rows = await ctx.db
+      .query("taskComments")
+      .withIndex("by_task", (q) => q.eq("taskId", taskId))
+      .collect();
+    return await Promise.all(
+      rows
+        .sort((a, b) => a._creationTime - b._creationTime)
+        .map(async (c) => ({
+          _id: c._id,
+          text: c.text,
+          authorId: c.authorId,
+          author: await personLabel(ctx, c.authorId),
+          at: c._creationTime,
+        })),
+    );
+  },
+});
+
+/** Post a message on a task. */
+export const addComment = mutation({
+  args: { taskId: v.id("tasks"), text: v.string() },
+  handler: async (ctx, { taskId, text }) => {
+    const { orgId, userId } = await requireTask(ctx, taskId);
+    const trimmed = text.trim();
+    if (trimmed.length === 0) throw new Error("Write something first.");
+    if (trimmed.length > MAX_DESCRIPTION_LENGTH) {
+      throw new Error("That message is too long.");
+    }
+    return await ctx.db.insert("taskComments", {
+      ownerId: orgId,
+      taskId,
+      authorId: userId,
+      text: trimmed,
+    });
+  },
+});
+
+/** Take back your own message (or any of them, if you own the task). */
+export const removeComment = mutation({
+  args: { id: v.id("taskComments") },
+  handler: async (ctx, { id }) => {
+    const { task, userId } = await requireTask(ctx, await commentTaskOf(ctx, id));
+    const comment = await ctx.db.get(id);
+    if (comment === null) return;
+    const rights = await rightsFor(
+      ctx,
+      task,
+      task.ownerId,
+      userId,
+    );
+    if (comment.authorId !== userId && !rights.isOwner) {
+      throw new Error("You can only remove your own messages.");
+    }
+    await ctx.db.delete(id);
+  },
+});
+
+/** Which task a comment belongs to, guarding against a stray id. */
+async function commentTaskOf(
+  ctx: QueryCtx | MutationCtx,
+  id: Id<"taskComments">,
+): Promise<Id<"tasks">> {
+  const comment = await ctx.db.get(id);
+  if (comment === null) throw new Error("That message is already gone.");
+  return comment.taskId;
+}
+
+// ── Issues ──────────────────────────────────────────────────────────────
+
+/** The problems reported against a task, open ones first. */
+export const listIssues = query({
+  args: { taskId: v.id("tasks") },
+  handler: async (ctx, { taskId }) => {
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) return [];
+    const task = await ctx.db.get(taskId);
+    if (task === null || task.ownerId !== orgId) return [];
+    const rows = await ctx.db
+      .query("taskIssues")
+      .withIndex("by_task", (q) => q.eq("taskId", taskId))
+      .collect();
+    return await Promise.all(
+      rows
+        .sort(
+          (a, b) =>
+            Number(a.isSolved ?? false) - Number(b.isSolved ?? false) ||
+            b._creationTime - a._creationTime,
+        )
+        .map(async (i) => ({
+          _id: i._id,
+          title: i.title,
+          detail: i.detail,
+          severity: i.severity,
+          solution: i.solution,
+          isSolved: i.isSolved ?? false,
+          raisedBy: i.raisedBy,
+          raisedByLabel: await personLabel(ctx, i.raisedBy),
+          at: i._creationTime,
+          solvedAt: i.solvedAt,
+          solvedBy: i.solvedBy,
+          solvedByLabel:
+            i.solvedBy !== undefined
+              ? await personLabel(ctx, i.solvedBy)
+              : undefined,
+        })),
+    );
+  },
+});
+
+/** Report a problem against a task. */
+export const addIssue = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    title: v.string(),
+    detail: v.optional(v.string()),
+    severity: v.optional(
+      v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+    ),
+  },
+  handler: async (ctx, { taskId, title, detail, severity }) => {
+    const { orgId, userId } = await requireTask(ctx, taskId);
+    const trimmed = title.trim();
+    if (trimmed.length === 0) throw new Error("Say what is wrong.");
+    if (trimmed.length > MAX_TASK_LENGTH) {
+      throw new Error("That summary is too long.");
+    }
+    return await ctx.db.insert("taskIssues", {
+      ownerId: orgId,
+      taskId,
+      raisedBy: userId,
+      title: trimmed,
+      detail: detail?.trim() || undefined,
+      severity,
+      isSolved: false,
+    });
+  },
+});
+
+/**
+ * Mark an issue solved — or reopen it. Solving records who did it and when,
+ * plus what was done, so the task keeps the story of what went wrong.
+ */
+export const setIssueSolved = mutation({
+  args: {
+    id: v.id("taskIssues"),
+    solved: v.boolean(),
+    solution: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, solved, solution }) => {
+    const issue = await ctx.db.get(id);
+    if (issue === null) throw new Error("That issue is already gone.");
+    const { task, userId } = await requireTask(ctx, issue.taskId);
+    // putting a problem right is the owner's call, or anyone they let edit
+    const rights = await rightsFor(ctx, task, task.ownerId, userId);
+    if (!rights.canEdit) {
+      throw new Error("Only someone who can edit this task can close an issue.");
+    }
+    if (!solved) {
+      await ctx.db.patch(id, {
+        isSolved: false,
+        solvedBy: undefined,
+        solvedAt: undefined,
+      });
+      return;
+    }
+    const text = solution?.trim() ?? "";
+    if (text.length === 0) {
+      throw new Error("Say how you fixed it, so the next person knows.");
+    }
+    if (text.length > MAX_DESCRIPTION_LENGTH) {
+      throw new Error("That note is too long.");
+    }
+    await ctx.db.patch(id, {
+      isSolved: true,
+      solution: text,
+      solvedBy: userId,
+      solvedAt: Date.now(),
+    });
+  },
+});
+
+/** Drop an issue entirely — the person who raised it, or the task's owner. */
+export const removeIssue = mutation({
+  args: { id: v.id("taskIssues") },
+  handler: async (ctx, { id }) => {
+    const issue = await ctx.db.get(id);
+    if (issue === null) return;
+    const { task, userId } = await requireTask(ctx, issue.taskId);
+    const rights = await rightsFor(ctx, task, task.ownerId, userId);
+    if (issue.raisedBy !== userId && !rights.isOwner) {
+      throw new Error("You can only remove issues you raised.");
+    }
     await ctx.db.delete(id);
   },
 });

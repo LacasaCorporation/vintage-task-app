@@ -37,6 +37,8 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import AssignDialog, { targetOf } from "@/components/AssignDialog";
+import TaskComments from "@/components/TaskComments";
+import TaskIssues from "@/components/TaskIssues";
 import { assigneeLabel, assigneesOfTask } from "@/lib/task-people";
 
 type Priority = "high" | "medium" | "low";
@@ -682,6 +684,11 @@ export default function TaskDetail({
               )}
             </Row>
 
+            {/* issues raised against the task */}
+            <div className="mt-4">
+              <TaskIssues taskId={task._id} canEdit={mayEdit} />
+            </div>
+
             {/* attachments */}
             <Row icon={Paperclip} label={`Files${attachments.length > 0 ? ` (${attachments.length})` : ""}`}>
               {attachments.length > 0 && (
@@ -745,6 +752,11 @@ export default function TaskDetail({
                 </Button>
               )}
             </Row>
+
+            {/* conversation on the task */}
+            <div className="mt-4 border-t border-border/60 pt-4">
+              <TaskComments taskId={task._id} />
+            </div>
           </div>
         </div>
 

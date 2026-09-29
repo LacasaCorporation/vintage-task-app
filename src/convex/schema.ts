@@ -353,6 +353,34 @@ const schema = defineSchema(
       .index("by_task", ["taskId"])
       .index("by_owner", ["ownerId"]),
 
+    // the conversation on a task: one row per message, read as a chat history
+    taskComments: defineTable({
+      ownerId: v.id("users"), // the firm scope — settings.ownerId
+      taskId: v.id("tasks"),
+      authorId: v.id("users"), // the *person* who wrote it, not the firm
+      text: v.string(),
+    })
+      .index("by_task", ["taskId"])
+      .index("by_owner", ["ownerId"]),
+
+    // a problem reported against a task, and how it was put right
+    taskIssues: defineTable({
+      ownerId: v.id("users"), // the firm scope
+      taskId: v.id("tasks"),
+      raisedBy: v.id("users"), // who reported it
+      title: v.string(),
+      detail: v.optional(v.string()),
+      /** how bad it is — the same high / medium / low the task uses */
+      severity: v.optional(taskPriorityValidator),
+      /** what was done about it, written when the issue is solved */
+      solution: v.optional(v.string()),
+      isSolved: v.optional(v.boolean()),
+      solvedBy: v.optional(v.id("users")),
+      solvedAt: v.optional(v.number()),
+    })
+      .index("by_task", ["taskId"])
+      .index("by_owner", ["ownerId"]),
+
     // folders that group task lists
     taskFolders: defineTable({
       ownerId: v.id("users"),
