@@ -159,6 +159,10 @@ export default function TasksPanel({
   /** Today is a narrowing control that rides with the sort, not a view. */
   const [todayOnly, setTodayOnly] = useState(false);
   const [query, setQuery] = useState("");
+  /** The task being renamed in place, and the text being typed into it. */
+  const [renamingId, setRenamingId] = useState<Id<"tasks"> | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
 
 
   // ── reminder notifications (in-app while the app is open) ──────────
@@ -406,6 +410,39 @@ export default function TasksPanel({
       await toggleTask({ id: taskId });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the task.");
+    }
+  };
+
+  /**
+   * Save a name typed into a row. An empty name is refused in the field itself
+   * (and said out loud), because a task with no name cannot be found again.
+   */
+  const commitRename = async (taskId: Id<"tasks">) => {
+    const task = (allTasks ?? []).find((t) => t._id === taskId);
+    if (task === undefined) {
+      setRenamingId(null);
+      return;
+    }
+    const next = renameDraft.trim();
+    if (next.length === 0) {
+      setRenameError("A task needs a name.");
+      toast.error("A task needs a name.");
+      return;
+    }
+    if (next === task.text) {
+      setRenamingId(null);
+      setRenameError(null);
+      return;
+    }
+    try {
+      await updateTask({ id: taskId, text: next });
+      setRenamingId(null);
+      setRenameError(null);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Couldn't rename that task.";
+      setRenameError(message);
+      toast.error(message);
     }
   };
 
@@ -660,15 +697,59 @@ export default function TasksPanel({
                           }
                           className="size-4 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
                         />
+                        {renamingId === task._id && (
+                          <input
+                            autoFocus
+                            value={renameDraft}
+                            onChange={(e) => {
+                              setRenameDraft(e.target.value);
+                              setRenameError(null);
+                            }}
+                            onBlur={() => void commitRename(task._id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                e.currentTarget.blur();
+                              } else if (e.key === "Escape") {
+                                e.preventDefault();
+                                setRenamingId(null);
+                                setRenameError(null);
+                              }
+                            }}
+                            aria-label={`Rename “${task.text}”`}
+                            className={cn(
+                              "min-w-0 max-w-full flex-1 rounded-md border bg-card px-1.5 py-0.5 text-sm leading-5 outline-none focus:ring-2 focus:ring-primary/30",
+                              renameError !== null
+                                ? "border-destructive"
+                                : "border-primary/50",
+                            )}
+                          />
+                        )}
                         <button
                           type="button"
                           onClick={() => setOpenTaskId(isOpen ? null : task._id)}
-                          className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-left"
+                          onDoubleClick={(e) => {
+                            // double-click the name to rename it in place
+                            if (!canEdit) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setRenamingId(task._id);
+                            setRenameDraft(task.text);
+                            setRenameError(null);
+                          }}
+                          className={cn(
+                            "flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-left",
+                            renamingId === task._id && "hidden",
+                          )}
                         >
                           <span
+                            title={
+                              canEdit ? "Double-click to rename" : undefined
+                            }
                             className={cn(
                               "text-sm leading-5 transition-colors",
-                              task.isCompleted && "text-muted-foreground line-through",
+                              task.isCompleted &&
+                                "text-muted-foreground line-through",
                             )}
                           >
                             {task.text}
@@ -1154,6 +1235,7 @@ export default function TasksPanel({
             ) : openTask && (
               <Suspense fallback={null}>
               <TaskDetail
+                key={openTask._id}
                 task={openTask}
                 canEdit={canEdit}
                 canDelete={canDelete}

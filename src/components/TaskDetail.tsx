@@ -156,6 +156,12 @@ export default function TaskDetail({
       .join(" · ");
   }, [assignees, groupIds, groupsById]);
   const [description, setDescription] = useState(task.description ?? "");
+  // The name is a local draft saved on blur or Enter: typing is never blocked
+  // half-way, and a name the server refuses is explained instead of silently
+  // snapping back. The panel is keyed on the task, so the draft always starts
+  // from the task it belongs to.
+  const [titleDraft, setTitleDraft] = useState(task.text);
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState("");
   const [stepDraft, setStepDraft] = useState("");
   const [dueDraft, setDueDraft] = useState(
@@ -170,6 +176,28 @@ export default function TaskDetail({
     [task.attachments],
   );
   const doneSteps = (steps ?? []).filter((s) => s.isCompleted).length;
+
+  const saveTitle = async () => {
+    const next = titleDraft.trim();
+    if (next === task.text) {
+      setTitleDraft(task.text);
+      setTitleError(null);
+      return;
+    }
+    if (next.length === 0) {
+      setTitleError("A task needs a name.");
+      return;
+    }
+    try {
+      await updateTask({ id: task._id, text: next });
+      setTitleError(null);
+    } catch (error) {
+      setTitleDraft(task.text);
+      setTitleError(
+        error instanceof Error ? error.message : "Couldn't rename this task.",
+      );
+    }
+  };
 
   const saveDescription = async () => {
     if ((task.description ?? "") === description) return;
@@ -352,17 +380,34 @@ export default function TaskDetail({
               className="mt-1 size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3"
             />
             <input
-              value={task.text}
+              value={titleDraft}
               readOnly={!mayEdit}
-              onChange={(e) =>
-                mayEdit &&
-                void updateTask({ id: task._id, text: e.target.value }).catch(() => {})
-              }
+              onChange={(e) => {
+                setTitleDraft(e.target.value);
+                if (titleError !== null) setTitleError(null);
+              }}
+              onBlur={() => void saveTitle()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setTitleDraft(task.text);
+                  setTitleError(null);
+                }
+              }}
               className={cn(
-                "w-full bg-transparent text-[15px] font-medium outline-none",
+                "w-full rounded-md bg-transparent px-1.5 py-0.5 text-[15px] font-medium outline-none transition-colors focus:bg-card focus:ring-2 focus:ring-primary/30",
+                titleError !== null && "ring-1 ring-destructive",
                 task.isCompleted && "text-muted-foreground line-through",
               )}
             />
+            {titleError !== null && (
+              <p className="mt-1 px-1.5 text-[11px] font-medium text-destructive">
+                {titleError}
+              </p>
+            )}
           </div>
 
           {/* assigned to — one person or a whole group in the firm */}
