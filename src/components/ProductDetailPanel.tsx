@@ -10,6 +10,7 @@ import {
   ListTodo,
   Loader2,
   Package,
+  PackageMinus,
   Paperclip,
   Plus,
   Repeat,
@@ -24,6 +25,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useAppDialogs } from "@/components/AppDialogs";
 import AssignDialog, { targetOf } from "@/components/AssignDialog";
 import NodeComments from "@/components/NodeComments";
 import NodeIssues from "@/components/NodeIssues";
@@ -118,6 +120,9 @@ export default function ProductDetailPanel({
   canEdit?: boolean;
 }) {
   const updateFg = useMutation(api.costing.updateFinishedGood);
+  const detachFromJobM = useMutation(api.costing.detachFromJob);
+  const detachFromProjectM = useMutation(api.costing.detachFromProject);
+  const { confirm } = useAppDialogs();
   const setStatus = useMutation(api.costing.setFgProjectStatus);
   const setCompleted = useMutation(api.costing.setFgCompleted);
   const addStep = useMutation(api.productTasks.addStep);
@@ -256,6 +261,36 @@ export default function ProductDetailPanel({
       } as never);
     } catch (error) {
       toast.error(messageFrom(error, "Couldn't remove the file."));
+    }
+  };
+
+  /**
+   * Take the product out of its project — or out of the job it is shown under
+   * — without deleting it. It drops back to a standalone item and stays in
+   * Products with its recipe, cost and stock.
+   */
+  const removeFromProject = async () => {
+    const from =
+      parentJob !== undefined
+        ? `job “${parentJob.name}”`
+        : `“${project?.name ?? fg.projectName ?? "the project"}”`;
+    const ok = await confirm({
+      title: `Remove “${fg.name}” from ${from}?`,
+      message:
+        "The product is not deleted — it becomes a standalone item and stays in Products with its recipe, cost and stock. Only its link to this project is removed.",
+      confirmLabel: "Remove from project",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      if (parentJob !== undefined) {
+        await detachFromJobM({ fgId: fg._id, jobId: parentJob._id });
+      } else {
+        await detachFromProjectM({ fgId: fg._id });
+      }
+      toast.success(`“${fg.name}” removed — it is still in Products.`);
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't remove it from the project."));
     }
   };
 
@@ -787,18 +822,34 @@ export default function ProductDetailPanel({
         </div>
 
         {/* footer */}
-        {mayDelete && onDelete && (
-          <div className="border-t border-border/60 p-3">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="w-full rounded-lg text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={onDelete}
-            >
-              <Trash2 className="size-3.5" />
-              Delete product
-            </Button>
+        {((mayEdit && (parentJob !== undefined || fg.projectName !== undefined)) ||
+          (mayDelete && onDelete)) && (
+          <div className="space-y-1 border-t border-border/60 p-3">
+            {mayEdit && (parentJob !== undefined || fg.projectName !== undefined) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full rounded-lg text-xs"
+                title="Take it out of the project — the product stays in Products"
+                onClick={() => void removeFromProject()}
+              >
+                <PackageMinus className="size-3.5" />
+                Remove from {parentJob !== undefined ? "this job" : "this project"}
+              </Button>
+            )}
+            {mayDelete && onDelete && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full rounded-lg text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={onDelete}
+              >
+                <Trash2 className="size-3.5" />
+                Delete product
+              </Button>
+            )}
           </div>
         )}
       </div>

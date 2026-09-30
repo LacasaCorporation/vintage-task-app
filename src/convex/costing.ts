@@ -1192,16 +1192,19 @@ export const detachFromJob = mutation({
 
     const jobIds = (fg.jobIds ?? []).filter((id) => id !== jobId);
     if (jobIds.length === 0) {
-      // nothing left to link to, so it becomes standalone again
+      // nothing left to link to, so it becomes standalone again — the product
+      // itself is untouched, it just leaves the project
       await ctx.db.patch(fgId, {
         jobIds: undefined,
         jobId: undefined,
         projectName: undefined,
         projectCode: undefined,
       });
+      await syncJobCompletion(ctx, userId, jobId);
       return;
     }
     await ctx.db.patch(fgId, { jobIds, jobId: jobIds[0] });
+    await syncJobCompletion(ctx, userId, jobId);
   },
 });
 

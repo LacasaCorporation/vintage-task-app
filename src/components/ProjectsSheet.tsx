@@ -15,6 +15,7 @@ import {
   Pencil,
   Play,
   Plus,
+  PackageMinus,
   Printer,
   Search as SearchIcon,
   Sigma,
@@ -266,6 +267,8 @@ export default function ProjectsSheet({
   const setProjectFlag = useMutation(api.costing.setProjectFlag);
   const addProjectM = useMutation(api.costing.addProject);
   const removeFgM = useMutation(api.costing.removeFinishedGood);
+  const detachFromJobM = useMutation(api.costing.detachFromJob);
+  const detachFromProjectM = useMutation(api.costing.detachFromProject);
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const { confirm } = useAppDialogs();
 
@@ -614,6 +617,46 @@ export default function ProjectsSheet({
     if (job === undefined) return undefined;
     return (projects ?? []).find((p) => p._id === job.projectId)?.name;
   }, [pane, allJobs, projects]);
+
+  /**
+   * Take a product out of the project — or out of one job inside it. The
+   * product itself is never deleted: it drops back to a standalone item and
+   * stays in the Products list with its recipe, cost and stock. A product
+   * that is in production or already finished is refused, because its costs
+   * and units are part of the project's record.
+   */
+  const handleRemoveProductFromProject = async (
+    fg: FgDoc,
+    where: {
+      projectName: string;
+      jobId?: Id<"projectJobs">;
+      jobName?: string;
+    },
+  ) => {
+    const from = where.jobId !== undefined ? `job “${where.jobName}”` : `“${where.projectName}”`;
+    const ok = await confirm({
+      title: `Remove “${fg.name}” from ${from}?`,
+      message:
+        "The product is not deleted — it becomes a standalone item and stays in Products with its recipe, cost and stock. Only its link to this project is removed.",
+      confirmLabel: "Remove from project",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      if (where.jobId !== undefined) {
+        await detachFromJobM({ fgId: fg._id, jobId: where.jobId });
+      } else {
+        await detachFromProjectM({ fgId: fg._id });
+      }
+      toast.success(
+        `“${fg.name}” removed from ${from} — it is still in Products.`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't remove that product.",
+      );
+    }
+  };
 
   /** Delete the product the side panel is showing, after the usual confirm. */
   const handleDeleteProductFromPane = async (fg: FgDoc) => {
@@ -1517,6 +1560,21 @@ export default function ProjectsSheet({
                                   <ProductionButton fg={fg} />
                                   <button
                                     type="button"
+                                    title="Remove from this job — the product stays in Products"
+                                    aria-label={`Remove “${fg.name}” from this job`}
+                                    className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
+                                    onClick={() =>
+                                      void handleRemoveProductFromProject(fg, {
+                                        projectName: p.name,
+                                        jobId: job._id,
+                                        jobName: job.name,
+                                      })
+                                    }
+                                  >
+                                    <PackageMinus className="size-3" />
+                                  </button>
+                                  <button
+                                    type="button"
                                     title={
                                       fg.isFlagged
                                         ? "Remove flag from product"
@@ -1609,6 +1667,19 @@ export default function ProjectsSheet({
                             onClick={() => onOpenProduct?.(fg._id)}
                           >
                             <Plus className="size-3" />
+                          </button>
+                          <button
+                            type="button"
+                            title="Remove from this project — the product stays in Products"
+                            aria-label={`Remove “${fg.name}” from this project`}
+                            className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
+                            onClick={() =>
+                              void handleRemoveProductFromProject(fg, {
+                                projectName: p.name,
+                              })
+                            }
+                          >
+                            <PackageMinus className="size-3" />
                           </button>
                           <button
                             type="button"
