@@ -40,6 +40,7 @@ import {
   User,
 } from "lucide-react";
 import {
+  Fragment,
   lazy,
   Suspense,
   useCallback,
@@ -191,6 +192,17 @@ export default function TasksPanel({
       else next.add(taskId);
       return next;
     });
+
+  /**
+   * The one subtask whose own issues are open underneath it. A step's issues
+   * are its own story, so they get their own line in the list rather than
+   * being buried in the task's issues dropdown.
+   */
+  const [openStepIssueId, setOpenStepIssueId] = useState<Id<"taskSteps"> | null>(
+    null,
+  );
+  const toggleStepIssues = (stepId: Id<"taskSteps">) =>
+    setOpenStepIssueId((current) => (current === stepId ? null : stepId));
 
   const toggleStepRow = (taskId: string) =>
     setOpenStepRows((current) => {
@@ -1230,8 +1242,8 @@ export default function TasksPanel({
                                       (i) => !i.isSolved,
                                     ).length;
                                     return (
+                                    <Fragment key={step._id}>
                                     <li
-                                          key={step._id}
                                           className={cn(
                                             "group/step flex items-center gap-2 rounded-md px-1.5",
                                             openStepId === step._id && "bg-amber-500/10",
@@ -1430,41 +1442,47 @@ export default function TasksPanel({
                                           <CalendarDays className="size-3" />
                                         </span>
                                       )}
-                                      {/* issues reported against this subtask — they
-                                          live in the task's issues dropdown */}
-                                      {stepIssues.length > 0 && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            if (!openStepRows.has(task._id)) {
-                                              toggleStepRow(task._id);
-                                            }
-                                            if (!openIssueRows.has(task._id)) {
-                                              toggleIssueRow(task._id);
-                                            }
-                                          }}
-                                          title={
-                                            stepIssuesOpen > 0
-                                              ? `${stepIssuesOpen} open issue(s) on this subtask — it can only be completed once they are cleared`
-                                              : "Every issue on this subtask is cleared"
+                                      {/* issues reported against this subtask — they open
+                                          under the step, so a snag on a step reads as
+                                          plainly as a snag on the task */}
+                                      <button
+                                        type="button"
+                                        aria-expanded={openStepIssueId === step._id}
+                                        onClick={() => {
+                                          if (!openStepRows.has(task._id)) {
+                                            toggleStepRow(task._id);
                                           }
-                                          className={cn(
-                                            "order-5 inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
-                                            stepIssuesOpen > 0
-                                              ? "bg-rose-500/10 text-rose-700 dark:text-rose-400"
-                                              : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-                                          )}
-                                        >
-                                          {stepIssuesOpen > 0 ? (
-                                            <>
-                                              <TriangleAlert className="size-2.5" />
-                                              {stepIssuesOpen}
-                                            </>
-                                          ) : (
-                                            "✓"
-                                          )}
-                                        </button>
-                                      )}
+                                          toggleStepIssues(step._id);
+                                        }}
+                                        title={
+                                          stepIssues.length === 0
+                                            ? "Report an issue with this subtask"
+                                            : stepIssuesOpen > 0
+                                              ? `${stepIssuesOpen} open of ${stepIssues.length} — it can only be completed once they are cleared`
+                                              : `Every one of the ${stepIssues.length} issue(s) on this subtask is cleared`
+                                        }
+                                        className={cn(
+                                          "order-5 inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
+                                          stepIssuesOpen > 0
+                                            ? "bg-rose-500/10 text-rose-700 dark:text-rose-400"
+                                            : stepIssues.length > 0
+                                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                              : "bg-muted text-muted-foreground hover:bg-rose-500/10 hover:text-rose-700 dark:hover:text-rose-400",
+                                          openStepIssueId === step._id &&
+                                            "ring-1 ring-rose-500/40",
+                                        )}
+                                      >
+                                        {stepIssuesOpen > 0 ? (
+                                          <>
+                                            <TriangleAlert className="size-2.5" />
+                                            {stepIssuesOpen}
+                                          </>
+                                        ) : stepIssues.length > 0 ? (
+                                          "✓"
+                                        ) : (
+                                          <TriangleAlert className="size-2.5" />
+                                        )}
+                                      </button>
                                       {canDelete && (
                                         <button
                                           type="button"
@@ -1498,6 +1516,20 @@ export default function TasksPanel({
                                         />
                                       )}
                                     </li>
+                                    {/* the subtask's own issues, listed under it */}
+                                    {openStepIssueId === step._id && (
+                                      <li className="py-1 pl-6 pr-2">
+                                        <div className="rounded-lg border border-rose-500/25 bg-rose-500/[0.04] px-2 py-1.5">
+                                          <TaskIssues
+                                            taskId={task._id}
+                                            stepId={step._id}
+                                            canEdit={canEdit}
+                                            compact
+                                          />
+                                        </div>
+                                      </li>
+                                    )}
+                                    </Fragment>
                                     );
                                   })}
                                 </ul>

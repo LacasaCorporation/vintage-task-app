@@ -1441,11 +1441,10 @@ export const listIssues = query({
       .query("taskIssues")
       .withIndex("by_task", (q) => q.eq("taskId", taskId))
       .collect();
-    // the task's own issues are the ones not pinned to a subtask
-    const rows =
-      stepId === undefined
-        ? every.filter((i) => i.stepId === undefined)
-        : every.filter((i) => i.stepId === stepId);
+    // the task's view is everything reported on it, its subtasks included —
+    // a problem with a step is a problem with the job; given a `stepId` it is
+    // that subtask's own list instead
+    const rows = stepId === undefined ? every : every.filter((i) => i.stepId === stepId);
     // an issue can sit against the task itself or against one of its subtasks,
     // so the name of the subtask is looked up to label it
     const stepText = new Map(
