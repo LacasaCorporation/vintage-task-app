@@ -35,7 +35,7 @@ import {
   Loader2,
   Package,
   Play,
-  Square,
+  Undo2,
   Star,
   Tag,
   X,
@@ -942,17 +942,24 @@ export function ProductionButton({
             {runningLabel}
           </span>
         )}
-        {/* an action, not a status — it stays out of the way of the status chip
-            and only becomes obvious on hover or keyboard focus */}
+        {/* the way back out of a running batch, said out loud: the consumed
+            materials return to stock and the status goes back to the first
+            one. It used to be an icon that only appeared on hover, which
+            meant a row sitting in a plain table had no visible way back */}
         <button
           type="button"
           disabled={busy}
           onClick={() => setConfirming(true)}
-          title="Stop production"
-          aria-label="Stop production"
-          className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover/row:opacity-100 disabled:opacity-50"
+          title="Reverse — stop production and return the consumed materials to stock"
+          aria-label={`Reverse the production of “${fg.name}”`}
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:opacity-50 dark:text-amber-400"
         >
-          <Square className="size-2.5" />
+          {busy ? (
+            <Loader2 className="size-2.5 animate-spin" />
+          ) : (
+            <Undo2 className="size-2.5" />
+          )}
+          Reverse
         </button>
       </span>
     );
@@ -961,15 +968,15 @@ export function ProductionButton({
   return (
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
       <AlertTriangle className="size-2.5" />
-      Stop and return the used stock?
+      Reverse and return the used stock?
       <button
         type="button"
         disabled={busy}
         onClick={() =>
           void run(
             () => stopProduction({ fgId: fg._id }),
-            "Couldn't stop production.",
-            "Production stopped — stock returned.",
+            "Couldn't reverse production.",
+            "Production reversed — the consumed stock went back.",
           )
         }
         className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground disabled:opacity-50"
