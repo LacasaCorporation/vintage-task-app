@@ -51,14 +51,19 @@ const NO_GRANT: Grant = {
 };
 
 /**
- * What the popup acts on. A task, a subtask and a flagged product behave the
- * same way, so they share this one popup — only the functions behind it differ.
- * A subtask has no permissions tab: what someone may do to a step is what they
- * may do to the task it belongs to.
+ * What the popup acts on. A task, a subtask, a flagged product and a project or
+ * job all behave the same way, so they share this one popup — only the
+ * functions behind it differ. A subtask has no permissions tab: what someone
+ * may do to a step is what they may do to the task it belongs to.
  */
 export type AssignTarget = {
-  kind: "task" | "product" | "step";
-  id: Id<"tasks"> | Id<"finishedGoods"> | Id<"taskSteps">;
+  kind: "task" | "product" | "step" | "project" | "job";
+  id:
+    | Id<"tasks">
+    | Id<"finishedGoods">
+    | Id<"taskSteps">
+    | Id<"projects">
+    | Id<"projectJobs">;
   /** Who created it — the owner who may reassign and hand out permissions. */
   assigneeId?: Id<"users">;
   assignedAt?: number;
@@ -70,7 +75,12 @@ export type AssignTarget = {
  *  caller, because a Convex id does not say which table it came from. */
 export function targetOf(
   doc: {
-    _id: Id<"tasks"> | Id<"finishedGoods"> | Id<"taskSteps">;
+    _id:
+      | Id<"tasks">
+      | Id<"finishedGoods">
+      | Id<"taskSteps">
+      | Id<"projects">
+      | Id<"projectJobs">;
     assigneeId?: Id<"users">;
     assignedAt?: number;
     assigneeIds?: Id<"users">[];
@@ -143,7 +153,15 @@ function AssignBody({
 }) {
   const isProduct = target.kind === "product";
   const isStep = target.kind === "step";
-  const taskId = isProduct || isStep ? null : (target.id as Id<"tasks">);
+  const isNode = target.kind === "project" || target.kind === "job";
+  const nodeKind: "project" | "job" | null = isNode
+    ? (target.kind as "project" | "job")
+    : null;
+  const nodeId = isNode ? String(target.id) : null;
+  /** What this target is called, for the wording on the popup. */
+  const noun: "task" | "subtask" | "product" | "project" | "job" =
+    target.kind === "step" ? "subtask" : target.kind;
+  const taskId = target.kind === "task" ? (target.id as Id<"tasks">) : null;
   const productId = isProduct ? (target.id as Id<"finishedGoods">) : null;
   const stepId = isStep ? (target.id as Id<"taskSteps">) : null;
   const peopleData = useQuery(api.tasks.people);
@@ -157,12 +175,26 @@ function AssignBody({
     api.productTasks.grants,
     productId === null ? "skip" : { id: productId },
   );
-  const grantsData = isStep ? undefined : isProduct ? productGrants : taskGrants;
+  const nodeGrants = useQuery(
+    api.projectTasks.grants,
+    nodeKind === null || nodeId === null
+      ? "skip"
+      : { kind: nodeKind, id: nodeId },
+  );
+  const grantsData = isStep
+    ? undefined
+    : isNode
+      ? nodeGrants
+      : isProduct
+        ? productGrants
+        : taskGrants;
   const assignTask = useMutation(api.tasks.assign);
   const assignProduct = useMutation(api.productTasks.assign);
   const assignStepM = useMutation(api.tasks.assignStep);
+  const assignNode = useMutation(api.projectTasks.assign);
   const setTaskGrant = useMutation(api.tasks.setGrant);
   const setProductGrant = useMutation(api.productTasks.setGrant);
+  const setNodeGrant = useMutation(api.projectTasks.setGrant);
   const [tab, setTab] = useState<"people" | "groups" | "rights">("people");
   const [busy, setBusy] = useState(false);
 
@@ -260,7 +292,14 @@ function AssignBody({
   const save = async (nextUsers: Id<"users">[], nextGroups: Id<"userGroups">[]) => {
     setBusy(true);
     try {
-      if (isProduct) {
+      if (isNode) {
+        await assignNode({
+          kind: nodeKind as "project" | "job",
+          id: nodeId as string,
+          userIds: nextUsers,
+          groupIds: nextGroups,
+        });
+      } else if (isProduct) {
         await assignProduct({
           id: productId as Id<"finishedGoods">,
           userIds: nextUsers,
@@ -287,24 +326,13 @@ function AssignBody({
       ];
       toast.success(
         who.length === 0
-          ? isProduct
-            ? "This product is no longer assigned to anyone."
-            : isStep
-              ? "This subtask is no longer assigned to anyone."
-              : "Task is no longer assigned to anyone."
+          ? `This ${noun} is no longer assigned to anyone.`
           : `Assigned to ${who.join(", ")}.`,
       );
       onClose();
     } catch (error) {
       toast.error(
-        messageFrom(
-          error,
-          isProduct
-            ? "Couldn't assign that product."
-            : isStep
-              ? "Couldn't assign that subtask."
-              : "Couldn't assign that task.",
-        ),
+        messageFrom(error, `Couldn't assign that ${noun}.`),
       );
     } finally {
       setBusy(false);
@@ -314,7 +342,14 @@ function AssignBody({
   const saveGrant = async (userId: Id<"users">, next: Grant) => {
     setBusy(true);
     try {
-      if (isProduct) {
+      if (isNode) {
+        await setNodeGrant({
+          kind: nodeKind as "project" | "job",
+          id: nodeId as string,
+          userId,
+          ...next,
+        });
+      } else if (isProduct) {
         await setProductGrant({
           id: productId as Id<"finishedGoods">,
           userId,
@@ -381,8 +416,8 @@ function AssignBody({
             {isStep
               ? "Hand this subtask to people or to a group. What they may do to it is what they may do to the task."
               : isOwner
-                ? `You created this ${isProduct ? "product" : "task"}, so you can edit, complete, change and delete it. Tick who else may — and what they may do.`
-                : `Hand this ${isProduct ? "product" : "task"} to people or to a group. Only the person who created it can change what they may do.`}
+                ? `You created this ${noun}, so you can edit, complete, change and delete it. Tick who else may — and what they may do.`
+                : `Hand this ${noun} to people or to a group. Only the person who created it can change what they may do.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -535,8 +570,8 @@ function AssignBody({
           <div className="space-y-2">
             {!isOwner ? (
               <p className="py-6 text-sm text-muted-foreground">
-                Only the person who created this{" "}
-                {isProduct ? "product" : "task"} can hand out permissions.
+                Only the person who created this {noun} can hand out
+                permissions.
               </p>
             ) : holderIds.length === 0 ? (
               <p className="py-6 text-sm text-muted-foreground">

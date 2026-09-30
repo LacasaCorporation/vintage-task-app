@@ -2,6 +2,11 @@ import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { scopeUserId } from "./org";
 import {
+  assertNoOpenIssues,
+  purgeNode,
+  spawnNextOccurrence,
+} from "./projectTasks";
+import {
   clearAncestorsIfOrphaned,
   flagAncestors,
   jobIdsOf,
@@ -688,6 +693,7 @@ export const setProjectProjectStatus = mutation({
     const clean = status.trim().replace(/\s+/g, " ");
     if (!clean) throw new Error("Choose a status.");
     if (clean === PROJECT_STATUS_FINISH) {
+      await assertNoOpenIssues(ctx, "project", id, "project");
       const jobs = await ctx.db
         .query("projectJobs")
         .withIndex("by_project", (q) => q.eq("projectId", id))
@@ -709,10 +715,16 @@ export const setProjectProjectStatus = mutation({
         );
       }
     }
+    const wasFinished =
+      project.projectStatus === PROJECT_STATUS_FINISH ||
+      project.status === "completed";
     await ctx.db.patch(id, {
       projectStatus: clean,
       status: clean === PROJECT_STATUS_FINISH ? "completed" : clean === PROJECT_STATUS_START ? "planning" : "in_progress",
     });
+    // a repeating project lays down its next occurrence once, on finishing
+    if (clean === PROJECT_STATUS_FINISH && !wasFinished)
+      await spawnNextOccurrence(ctx, "project", project);
   },
 });
 
@@ -734,6 +746,7 @@ export const removeProject = mutation({
       throw new Error(
         `This project still has ${jobs.length} job${jobs.length === 1 ? "" : "s"}. Delete the products first, then the jobs, then the project.`,
       );
+    await purgeNode(ctx, "project", id);
     await ctx.db.delete(id);
   },
 });
@@ -866,8 +879,13 @@ export const updateFinishedGood = mutation({
     tags: v.optional(v.array(v.string())),
     remindAt: v.optional(v.number()),
     starred: v.optional(v.boolean()),
+    attachments: v.optional(v.string()), // JSON: [{id,name,type,size,data}]
+    recurrence: v.optional(
+      v.union(v.literal("daily"), v.literal("weekly"), v.literal("monthly")),
+    ),
+    clearRecurrence: v.optional(v.boolean()),
   },
-  handler: async (ctx, { id, ...patch }) => {
+  handler: async (ctx, { id, clearRecurrence, ...patch }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(id);
@@ -927,6 +945,7 @@ export const updateFinishedGood = mutation({
       patch.currency =
         patch.currency.trim().slice(0, 4) ||
         currencySymbol((await getSettings(ctx, userId))?.currency);
+    if (clearRecurrence === true) patch.recurrence = undefined;
     await ctx.db.patch(id, patch);
   },
 });
@@ -1003,6 +1022,8 @@ export const removeFinishedGood = mutation({
       .withIndex("by_product", (q) => q.eq("productId", id))
       .collect();
     for (const movement of movements) await ctx.db.delete(movement._id);
+    // and the conversation and issues hanging off it
+    await purgeNode(ctx, "product", id);
     await ctx.db.delete(id);
   },
 });
@@ -1281,15 +1302,20 @@ export const setFgProjectStatus = mutation({
     if (!clean) throw new Error("Choose a status.");
     const isFinish = clean === PROJECT_STATUS_FINISH;
     if (isFinish) {
+      await assertNoOpenIssues(ctx, "product", id, "product");
       // finishing a product is what puts its units on the shelf, so the
       // project status and the stock ledger can never disagree
       await landRun(ctx, userId, fg, landableQty(fg));
     }
+    const wasFinished =
+      fg.projectStatus === PROJECT_STATUS_FINISH || fg.isCompleted === true;
     await ctx.db.patch(id, {
       projectStatus: clean,
       isCompleted: isFinish || undefined,
       completedAt: isFinish ? fg.completedAt ?? Date.now() : undefined,
     });
+    // a repeating product lays down its next occurrence once, on finishing
+    if (isFinish && !wasFinished) await spawnNextOccurrence(ctx, "product", fg);
 
     const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
     for (const jid of jobIds) {
@@ -1326,7 +1352,9 @@ export const setFgCompleted = mutation({
     const fg = await ctx.db.get(id);
     if (fg === null || fg.ownerId !== userId)
       throw new Error("That product no longer exists.");
+    const wasDone = fg.isCompleted === true;
     if (completed) {
+      await assertNoOpenIssues(ctx, "product", id, "product");
       // ticking a product off is finishing it: its units land in stock
       await landRun(ctx, userId, fg, landableQty(fg));
     }
@@ -1335,6 +1363,8 @@ export const setFgCompleted = mutation({
       projectStatus: completed ? PROJECT_STATUS_FINISH : PROJECT_STATUS_START,
       completedAt: completed ? Date.now() : undefined,
     });
+    // a repeating product lays down its next occurrence once, on finishing
+    if (completed && !wasDone) await spawnNextOccurrence(ctx, "product", fg);
 
     // update each job the product belongs to: complete it when all of its
     // flagged products are done, reopen it otherwise

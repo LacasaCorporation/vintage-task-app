@@ -115,6 +115,7 @@ export function JobsList({
   onOpenProject,
   onEditJob,
   onDeleteJob,
+  onOpenNode,
 }: {
   jobs: JobDoc[];
   projects: ProjectDoc[] | undefined;
@@ -126,6 +127,8 @@ export function JobsList({
   onEditJob?: (job: JobDoc, projectName: string) => void;
   /** The parent refuses the delete while products are still linked. */
   onDeleteJob?: (job: JobDoc, productCount: number) => void;
+  /** Opens the job's own side panel, exactly as clicking a task does. */
+  onOpenNode?: (kind: "job", id: string) => void;
 }) {
   const { format: money } = useWorkspaceCurrency();
   const rows = useMemo(() => {
@@ -196,7 +199,18 @@ export function JobsList({
                   <td className="px-4 py-2.5">
                     <span className="flex items-center gap-2">
                       <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
-                      <span className="font-medium">{job.name}</span>
+                      {onOpenNode ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenNode("job", String(job._id))}
+                          title="Open the job's side panel"
+                          className="min-w-0 cursor-pointer truncate text-left font-medium hover:underline"
+                        >
+                          {job.name}
+                        </button>
+                      ) : (
+                        <span className="font-medium">{job.name}</span>
+                      )}
                       {job.code && (
                         <span className="font-mono text-[10px] text-muted-foreground/70">
                           {job.code}
@@ -284,12 +298,16 @@ export function ProductsList({
   search,
   filter,
   onOpenProduct,
+  onOpenNode,
 }: {
   finishedGoods: FgDoc[];
   costByFg: Map<Id<"finishedGoods">, number>;
   search: string;
   filter: ProductFilter;
+  /** Opens the full costing sheet. */
   onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
+  /** Opens the product's own side panel, exactly as clicking a task does. */
+  onOpenNode?: (kind: "product", id: string) => void;
 }) {
   const { format: money } = useWorkspaceCurrency();
   const rows = useMemo(
@@ -354,7 +372,16 @@ export function ProductsList({
                   <td className="px-4 py-2.5">
                     <span className="flex items-center gap-2">
                       <Package className="size-3.5 shrink-0 text-sky-500/80" />
-                      {onOpenProduct ? (
+                      {onOpenNode ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenNode("product", String(fg._id))}
+                          title="Open the product's side panel"
+                          className="min-w-0 cursor-pointer truncate text-left font-medium hover:underline"
+                        >
+                          {fg.name}
+                        </button>
+                      ) : onOpenProduct ? (
                         <button
                           type="button"
                           onClick={() => onOpenProduct(fg._id)}
@@ -384,7 +411,18 @@ export function ProductsList({
                     {money(total)}
                   </td>
                   <td className="px-2 py-2 text-right align-middle">
-                    <span className="flex justify-end">
+                    <span className="flex items-center justify-end gap-1">
+                      {onOpenProduct && (
+                        <button
+                          type="button"
+                          aria-label={`Open the costing sheet for “${fg.name}”`}
+                          title="Open the full costing sheet"
+                          className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-primary"
+                          onClick={() => onOpenProduct(fg._id)}
+                        >
+                          <Sigma className="size-3.5" />
+                        </button>
+                      )}
                       <ProductionButton fg={fg} />
                     </span>
                   </td>

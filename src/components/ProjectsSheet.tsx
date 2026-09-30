@@ -22,7 +22,7 @@ import {
   User,
   Users,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -55,6 +55,10 @@ import {
   AddProductToJobDialog,
 } from "@/components/ProjectDialogs";
 import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
+
+// the side panels are big, so they are only fetched when one is actually open
+const ProjectDetailPanel = lazy(() => import("@/components/ProjectDetailPanel"));
+const ProductDetailPanel = lazy(() => import("@/components/ProductDetailPanel"));
 
 const PROJECT_FILTERS: readonly FilterOption<"all" | "flagged">[] = [
   { value: "all", label: "All items", hint: "Every project" },
@@ -261,8 +265,28 @@ export default function ProjectsSheet({
   const setFgFlag = useMutation(api.costing.setFgFlag);
   const setProjectFlag = useMutation(api.costing.setProjectFlag);
   const addProjectM = useMutation(api.costing.addProject);
+  const removeFgM = useMutation(api.costing.removeFinishedGood);
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
   const { confirm } = useAppDialogs();
+
+  /**
+   * The side panel on the right shows one thing at a time — a project, a job
+   * or a product — exactly as the Tasks page does with its task and subtask
+   * panels. Clicking whatever is already open closes it again.
+   */
+  const [pane, setPane] = useState<{
+    kind: "project" | "job" | "product";
+    id: string;
+  } | null>(null);
+  const openNode = useCallback(
+    (kind: "project" | "job" | "product", id: string) =>
+      setPane((current) =>
+        current !== null && current.kind === kind && current.id === id
+          ? null
+          : { kind, id },
+      ),
+    [],
+  );
 
   /**
    * Promote a name-only project (one that only exists as a projectName on its
@@ -568,6 +592,50 @@ export default function ProjectsSheet({
     }
   };
 
+  /**
+   * The document the side panel is showing, looked up from the live lists so
+   * it always reflects the newest edit rather than a stale copy.
+   */
+  const paneDoc = useMemo(() => {
+    if (pane === null) return null;
+    if (pane.kind === "project") {
+      return (projects ?? []).find((p) => String(p._id) === pane.id) ?? null;
+    }
+    if (pane.kind === "job") {
+      return (allJobs ?? []).find((j) => String(j._id) === pane.id) ?? null;
+    }
+    return finishedGoods.find((f) => String(f._id) === pane.id) ?? null;
+  }, [pane, projects, allJobs, finishedGoods]);
+
+  /** The project a job in the panel sits under, for its subtitle line. */
+  const paneJobParent = useMemo(() => {
+    if (pane === null || pane.kind !== "job") return undefined;
+    const job = (allJobs ?? []).find((j) => String(j._id) === pane.id);
+    if (job === undefined) return undefined;
+    return (projects ?? []).find((p) => p._id === job.projectId)?.name;
+  }, [pane, allJobs, projects]);
+
+  /** Delete the product the side panel is showing, after the usual confirm. */
+  const handleDeleteProductFromPane = async (fg: FgDoc) => {
+    const ok = await confirm({
+      title: `Delete product “${fg.name}”?`,
+      message:
+        "The product is permanently removed along with its costs and files. Take it out of its project or job first. This cannot be undone.",
+      confirmLabel: "Delete product",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await removeFgM({ id: fg._id });
+      setPane(null);
+      toast.success("Product deleted.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't delete that product.",
+      );
+    }
+  };
+
   /** What the print header should say about the active filter. */
   const tabLabel =
     tab === "projects"
@@ -633,6 +701,9 @@ export default function ProjectsSheet({
           onPrinted={() => setPrinting(false)}
         />
       )}
+
+      <div className="grid items-start lg:grid-cols-[1fr_auto]">
+      <div className="min-w-0 space-y-4">
       {/* ── Tabs: one list per level of the hierarchy ───────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <PageTabs
@@ -715,6 +786,7 @@ export default function ProjectsSheet({
           onDeleteJob={(job, productCount) =>
             void handleDeleteJobFromList(job, productCount)
           }
+          onOpenNode={(kind, id) => openNode(kind, id)}
         />
       )}
 
@@ -725,6 +797,7 @@ export default function ProjectsSheet({
           search={search}
           filter={productFilter}
           onOpenProduct={onOpenProduct}
+          onOpenNode={(kind, id) => openNode(kind, id)}
         />
       )}
 
@@ -801,15 +874,36 @@ export default function ProjectsSheet({
                     <button
                       type="button"
                       onClick={() => setExpanded(expanded === p.key ? null : p.key)}
-                      className="flex min-w-0 items-center gap-2 text-left"
+                      className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                       title="Show / hide jobs & products"
+                      aria-expanded={expanded === p.key}
+                      aria-label={`Show or hide the jobs in ${p.name}`}
                     >
                       <ChevronDown
                         className={cn(
-                          "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                          "size-3.5 transition-transform",
                           expanded === p.key && "rotate-180",
                         )}
                       />
+                    </button>
+                    {/* the name opens the side panel, exactly as a task does */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (detail) {
+                          openNode("project", String(detail._id));
+                          setExpanded(p.key);
+                        } else {
+                          setExpanded(expanded === p.key ? null : p.key);
+                        }
+                      }}
+                      className="flex min-w-0 items-center gap-2 text-left"
+                      title={
+                        detail
+                          ? "Open the project's side panel"
+                          : "Show / hide jobs & products"
+                      }
+                    >
                       <Folder className="size-4 shrink-0 text-sky-500/80" />
                       <span className="truncate text-sm font-medium hover:text-primary">
                         {p.name}
@@ -1096,7 +1190,14 @@ export default function ProjectsSheet({
                                 className="group/job flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-card px-2 py-1.5 text-xs"
                               >
                               <Briefcase className="size-3 shrink-0 text-sky-500/80" />
-                              <span className="font-medium">{job.name}</span>
+                              <button
+                                type="button"
+                                title="Open the job's side panel"
+                                className="min-w-0 cursor-pointer truncate font-medium hover:text-primary hover:underline"
+                                onClick={() => openNode("job", String(job._id))}
+                              >
+                                {job.name}
+                              </button>
                               {job.code && (
                                 <span className="font-mono text-[10px] text-muted-foreground/70">
                                   {job.code}
@@ -1377,9 +1478,9 @@ export default function ProjectsSheet({
                                 >
                                   <button
                                     type="button"
-                                    title="Open this product's costing sheet"
+                                    title="Open the product's side panel"
                                     className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                                    onClick={() => onOpenProduct?.(fg._id)}
+                                    onClick={() => openNode("product", String(fg._id))}
                                   >
                                     <Package className="size-3 shrink-0 text-sky-500/80" />
                                     <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
@@ -1473,9 +1574,9 @@ export default function ProjectsSheet({
                         >
                           <button
                             type="button"
-                            title="Open this product's costing sheet"
+                            title="Open the product's side panel"
                             className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                            onClick={() => onOpenProduct?.(fg._id)}
+                            onClick={() => openNode("product", String(fg._id))}
                           >
                             <Package className="size-3 shrink-0 text-sky-500/80" />
                             <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
@@ -1581,11 +1682,55 @@ export default function ProjectsSheet({
           </div>
         )}
       </section>
+      </div>
+
+      {/* the side panel — one project, job or product at a time */}
+      {pane !== null && paneDoc !== null && (
+        <div className="mt-4 min-w-0 lg:mt-3">
+          <Suspense fallback={null}>
+            {pane.kind === "product" ? (
+              <ProductDetailPanel
+                key={`product:${pane.id}`}
+                fg={paneDoc as FgDoc}
+                jobs={allJobs ?? []}
+                projects={projects ?? []}
+                onClose={() => setPane(null)}
+                onDelete={() => void handleDeleteProductFromPane(paneDoc as FgDoc)}
+                canEdit={onEditProject !== undefined}
+              />
+            ) : (
+              <ProjectDetailPanel
+                key={`${pane.kind}:${pane.id}`}
+                kind={pane.kind}
+                doc={paneDoc as ProjectDoc | JobDoc}
+                parentLabel={paneJobParent}
+                onClose={() => setPane(null)}
+                onDelete={
+                  pane.kind === "project"
+                    ? onDeleteProject
+                      ? () => onDeleteProject(paneDoc as ProjectDoc)
+                      : undefined
+                    : () => {
+                        const job = paneDoc as JobDoc;
+                        const count = finishedGoods.filter(
+                          (f) =>
+                            f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
+                        ).length;
+                        void handleDeleteJobFromList(job, count);
+                      }
+                }
+                canEdit={onEditProject !== undefined}
+              />
+            )}
+          </Suspense>
+        </div>
+      )}
+      </div>
 
       <p className="mt-3 text-xs text-muted-foreground">
         A project groups jobs, and jobs group finished goods — its cost and
-        total are the sum of all its products. Click a project name to expand
-        its jobs, or the package icon to open its products.
+        total are the sum of all its products. Click a project, job or product
+        name to open its side panel, or the chevron to expand a project's jobs.
       </p>
 
       {jobDialog && (

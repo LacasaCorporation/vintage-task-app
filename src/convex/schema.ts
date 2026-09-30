@@ -277,6 +277,67 @@ export const taskRecurrenceValidator = v.union(
 );
 export type TaskRecurrence = Infer<typeof taskRecurrenceValidator>;
 
+// ── Task extras for projects, jobs and products ─────────────────────────
+// A project and a job get the same furniture a task has — who it is handed
+// to with per-person permissions, the steps under it, its own conversation
+// and the problems reported against it — and a product gets the conversation
+// and issues too. One set of tables serves every kind (told apart by
+// `kind`), so they all behave identically to each other.
+const nodeGrants = defineTable({
+  ownerId: v.id("users"), // firm scope — settings.ownerId
+  kind: v.string(), // "project" | "job"
+  nodeId: v.string(), // the project or job id
+  userId: v.id("users"),
+  canEdit: v.boolean(),
+  canDelete: v.boolean(),
+  canComplete: v.boolean(),
+  canChangeOptions: v.boolean(),
+  grantedBy: v.id("users"),
+  grantedAt: v.number(),
+})
+  .index("by_owner", ["ownerId"])
+  .index("by_node", ["ownerId", "kind", "nodeId"]);
+
+// Steps (subtasks) of a project or a job, mirroring taskSteps.
+const nodeSteps = defineTable({
+  ownerId: v.id("users"),
+  kind: v.string(),
+  nodeId: v.string(),
+  text: v.string(),
+  isCompleted: v.optional(v.boolean()),
+})
+  .index("by_owner", ["ownerId"])
+  .index("by_node", ["ownerId", "kind", "nodeId"]);
+
+// The conversation on a project, job or product — one thread per item.
+const nodeComments = defineTable({
+  ownerId: v.id("users"),
+  kind: v.string(),
+  nodeId: v.string(),
+  authorId: v.id("users"),
+  text: v.string(),
+})
+  .index("by_owner", ["ownerId"])
+  .index("by_node", ["ownerId", "kind", "nodeId"]);
+
+// Problems reported against a project, job or product. An open issue stops
+// the item being finished, exactly as it does for a task.
+const nodeIssues = defineTable({
+  ownerId: v.id("users"),
+  kind: v.string(),
+  nodeId: v.string(),
+  title: v.string(),
+  detail: v.optional(v.string()),
+  severity: v.optional(taskPriorityValidator),
+  isSolved: v.optional(v.boolean()),
+  solution: v.optional(v.string()),
+  raisedBy: v.id("users"),
+  solvedBy: v.optional(v.id("users")),
+  solvedAt: v.optional(v.number()),
+})
+  .index("by_owner", ["ownerId"])
+  .index("by_node", ["ownerId", "kind", "nodeId"]);
+
 const schema = defineSchema(
   {
     // default auth tables using convex auth.
@@ -808,6 +869,9 @@ const schema = defineSchema(
       tags: v.optional(v.array(v.string())),
       remindAt: v.optional(v.number()),
       starred: v.optional(v.boolean()),
+      // a product carries files and a repeat exactly as a task does
+      attachments: v.optional(v.string()), // JSON: [{id,name,type,size,data}]
+      recurrence: v.optional(taskRecurrenceValidator),
       // production run: set when the product is started, cleared when stopped.
       // The consumed list is what lets a stop put the stock back.
       productionStartedAt: v.optional(v.number()),
@@ -870,6 +934,19 @@ const schema = defineSchema(
       flaggedAt: v.optional(v.number()),
       /** Ordered custom Projects status; Start and Finish are fixed. */
       projectStatus: v.optional(v.string()),
+      /** Who created the job — the owner allowed to reassign it and hand out
+       *  permissions on it, exactly as a task's creator is. */
+      assigneeId: v.optional(v.id("users")),
+      assignedAt: v.optional(v.number()),
+      /** Everyone the job is handed to, plus whole groups. */
+      assigneeIds: v.optional(v.array(v.id("users"))),
+      groupIds: v.optional(v.array(v.id("userGroups"))),
+      /** The task extras a job now carries: tags, a reminder, a star, files. */
+      tags: v.optional(v.array(v.string())),
+      remindAt: v.optional(v.number()),
+      starred: v.optional(v.boolean()),
+      attachments: v.optional(v.string()), // JSON: [{id,name,type,size,data}]
+      recurrence: v.optional(taskRecurrenceValidator),
     })
       .index("by_owner", ["ownerId"])
       .index("by_project", ["projectId"]),
@@ -901,6 +978,19 @@ const schema = defineSchema(
       isFlagged: v.optional(v.boolean()),
       // timestamp when the project was added to the flagged todo list
       flaggedAt: v.optional(v.number()),
+      /** Who created the project — the owner allowed to reassign it and hand
+       *  out permissions on it, exactly as a task's creator is. */
+      assigneeId: v.optional(v.id("users")),
+      assignedAt: v.optional(v.number()),
+      /** Everyone the project is handed to, plus whole groups. */
+      assigneeIds: v.optional(v.array(v.id("users"))),
+      groupIds: v.optional(v.array(v.id("userGroups"))),
+      /** The task extras a project now carries: tags, a reminder, a star, files. */
+      tags: v.optional(v.array(v.string())),
+      remindAt: v.optional(v.number()),
+      starred: v.optional(v.boolean()),
+      attachments: v.optional(v.string()), // JSON: [{id,name,type,size,data}]
+      recurrence: v.optional(taskRecurrenceValidator),
     }).index("by_owner", ["ownerId"]),
 
     // one line inside a costing sheet
@@ -1049,6 +1139,10 @@ const schema = defineSchema(
     taskGrants,
     fgGrants,
     fgSteps,
+    nodeGrants,
+    nodeSteps,
+    nodeComments,
+    nodeIssues,
     credentials,
     customRoles,
     pendingInvites,

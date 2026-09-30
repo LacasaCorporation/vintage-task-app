@@ -1,6 +1,11 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import {
+  assertNoOpenIssues,
+  purgeNode,
+  spawnNextOccurrence,
+} from "./projectTasks";
+import {
   clearAncestorsIfOrphaned,
   flagAncestors,
   jobHasFlaggedProduct,
@@ -239,13 +244,20 @@ export const setJobProjectStatus = mutation({
     if (!clean) throw new Error("Choose a status.");
     const isFinish = clean === PROJECT_STATUS_FINISH;
     const isStart = clean === PROJECT_STATUS_START;
-    if (isFinish) await assertJobProductsDone(ctx, userId, id);
+    if (isFinish) {
+      await assertNoOpenIssues(ctx, "job", id, "job");
+      await assertJobProductsDone(ctx, userId, id);
+    }
+    const wasFinished =
+      job.projectStatus === PROJECT_STATUS_FINISH || job.status === "completed";
     await ctx.db.patch(id, {
       projectStatus: clean,
       status: isFinish ? "completed" : isStart ? "planning" : "in_progress",
       completedAt: isFinish ? job.completedAt ?? Date.now() : undefined,
       pausedAt: undefined,
     });
+    // a repeating job lays down its next occurrence once, on finishing
+    if (isFinish && !wasFinished) await spawnNextOccurrence(ctx, "job", job);
   },
 });
 
@@ -292,12 +304,17 @@ export const completeJob = mutation({
     const job = await ctx.db.get(id);
     if (job === null || job.ownerId !== userId)
       throw new Error("That job no longer exists.");
+    await assertNoOpenIssues(ctx, "job", id, "job");
     await assertJobProductsDone(ctx, userId, id);
+    const wasFinished =
+      job.projectStatus === PROJECT_STATUS_FINISH || job.status === "completed";
     await ctx.db.patch(id, {
       status: "completed",
       completedAt: Date.now(),
       pausedAt: undefined,
     });
+    // a repeating job lays down its next occurrence once, on finishing
+    if (!wasFinished) await spawnNextOccurrence(ctx, "job", job);
   },
 });
 
@@ -402,6 +419,7 @@ export const removeJob = mutation({
       throw new Error(
         `This job still has ${linked.length} product${linked.length === 1 ? "" : "s"}. Delete the products first, then the job.`,
       );
+    await purgeNode(ctx, "job", id);
     await ctx.db.delete(id);
   },
 });

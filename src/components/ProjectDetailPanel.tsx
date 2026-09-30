@@ -2,14 +2,15 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import {
   AlarmClock,
+  Briefcase,
   CalendarDays,
   Check,
   FileText,
   Flag,
+  Folder,
   Hash,
   ListTodo,
   Loader2,
-  Package,
   Paperclip,
   Plus,
   Repeat,
@@ -27,20 +28,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import AssignDialog, { targetOf } from "@/components/AssignDialog";
 import NodeComments from "@/components/NodeComments";
 import NodeIssues from "@/components/NodeIssues";
-import type { FgDoc, JobDoc } from "@/components/FlaggedLists";
-import { PRIORITY_META, tagChip } from "@/components/FlaggedLists";
-
-/** Pill base used by the priority row, matching the other project chips. */
-const chipBase =
-  "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors";
-const prioChip: Record<string, string> = {
-  high: "bg-rose-500/10 text-rose-700 dark:text-rose-400",
-  medium: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  low: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
-};
+import { jobProjectStatus, projectDocStatus, tagChip } from "@/components/FlaggedLists";
+import { messageFrom } from "@/lib/errors";
+import { toast } from "@/lib/toast";
 import {
+  PRIORITY_META,
   RECURRENCE_LABEL,
   REMINDER_OFFSETS,
+  daysLeftLabel,
   formatDueLabel,
   parseAttachments,
   toLocalInput,
@@ -48,15 +43,21 @@ import {
 } from "@/lib/task-utils";
 import { assigneeLabel, assigneesOfTask } from "@/lib/task-people";
 import {
-  middleProjectStatuses,
+  PROJECT_STATUS_FINISH,
+  PROJECT_STATUS_START,
   projectStatusesOrDefaults,
 } from "@/lib/project-statuses";
-import { messageFrom } from "@/lib/errors";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
-/** One line per field: icon, small caps label, then the control — the same
- *  shape a normal task's detail panel uses. */
+export type ProjectNodeKind = "project" | "job";
+type ProjectNodeDoc = Doc<"projects"> | Doc<"projectJobs">;
+
+const chipBase =
+  "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors";
+const ROUND_CHECK =
+  "mt-1 size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3";
+
+/** One line per field: icon, small caps label, then the control. */
 function Row({
   icon: Icon,
   label,
@@ -97,44 +98,58 @@ function Row({
 }
 
 /**
- * A flagged product's whole side panel in one card: the costing fields it
- * always had (dates, priority, status, unit, note) plus the features a normal
- * task has — who it is assigned to, the permissions its owner hands out, a
- * star, a reminder, tags and steps. One line per field, like the task panel.
+ * Side panel for a project or a job. A project groups jobs and a job groups
+ * products, and both now carry exactly what a task carries: who it is handed
+ * to and what they may do, a due date, a reminder, a priority, a repeat, tags,
+ * notes, steps, files, the issues raised on it and the conversation about it.
+ * The same conditions apply — only the owner's permissions decide what can be
+ * changed, and an open issue stops it being finished.
  */
-export default function ProductDetailPanel({
-  fg,
-  jobs,
-  projects,
+export default function ProjectDetailPanel({
+  kind,
+  doc,
+  parentLabel,
   onClose,
   onDelete,
   canEdit = true,
 }: {
-  fg: FgDoc;
-  jobs: JobDoc[];
-  projects: Doc<"projects">[];
+  kind: ProjectNodeKind;
+  doc: ProjectNodeDoc;
+  /** The project a job sits under, for the line below the title. */
+  parentLabel?: string;
   onClose: () => void;
   onDelete?: () => void;
   canEdit?: boolean;
 }) {
-  const updateFg = useMutation(api.costing.updateFinishedGood);
-  const setStatus = useMutation(api.costing.setFgProjectStatus);
-  const setCompleted = useMutation(api.costing.setFgCompleted);
-  const addStep = useMutation(api.productTasks.addStep);
-  const toggleStep = useMutation(api.productTasks.toggleStep);
-  const removeStep = useMutation(api.productTasks.removeStep);
-  const statusesQuery = useQuery(api.settings.listProjectStatuses);
-  const projectStatuses = projectStatusesOrDefaults(statusesQuery ?? undefined);
+  const id = String(doc._id);
+  const updateM = useMutation(api.projectTasks.update);
+  const setStatusJobM = useMutation(api.jobs.setJobProjectStatus);
+  const setStatusProjectM = useMutation(api.costing.setProjectProjectStatus);
+  const addStepM = useMutation(api.projectTasks.addStep);
+  const toggleStepM = useMutation(api.projectTasks.toggleStep);
+  const renameStepM = useMutation(api.projectTasks.renameStep);
+  const removeStepM = useMutation(api.projectTasks.removeStep);
+  const addAttachmentM = useMutation(api.projectTasks.addAttachment);
+  const removeAttachmentM = useMutation(api.projectTasks.removeAttachment);
+
+  const rights = useQuery(api.projectTasks.rights, { kind, id });
+  const steps = useQuery(api.projectTasks.listSteps, { kind, id });
   const peopleData = useQuery(api.tasks.people);
   const groupsData = useQuery(api.userGroups.list);
-  const rights = useQuery(api.productTasks.myRights, { id: fg._id });
-  const steps = useQuery(api.productTasks.listSteps, { fgId: fg._id });
+  const statusesQuery = useQuery(api.settings.listProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(statusesQuery);
 
   const [assignOpen, setAssignOpen] = useState(false);
   const [stepDraft, setStepDraft] = useState("");
+  const [renamingStep, setRenamingStep] = useState<string | null>(null);
+  const [stepRenameDraft, setStepRenameDraft] = useState("");
   const [tagDraft, setTagDraft] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [nameDraft, setNameDraft] = useState(doc.name);
+  const [notesDraft, setNotesDraft] = useState(
+    ("description" in doc ? doc.description : undefined) ?? "",
+  );
   const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const peopleById = useMemo(
@@ -145,38 +160,29 @@ export default function ProductDetailPanel({
     () => new Map((groupsData ?? []).map((g) => [g._id, g] as const)),
     [groupsData],
   );
-  const assignees = useMemo(
-    () => assigneesOfTask(fg, peopleById),
-    [fg, peopleById],
-  );
-  const groupIds = fg.groupIds ?? [];
-  const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
-  const parentJob = jobs.find((j) => jobIds.includes(j._id));
-  const project = parentJob
-    ? projects.find((p) => p._id === parentJob.projectId)
-    : undefined;
-  const currentStatus = fg.projectStatus ?? (fg.isCompleted ? "Finish" : "Listed");
-  // once production has started, Listed and Finish are off limits: they are
-  // reached by starting production and by finishing the job
-  const statusChoices =
-    fg.productionStartedAt === undefined
-      ? projectStatuses
-      : middleProjectStatuses(projectStatuses, currentStatus);
+  const assignees = useMemo(() => assigneesOfTask(doc, peopleById), [doc, peopleById]);
+  const groupIds = doc.groupIds ?? [];
+  const attachments = useMemo(() => parseAttachments(doc.attachments), [doc.attachments]);
+  const doneSteps = (steps ?? []).filter((s) => s.isCompleted).length;
 
-  // the role gates the panel; the product's own grant narrows it
+  const projectDoc = kind === "project" ? (doc as Doc<"projects">) : null;
+  const jobDoc = kind === "job" ? (doc as Doc<"projectJobs">) : null;
+  const currentStatus =
+    projectDoc !== null
+      ? projectDocStatus(projectDoc, projectStatuses)
+      : jobProjectStatus(jobDoc as Doc<"projectJobs">, projectStatuses);
+  const isFinished = currentStatus === PROJECT_STATUS_FINISH;
+
+  // the role gates the panel; the item's own grant narrows it
   const mayEdit = canEdit && (rights?.canEdit ?? true);
   const mayComplete = canEdit && (rights?.canComplete ?? true);
   const mayOptions = canEdit && (rights?.canChangeOptions ?? true);
   const mayDelete = canEdit && (rights?.canDelete ?? true);
-  const attachments = useMemo(
-    () => parseAttachments(fg.attachments),
-    [fg.attachments],
-  );
 
   const patch = async (values: Record<string, unknown>) => {
     setBusy(true);
     try {
-      await updateFg({ id: fg._id, ...values } as never);
+      await updateM({ kind, id, ...values } as never);
     } catch (error) {
       toast.error(messageFrom(error, "Couldn't save that change."));
     } finally {
@@ -184,17 +190,15 @@ export default function ProductDetailPanel({
     }
   };
 
-  const submitStep = async () => {
-    const text = stepDraft.trim();
-    if (text.length === 0) return;
-    setBusy(true);
+  const changeStatus = async (status: string) => {
     try {
-      await addStep({ fgId: fg._id, text });
-      setStepDraft("");
+      if (kind === "job") {
+        await setStatusJobM({ id: doc._id as Doc<"projectJobs">["_id"], status });
+      } else {
+        await setStatusProjectM({ id: doc._id as Doc<"projects">["_id"], status });
+      }
     } catch (error) {
-      toast.error(messageFrom(error, "Couldn't add that step."));
-    } finally {
-      setBusy(false);
+      toast.error(messageFrom(error, "Couldn't change that status."));
     }
   };
 
@@ -206,15 +210,41 @@ export default function ProductDetailPanel({
     if (parts.length === 0) return;
     setBusy(true);
     try {
-      await updateFg({
-        id: fg._id,
-        tags: [...new Set([...(fg.tags ?? []), ...parts])],
-      } as never);
+      await updateM({
+        kind,
+        id,
+        tags: [...new Set([...(doc.tags ?? []), ...parts])],
+      });
       setTagDraft("");
     } catch (error) {
       toast.error(messageFrom(error, "Couldn't add those tags."));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const submitStep = async () => {
+    const text = stepDraft.trim();
+    if (text.length === 0) return;
+    setBusy(true);
+    try {
+      await addStepM({ kind, id, text });
+      setStepDraft("");
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't add that step."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveStepName = async (stepId: string) => {
+    const next = stepRenameDraft.trim();
+    setRenamingStep(null);
+    if (next.length === 0) return;
+    try {
+      await renameStepM({ kind, stepId, text: next });
+    } catch (error) {
+      toast.error(messageFrom(error, "Couldn't rename that step."));
     }
   };
 
@@ -234,13 +264,14 @@ export default function ProductDetailPanel({
         reader.onerror = () => reject(reader.error);
         reader.readAsDataURL(file);
       });
-      await updateFg({
-        id: fg._id,
-        attachments: JSON.stringify([
-          ...attachments,
-          { id: crypto.randomUUID(), name: file.name, type: file.type, size: file.size, data },
-        ]),
-      } as never);
+      await addAttachmentM({
+        kind,
+        id,
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        data,
+      });
     } catch (error) {
       toast.error(messageFrom(error, "Couldn't attach that file."));
     } finally {
@@ -248,24 +279,13 @@ export default function ProductDetailPanel({
     }
   };
 
-  const removeFile = async (attachmentId: string) => {
-    try {
-      await updateFg({
-        id: fg._id,
-        attachments: JSON.stringify(attachments.filter((a) => a.id !== attachmentId)),
-      } as never);
-    } catch (error) {
-      toast.error(messageFrom(error, "Couldn't remove the file."));
-    }
-  };
-
-  const doneSteps = (steps ?? []).filter((s) => s.isCompleted).length;
-
   return (
     <aside className="w-full shrink-0 border-border/60 lg:w-80 lg:border-l">
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
-          <p className="text-sm font-semibold">Product details</p>
+          <p className="text-sm font-semibold">
+            {kind === "project" ? "Project details" : "Job details"}
+          </p>
           <button
             type="button"
             aria-label="Close details"
@@ -280,52 +300,55 @@ export default function ProductDetailPanel({
           {/* name + done, like a task */}
           <div className="flex items-start gap-2.5">
             <Checkbox
-              checked={fg.isCompleted ?? false}
-              disabled={!mayComplete || busy}
+              checked={isFinished}
+              disabled={!mayComplete}
               onCheckedChange={() =>
-                void setCompleted({ id: fg._id, completed: !fg.isCompleted })
-                  .then(() => undefined)
-                  .catch((error) =>
-                    toast.error(messageFrom(error, "Couldn't update the product.")),
-                  )
+                void changeStatus(
+                  isFinished ? PROJECT_STATUS_START : PROJECT_STATUS_FINISH,
+                )
               }
-              aria-label={fg.isCompleted ? "Reopen product" : "Mark product as done"}
-              className="mt-1 size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3"
+              aria-label={isFinished ? "Reopen" : "Mark as finished"}
+              className={ROUND_CHECK}
             />
             <input
-              value={fg.name}
+              value={nameDraft}
               readOnly={!mayEdit}
-              onChange={(e) => void patch({ name: e.target.value })}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={() => {
+                if (!mayEdit || nameDraft.trim() === doc.name) return;
+                if (nameDraft.trim().length === 0) {
+                  setNameDraft(doc.name);
+                  return;
+                }
+                void patch({ name: nameDraft });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") setNameDraft(doc.name);
+              }}
               className="w-full bg-transparent text-[15px] font-medium outline-none"
             />
             <button
               type="button"
-              aria-pressed={fg.starred === true}
-              title={fg.starred ? "Remove the star" : "Star this product"}
+              aria-pressed={doc.starred === true}
+              title={doc.starred ? "Remove the star" : "Star this"}
               disabled={!mayEdit || busy}
-              onClick={() => void patch({ starred: !fg.starred })}
+              onClick={() => void patch({ starred: !doc.starred })}
               className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
             >
               <Star
-                className={cn(
-                  "size-4",
-                  fg.starred && "fill-amber-400 text-amber-500",
-                )}
+                className={cn("size-4", doc.starred && "fill-amber-400 text-amber-500")}
               />
             </button>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            <Package className="mr-1 inline size-3 text-violet-500/80" />
-            {parentJob ? (
-              <>
-                {parentJob.name}
-                {parentJob.code ? ` · ${parentJob.code}` : ""}
-                {project ? ` — ${project.name}` : ""}
-              </>
+            {kind === "project" ? (
+              <Folder className="mr-1 inline size-3 text-sky-500/80" />
             ) : (
-              "Standalone product"
+              <Briefcase className="mr-1 inline size-3 text-sky-500/80" />
             )}
-            {fg.code ? ` · ${fg.code}` : ""}
+            {kind === "project" ? "Project" : parentLabel ?? "Job"}
+            {doc.code ? ` · ${doc.code}` : ""}
           </p>
 
           <div className="mt-4">
@@ -355,13 +378,13 @@ export default function ProductDetailPanel({
               </button>
               {groupIds.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1">
-                  {groupIds.map((id) => (
+                  {groupIds.map((gid) => (
                     <span
-                      key={id}
+                      key={gid}
                       className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
                     >
                       <Users className="size-2.5" />
-                      {groupsById.get(id)?.name ?? "Group"}
+                      {groupsById.get(gid)?.name ?? "Group"}
                     </span>
                   ))}
                 </div>
@@ -369,8 +392,15 @@ export default function ProductDetailPanel({
               {rights !== undefined && !rights.isOwner && (
                 <p className="mt-1.5 text-[11px] text-muted-foreground">
                   {rights.canEdit || rights.canComplete
-                    ? `You can ${[rights.canEdit && "edit", rights.canComplete && "complete", rights.canChangeOptions && "change options", rights.canDelete && "delete"].filter(Boolean).join(", ")} this product.`
-                    : "You can see this product, but only whoever added it can act on it."}
+                    ? `You can ${[
+                        rights.canEdit && "edit",
+                        rights.canComplete && "complete",
+                        rights.canChangeOptions && "change options",
+                        rights.canDelete && "delete",
+                      ]
+                        .filter(Boolean)
+                        .join(", ")} this ${kind}.`
+                    : `You can see this ${kind}, but only whoever added it can act on it.`}
                 </p>
               )}
             </Row>
@@ -381,26 +411,32 @@ export default function ProductDetailPanel({
               label="Due date"
               locked={!mayOptions}
               onClear={
-                fg.dueAt !== undefined
-                  ? () => void patch({ dueAt: undefined })
-                  : undefined
+                doc.dueAt !== undefined ? () => void patch({ clearDue: true }) : undefined
               }
             >
               <input
                 type="datetime-local"
-                value={fg.dueAt !== undefined ? toLocalInput(new Date(fg.dueAt)) : ""}
+                value={doc.dueAt !== undefined ? toLocalInput(new Date(doc.dueAt)) : ""}
                 onChange={(e) =>
                   void patch({
-                    dueAt: e.target.value
-                      ? new Date(e.target.value).getTime()
-                      : undefined,
+                    dueAt: e.target.value ? new Date(e.target.value).getTime() : undefined,
+                    clearDue: e.target.value === "",
                   })
                 }
                 className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               />
-              {parentJob?.dueAt !== undefined && (
+              {doc.dueAt !== undefined && (
                 <p className="mt-1 text-[11px] text-muted-foreground">
-                  Job due: {formatDueLabel(parentJob.dueAt)}
+                  {formatDueLabel(doc.dueAt)} ·{" "}
+                  <span
+                    className={cn(
+                      daysLeftLabel(doc.dueAt).overdue
+                        ? "font-medium text-destructive"
+                        : "text-primary",
+                    )}
+                  >
+                    {daysLeftLabel(doc.dueAt).text}
+                  </span>
                 </p>
               )}
             </Row>
@@ -409,19 +445,19 @@ export default function ProductDetailPanel({
             <Row icon={AlarmClock} label="Reminder" locked={!mayOptions}>
               <select
                 value=""
-                disabled={!mayOptions || busy || fg.dueAt === undefined}
+                disabled={!mayOptions || busy || doc.dueAt === undefined}
                 onChange={(e) => {
                   const offset = REMINDER_OFFSETS[Number(e.target.value)];
                   if (offset === undefined || offset.minutes === null) return;
-                  if (fg.dueAt === undefined) return;
-                  void patch({ remindAt: fg.dueAt - offset.minutes * 60_000 });
+                  if (doc.dueAt === undefined) return;
+                  void patch({ remindAt: doc.dueAt - offset.minutes * 60_000 });
                 }}
                 className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
               >
                 <option value="">
-                  {fg.remindAt !== undefined
+                  {doc.remindAt !== undefined
                     ? "Reminder set — change"
-                    : fg.dueAt === undefined
+                    : doc.dueAt === undefined
                       ? "Set a due date first"
                       : "Add a reminder…"}
                 </option>
@@ -431,11 +467,20 @@ export default function ProductDetailPanel({
                   </option>
                 ))}
               </select>
-              {fg.remindAt !== undefined && (
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {new Date(fg.remindAt).toLocaleString()}
-                </p>
-              )}
+              {doc.remindAt !== undefined &&
+                (mayOptions ? (
+                  <button
+                    type="button"
+                    onClick={() => void patch({ clearRemind: true })}
+                    className="mt-1 text-[11px] text-muted-foreground hover:text-destructive"
+                  >
+                    {new Date(doc.remindAt).toLocaleString()} · clear
+                  </button>
+                ) : (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {new Date(doc.remindAt).toLocaleString()}
+                  </p>
+                ))}
             </Row>
 
             {/* priority */}
@@ -448,16 +493,21 @@ export default function ProductDetailPanel({
                     disabled={busy}
                     className={cn(
                       chipBase,
-                      fg.priority === p
-                        ? `${prioChip[p]} border-transparent`
+                      doc.priority === p
+                        ? `${PRIORITY_META[p].chip} border-transparent`
                         : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                     onClick={() =>
-                      void patch({ priority: fg.priority === p ? undefined : p })
+                      doc.priority === p
+                        ? void patch({ clearPriority: true })
+                        : void patch({ priority: p })
                     }
                   >
                     <span
-                      className={cn("mr-1 inline-block size-1.5 rounded-full", PRIORITY_META[p].dot)}
+                      className={cn(
+                        "mr-1 inline-block size-1.5 rounded-full",
+                        PRIORITY_META[p].dot,
+                      )}
                     />
                     {p[0]!.toUpperCase() + p.slice(1)}
                   </button>
@@ -471,14 +521,14 @@ export default function ProductDetailPanel({
               label="Repeat"
               locked={!mayOptions}
               onClear={
-                fg.recurrence !== undefined
+                doc.recurrence !== undefined
                   ? () => void patch({ clearRecurrence: true })
                   : undefined
               }
             >
               <div className="flex flex-wrap gap-1.5">
                 {(["daily", "weekly", "monthly"] as const).map((r) => {
-                  const active: Recurrence | undefined = fg.recurrence;
+                  const active: Recurrence | undefined = doc.recurrence;
                   return (
                     <button
                       key={r}
@@ -501,22 +551,23 @@ export default function ProductDetailPanel({
                   );
                 })}
               </div>
-              {fg.recurrence !== undefined && (
+              {doc.recurrence !== undefined && (
                 <p className="mt-1 text-[11px] text-muted-foreground">
-                  When completed, the next occurrence is created automatically.
+                  When {kind === "job" ? "the job" : "the project"} is completed,
+                  the next one is created automatically.
                 </p>
               )}
             </Row>
 
             {/* status */}
-            <Row icon={Check} label="Status" locked={!mayOptions}>
+            <Row icon={Check} label="Status" locked={!mayOptions && !mayComplete}>
               <select
                 value={currentStatus}
-                onChange={(e) => void setStatus({ id: fg._id, status: e.target.value })}
+                onChange={(e) => void changeStatus(e.target.value)}
                 disabled={busy}
                 className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               >
-                {statusChoices.map((status) => (
+                {projectStatuses.map((status) => (
                   <option key={status} value={status}>
                     {status}
                   </option>
@@ -524,42 +575,48 @@ export default function ProductDetailPanel({
               </select>
             </Row>
 
-            {/* qty, shown next to the name in every product row */}
-            <Row icon={Hash} label="Qty" locked={!mayEdit}>
-              <input
-                type="number"
-                min={0}
-                step="any"
-                value={fg.qty ?? ""}
-                disabled={!mayEdit}
-                onChange={(e) =>
-                  patch({
-                    qty:
-                      e.target.value.trim() === "" ? undefined : Number(e.target.value),
-                  })
-                }
-                placeholder="e.g. 12"
-                className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </Row>
-
-            {/* unit */}
-            <Row icon={Package} label="Unit" locked={!mayEdit}>
-              <input
-                value={fg.unit ?? ""}
-                disabled={!mayEdit}
-                onChange={(e) => void patch({ unit: e.target.value })}
-                placeholder="e.g. pcs"
-                className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </Row>
+            {/* project-only fields */}
+            {projectDoc !== null && (
+              <>
+                <Row icon={Briefcase} label="Client" locked={!mayOptions}>
+                  <input
+                    defaultValue={projectDoc.client ?? ""}
+                    disabled={!mayOptions}
+                    onBlur={(e) => {
+                      if (e.target.value === (projectDoc.client ?? "")) return;
+                      void patch({ client: e.target.value });
+                    }}
+                    placeholder="e.g. Acme Ltd"
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </Row>
+                <Row icon={Hash} label="Budget" locked={!mayOptions}>
+                  <input
+                    type="number"
+                    min={0}
+                    defaultValue={projectDoc.budget ?? ""}
+                    disabled={!mayOptions}
+                    onBlur={(e) => {
+                      const next =
+                        e.target.value === "" ? undefined : Number(e.target.value);
+                      if (next === projectDoc.budget) return;
+                      void patch(
+                        next === undefined ? { clearBudget: true } : { budget: next },
+                      );
+                    }}
+                    placeholder="Planned budget"
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </Row>
+              </>
+            )}
 
             {/* tags */}
-            <Row icon={Tag} label="Tags" locked={!mayOptions}>
+            <Row icon={Tag} label="Tags" locked={!mayEdit}>
               <div className="flex gap-1.5">
                 <input
                   value={tagDraft}
-                  disabled={!mayOptions || busy}
+                  disabled={!mayEdit || busy}
                   onChange={(e) => setTagDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -572,7 +629,7 @@ export default function ProductDetailPanel({
                 />
                 <button
                   type="button"
-                  disabled={!mayOptions || busy || tagDraft.trim().length === 0}
+                  disabled={!mayEdit || busy || tagDraft.trim().length === 0}
                   onClick={() => void addTags()}
                   className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
                   aria-label="Add tag"
@@ -580,20 +637,15 @@ export default function ProductDetailPanel({
                   <Plus className="size-3.5" />
                 </button>
               </div>
-              {(fg.tags ?? []).length > 0 && (
+              {(doc.tags ?? []).length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1">
-                  {(fg.tags ?? []).map((tag) => (
+                  {(doc.tags ?? []).map((tag) => (
                     <span
                       key={tag}
-                      className={cn(
-                        tagChip,
-                        "gap-1",
-                        mayOptions &&
-                          "cursor-pointer hover:line-through",
-                      )}
+                      className={cn(tagChip, "gap-1", mayEdit && "cursor-pointer hover:line-through")}
                       onClick={() =>
-                        mayOptions &&
-                        void patch({ tags: (fg.tags ?? []).filter((t) => t !== tag) })
+                        mayEdit &&
+                        void patch({ tags: (doc.tags ?? []).filter((t) => t !== tag) })
                       }
                     >
                       {tag}
@@ -603,20 +655,29 @@ export default function ProductDetailPanel({
               )}
             </Row>
 
-            {/* note */}
-            <Row icon={FileText} label="Note" locked={!mayEdit}>
+            {/* notes */}
+            <Row icon={FileText} label="Notes" locked={!mayEdit}>
               <textarea
-                value={fg.note ?? ""}
+                value={notesDraft}
                 disabled={!mayEdit}
-                onChange={(e) => void patch({ note: e.target.value })}
+                onChange={(e) => setNotesDraft(e.target.value)}
+                onBlur={() => {
+                  const current =
+                    ("description" in doc ? doc.description : undefined) ?? "";
+                  if (notesDraft === current) return;
+                  void patch({ notes: notesDraft });
+                }}
                 rows={3}
-                placeholder="Add a note…"
+                placeholder="Extra information, instructions, or a link…"
                 className="w-full resize-y rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               />
             </Row>
 
             {/* steps */}
-            <Row icon={ListTodo} label={`Steps${steps ? ` (${doneSteps}/${steps.length})` : ""}`}>
+            <Row
+              icon={ListTodo}
+              label={`Steps${steps ? ` (${doneSteps}/${steps.length})` : ""}`}
+            >
               {steps === undefined ? (
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Loader2 className="size-3 animate-spin" />
@@ -631,36 +692,51 @@ export default function ProductDetailPanel({
                         className="flex items-center gap-2 rounded-md px-1 py-1 hover:bg-accent"
                       >
                         <Checkbox
-                          checked={step.isCompleted === true}
+                          checked={step.isCompleted}
                           disabled={!mayComplete || busy}
                           onCheckedChange={() =>
-                            void toggleStep({ stepId: step._id }).catch((error) =>
-                              toast.error(
-                                messageFrom(error, "Couldn't update that step."),
-                              ),
+                            void toggleStepM({ kind, stepId: step._id }).catch((error) =>
+                              toast.error(messageFrom(error, "Couldn't update that step.")),
                             )
                           }
                           aria-label={`Mark “${step.text}” as ${step.isCompleted ? "not done" : "done"}`}
                           className="size-3.5 rounded-[3px]"
                         />
-                        <span
-                          className={cn(
-                            "min-w-0 flex-1 truncate text-sm",
-                            step.isCompleted &&
-                              "text-muted-foreground line-through",
-                          )}
-                        >
-                          {step.text}
-                        </span>
+                        {renamingStep === step._id ? (
+                          <input
+                            autoFocus
+                            value={stepRenameDraft}
+                            onChange={(e) => setStepRenameDraft(e.target.value)}
+                            onBlur={() => void saveStepName(step._id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.currentTarget.blur();
+                              if (e.key === "Escape") setRenamingStep(null);
+                            }}
+                            className="min-w-0 flex-1 rounded border bg-card px-1 text-sm outline-none"
+                          />
+                        ) : (
+                          <span
+                            onDoubleClick={() => {
+                              if (!mayEdit) return;
+                              setStepRenameDraft(step.text);
+                              setRenamingStep(step._id);
+                            }}
+                            title={mayEdit ? "Double-click to rename" : undefined}
+                            className={cn(
+                              "min-w-0 flex-1 truncate text-sm",
+                              step.isCompleted && "text-muted-foreground line-through",
+                            )}
+                          >
+                            {step.text}
+                          </span>
+                        )}
                         {mayEdit && (
                           <button
                             type="button"
                             aria-label={`Remove step ${step.text}`}
                             onClick={() =>
-                              void removeStep({ stepId: step._id }).catch((error) =>
-                                toast.error(
-                                  messageFrom(error, "Couldn't remove that step."),
-                                ),
+                              void removeStepM({ kind, stepId: step._id }).catch((error) =>
+                                toast.error(messageFrom(error, "Couldn't remove that step.")),
                               )
                             }
                             className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:text-destructive"
@@ -687,7 +763,7 @@ export default function ProductDetailPanel({
                           void submitStep();
                         }
                       }}
-                      placeholder="Add a step and press Enter"
+                      placeholder="Break it into a step…"
                       className="h-8 min-w-0 flex-1 rounded-lg border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
                     />
                     <button
@@ -742,7 +818,11 @@ export default function ProductDetailPanel({
                           type="button"
                           aria-label={`Remove ${a.name}`}
                           className="hidden size-5 shrink-0 place-items-center rounded text-muted-foreground hover:text-destructive group-hover/at:grid"
-                          onClick={() => void removeFile(a.id)}
+                          onClick={() =>
+                            void removeAttachmentM({ kind, id, attachmentId: a.id }).catch(
+                              () => toast.error("Couldn't remove the file."),
+                            )
+                          }
                         >
                           <X className="size-3" />
                         </button>
@@ -776,12 +856,12 @@ export default function ProductDetailPanel({
               )}
             </Row>
 
-            {/* issues raised on the product */}
-            <NodeIssues kind="product" id={String(fg._id)} canEdit={mayEdit || mayComplete} />
+            {/* issues raised on it */}
+            <NodeIssues kind={kind} id={id} canEdit={mayEdit || mayComplete} />
 
             {/* the conversation */}
             <div className="mt-4 border-t border-border/60 pt-4">
-              <NodeComments kind="product" id={String(fg._id)} />
+              <NodeComments kind={kind} id={id} />
             </div>
           </div>
         </div>
@@ -797,15 +877,15 @@ export default function ProductDetailPanel({
               onClick={onDelete}
             >
               <Trash2 className="size-3.5" />
-              Delete product
+              Delete {kind}
             </Button>
           </div>
         )}
       </div>
 
       <AssignDialog
-        target={targetOf(fg, "product")}
-        title="Assign this product"
+        target={targetOf(doc, kind)}
+        title={kind === "project" ? "Assign this project" : "Assign this job"}
         open={assignOpen}
         onOpenChange={setAssignOpen}
         canEdit={canEdit}
