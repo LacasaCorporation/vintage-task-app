@@ -13,6 +13,8 @@ type FgDoc = Doc<"finishedGoods">;
  */
 export type CostingView =
   | { kind: "materials" }
+  /** Everything carrying the Active mark, gathered in one list. */
+  | { kind: "active" }
   | { kind: "purchase" }
   | { kind: "sales" }
   | { kind: "products" }

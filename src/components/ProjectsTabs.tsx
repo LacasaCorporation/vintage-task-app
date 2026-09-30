@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 import { ProductionButton } from "@/components/FlaggedLists";
+import ActiveToggle from "@/components/ActiveToggle";
 import type { FilterOption } from "@/components/FilterMenu";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,7 @@ import { batchCost } from "@/lib/product-cost";
 export type ProductFilter =
   | "all"
   | "flagged"
+  | "active"
   | "in-production"
   | "finished"
   | "unflagged";
@@ -25,19 +27,26 @@ export type ProductFilter =
 export const PRODUCT_FILTERS: readonly FilterOption<ProductFilter>[] = [
   { value: "all", label: "All items", hint: "Every product" },
   { value: "flagged", label: "Flagged", hint: "On the Projects board" },
+  { value: "active", label: "Active", hint: "Marked as being worked on" },
   { value: "in-production", label: "In production", hint: "Materials out of stock" },
   { value: "finished", label: "Finished", hint: "Completed products" },
   { value: "unflagged", label: "Not flagged", hint: "Everything still to plan" },
 ];
 
 /** What the job list is narrowed down to. */
-export type JobFilter = "all" | "flagged" | "active" | "completed";
+export type JobFilter =
+  | "all"
+  | "flagged"
+  | "active"
+  | "open"
+  | "completed";
 
 /** Filter choices offered on the job list. */
 export const JOB_FILTERS: readonly FilterOption<JobFilter>[] = [
   { value: "all", label: "All items", hint: "Every job" },
   { value: "flagged", label: "Flagged", hint: "On the Projects board" },
-  { value: "active", label: "Active", hint: "Not finished yet" },
+  { value: "active", label: "Active", hint: "Marked as being worked on" },
+  { value: "open", label: "Open", hint: "Not finished yet" },
   { value: "completed", label: "Completed", hint: "Already done" },
 ];
 
@@ -46,6 +55,8 @@ export function keepsProduct(fg: FgDoc, filter: ProductFilter): boolean {
   switch (filter) {
     case "flagged":
       return fg.isFlagged === true;
+    case "active":
+      return fg.isActive === true;
     case "unflagged":
       return fg.isFlagged !== true;
     case "in-production":
@@ -63,6 +74,8 @@ export function keepsJob(job: JobDoc, filter: JobFilter): boolean {
     case "flagged":
       return job.isFlagged === true;
     case "active":
+      return job.isActive === true;
+    case "open":
       return job.status !== "completed" && job.status !== "cancelled";
     case "completed":
       return job.status === "completed";
@@ -216,6 +229,10 @@ export function JobsList({
                           {job.code}
                         </span>
                       )}
+                      <ActiveToggle
+                        target={{ kind: "job", id: job._id }}
+                        active={job.isActive === true}
+                      />
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-xs">
@@ -397,6 +414,10 @@ export function ProductsList({
                           {fg.code}
                         </span>
                       )}
+                      <ActiveToggle
+                        target={{ kind: "product", id: fg._id }}
+                        active={fg.isActive === true}
+                      />
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-xs">

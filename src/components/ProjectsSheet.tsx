@@ -28,6 +28,7 @@ import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
+import ActiveToggle from "@/components/ActiveToggle";
 import ProductCodeInline from "@/components/ProductCodeInline";
 import ProductTagsInline from "@/components/ProductTagsInline";
 import { batchCost, batchQty, costByProduct } from "@/lib/product-cost";
@@ -62,9 +63,12 @@ import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
 const ProjectDetailPanel = lazy(() => import("@/components/ProjectDetailPanel"));
 const ProductDetailPanel = lazy(() => import("@/components/ProductDetailPanel"));
 
-const PROJECT_FILTERS: readonly FilterOption<"all" | "flagged">[] = [
+type ProjectFilter = "all" | "flagged" | "active";
+
+const PROJECT_FILTERS: readonly FilterOption<ProjectFilter>[] = [
   { value: "all", label: "All items", hint: "Every project" },
   { value: "flagged", label: "Flagged", hint: "On the Projects board" },
+  { value: "active", label: "Active", hint: "Marked as being worked on" },
 ];
 import ProjectsPrintSheet, {
   buildPrintRows,
@@ -210,7 +214,7 @@ export default function ProjectsSheet({
     "projects" | "jobs" | "products" | "customers" | "productions"
   >("projects");
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [flagFilter, setFlagFilter] = useState<"all" | "flagged">("all");
+  const [flagFilter, setFlagFilter] = useState<ProjectFilter>("all");
   const [jobFilter, setJobFilter] = useState<JobFilter>("all");
   const [productFilter, setProductFilter] = useState<ProductFilter>("all");
   const [printing, setPrinting] = useState(false);
@@ -438,6 +442,11 @@ export default function ProjectsSheet({
           )
         );
       });
+    }
+    if (flagFilter === "active") {
+      // only a real project record can carry the mark — a name-only group
+      // (products sharing a project name with no project behind it) cannot
+      list = list.filter((p) => p.project?.isActive === true);
     }
     const q = search.trim().toLowerCase();
     if (!q) return list;
@@ -718,7 +727,7 @@ export default function ProjectsSheet({
   const setActiveFilter = (next: string) => {
     if (tab === "jobs") setJobFilter(next as JobFilter);
     else if (tab === "products") setProductFilter(next as ProductFilter);
-    else setFlagFilter(next as "all" | "flagged");
+    else setFlagFilter(next as ProjectFilter);
   };
 
   const printFilterLabel =
@@ -732,7 +741,7 @@ export default function ProjectsSheet({
           : PRODUCT_FILTERS.find((o) => o.value === productFilter)?.label ?? null
         : flagFilter === "all"
           ? null
-          : "flagged only";
+          : PROJECT_FILTERS.find((o) => o.value === flagFilter)?.label ?? null;
 
   return (
     <div className="mt-4 space-y-4">
@@ -1010,6 +1019,13 @@ export default function ProjectsSheet({
 
                     {/* actions */}
                     <span className="ml-auto flex shrink-0 items-center gap-1">
+                      {detail && (
+                        <ActiveToggle
+                          target={{ kind: "project", id: detail._id }}
+                          active={detail.isActive === true}
+                          compact
+                        />
+                      )}
                       {detail && (
                         <button
                           type="button"
@@ -1363,6 +1379,11 @@ export default function ProjectsSheet({
                                   />
                                 )}
                               </button>
+                              <ActiveToggle
+                                target={{ kind: "job", id: job._id }}
+                                active={job.isActive === true}
+                                compact
+                              />
 
                               <span className="ml-auto flex shrink-0 items-center gap-0.5">
                                 {(job.status === "planning" ||
@@ -1579,6 +1600,11 @@ export default function ProjectsSheet({
                                   >
                                     <PackageMinus className="size-3" />
                                   </button>
+                                  <ActiveToggle
+                                    target={{ kind: "product", id: fg._id }}
+                                    active={fg.isActive === true}
+                                    compact
+                                  />
                                   <button
                                     type="button"
                                     title={
@@ -1687,6 +1713,11 @@ export default function ProjectsSheet({
                           >
                             <PackageMinus className="size-3" />
                           </button>
+                          <ActiveToggle
+                            target={{ kind: "product", id: fg._id }}
+                            active={fg.isActive === true}
+                            compact
+                          />
                           <button
                             type="button"
                             title={

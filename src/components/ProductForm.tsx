@@ -25,6 +25,7 @@ import {
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import StockMovementList from "@/components/StockMovementList";
 import ProductLedgerDialog from "@/components/ProductLedgerDialog";
+import ActiveToggle from "@/components/ActiveToggle";
 import { PRODUCT_SOURCE_LABEL } from "@/lib/stock-labels";
 import { useItemPermission } from "@/lib/useItemPermission";
 import type { ProductStockRow } from "@/lib/stock-types";
@@ -64,10 +65,16 @@ const isLocked = (fg: FgDoc) =>
   fg.isCompleted === true;
 
 /** How the product list is narrowed down by production state. */
-type ProductionFilter = "all" | "not-started" | "in-production" | "finished";
+type ProductionFilter =
+  | "all"
+  | "active"
+  | "not-started"
+  | "in-production"
+  | "finished";
 
 const PRODUCTION_FILTERS: readonly FilterOption<ProductionFilter>[] = [
   { value: "all", label: "All states", hint: "Every product" },
+  { value: "active", label: "Active", hint: "Marked as being worked on" },
   { value: "not-started", label: "Not started", hint: "Production not begun" },
   { value: "in-production", label: "In production", hint: "Materials are out of stock" },
   { value: "finished", label: "Finished", hint: "Completed products" },
@@ -75,6 +82,8 @@ const PRODUCTION_FILTERS: readonly FilterOption<ProductionFilter>[] = [
 
 function keepsProduction(fg: FgDoc, filter: ProductionFilter): boolean {
   switch (filter) {
+    case "active":
+      return fg.isActive === true;
     case "not-started":
       return fg.productionStartedAt === undefined;
     case "in-production":
@@ -1029,6 +1038,10 @@ export default function ProductForm({
                               )}
                             </DropdownMenuContent>
                           </DropdownMenu>
+                          <ActiveToggle
+                            target={{ kind: "product", id: f._id }}
+                            active={f.isActive === true}
+                          />
                         </span>
                       </td>
                     </tr>

@@ -2,6 +2,8 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import MaterialImportDialog from "@/components/MaterialImportDialog";
+import ActiveToggle from "@/components/ActiveToggle";
+import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
 import CreateMaterialDialog from "@/components/CreateMaterialDialog";
 import StockMovementList from "@/components/StockMovementList";
 import type { StockRow } from "@/lib/stock-types";
@@ -37,6 +39,14 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
+
+/** All materials, or only the ones marked active. */
+type MaterialFilter = "all" | "active";
+
+const MATERIAL_FILTERS: readonly FilterOption<MaterialFilter>[] = [
+  { value: "all", label: "All materials", hint: "The whole master list" },
+  { value: "active", label: "Active", hint: "Marked as being worked on" },
+];
 
 /**
  * The opening-balance view: what each material carried into the books. Saving
@@ -342,6 +352,8 @@ export default function MaterialsSheet({
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  /** All materials, or only the ones carrying the Active mark. */
+  const [usageFilter, setUsageFilter] = useState<MaterialFilter>("all");
   const [importOpen, setImportOpen] = useState(false);
   /** the material whose income / outgoing transactions are open */
   const [openStock, setOpenStock] = useState<Id<"rawMaterials"> | null>(null);
@@ -364,6 +376,7 @@ export default function MaterialsSheet({
     return materials
       .filter((m) => {
         if (categoryFilter !== "all" && (m.category ?? "") !== categoryFilter) return false;
+        if (usageFilter === "active" && m.isActive !== true) return false;
         if (!q) return true;
         return (
           m.name.toLowerCase().includes(q) ||
@@ -372,7 +385,7 @@ export default function MaterialsSheet({
         );
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [materials, search, categoryFilter]);
+  }, [materials, search, categoryFilter, usageFilter]);
 
   const exportCsv = () => {
     const lines = [
@@ -459,6 +472,12 @@ export default function MaterialsSheet({
               className="h-7 w-40 rounded-lg border bg-card pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
             />
           </div>
+          <FilterMenu
+            value={usageFilter}
+            options={MATERIAL_FILTERS}
+            onChange={setUsageFilter}
+            label="Show materials"
+          />
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
@@ -594,7 +613,7 @@ export default function MaterialsSheet({
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
-                    {search || categoryFilter !== "all"
+                    {search || categoryFilter !== "all" || usageFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No raw materials yet — add your first one above."}
                   </td>
@@ -656,6 +675,10 @@ export default function MaterialsSheet({
                     <td className="px-3 py-2">
                       <span className="flex items-center gap-2">
                         <span className="font-medium">{m.name}</span>
+                        <ActiveToggle
+                          target={{ kind: "material", id: m._id }}
+                          active={m.isActive === true}
+                        />
                         {(materialUsage.get(m._id)?.reasons.length ?? 0) > 0 && (
                           <span
                             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"

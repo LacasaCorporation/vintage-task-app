@@ -472,6 +472,10 @@ const schema = defineSchema(
       // what was already on hand before any bill was recorded; set from the
       // Opening balance tab and kept as the authoritative figure
       opening: v.optional(v.number()),
+      // marked active by hand — a working mark of its own, separate from any
+      // status, so the Active list can gather whatever is being worked on now
+      isActive: v.optional(v.boolean()),
+      activeAt: v.optional(v.number()),
     }).index("by_owner", ["ownerId"]),
 
     // a purchase bill: buying raw materials, which adds to their stock
@@ -853,6 +857,9 @@ const schema = defineSchema(
       projectStatus: v.optional(v.string()),
       // timestamp when the product was added to the flagged todo list
       flaggedAt: v.optional(v.number()),
+      // marked active by hand — a working mark of its own, separate from status
+      isActive: v.optional(v.boolean()),
+      activeAt: v.optional(v.number()),
       // its own due date & priority on the flagged board (defaults copied
       // from the parent job when the product is flagged)
       dueAt: v.optional(v.number()),
@@ -932,6 +939,9 @@ const schema = defineSchema(
       isFlagged: v.optional(v.boolean()),
       // timestamp when the job was added to the flagged todo list
       flaggedAt: v.optional(v.number()),
+      // marked active by hand — a working mark of its own, separate from status
+      isActive: v.optional(v.boolean()),
+      activeAt: v.optional(v.number()),
       /** Ordered custom Projects status; Start and Finish are fixed. */
       projectStatus: v.optional(v.string()),
       /** Who created the job — the owner allowed to reassign it and hand out
@@ -978,6 +988,9 @@ const schema = defineSchema(
       isFlagged: v.optional(v.boolean()),
       // timestamp when the project was added to the flagged todo list
       flaggedAt: v.optional(v.number()),
+      // marked active by hand — a working mark of its own, separate from status
+      isActive: v.optional(v.boolean()),
+      activeAt: v.optional(v.number()),
       /** Who created the project — the owner allowed to reassign it and hand
        *  out permissions on it, exactly as a task's creator is. */
       assigneeId: v.optional(v.id("users")),

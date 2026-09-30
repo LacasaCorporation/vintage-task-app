@@ -4,6 +4,7 @@ import {
   Boxes,
   CheckSquare,
   ChevronDown,
+  CircleDot,
   FileBarChart,
   Folder,
   Layers,
@@ -87,6 +88,7 @@ export default function PrimaryNav({
   materials,
   purchaseCount,
   projectCount,
+  activeCount,
   salesCount,
   accountCount,
   onSelectSection,
@@ -103,6 +105,8 @@ export default function PrimaryNav({
   purchaseCount: number;
   /** How many projects exist — the Projects row counts them and nothing else. */
   projectCount: number;
+  /** How many things carry the Active mark, across all four kinds. */
+  activeCount: number;
   salesCount: number;
   accountCount: number;
   onSelectSection: (section: PrimarySection) => void;
@@ -168,6 +172,13 @@ export default function PrimaryNav({
         active={inCosting && (view?.kind === "projects" || view === null)}
         n={projectCount}
         onClick={() => onSelectView({ kind: "projects" })}
+      />
+      <NavRow
+        label="Active"
+        Icon={CircleDot}
+        active={inCosting && view?.kind === "active"}
+        n={activeCount}
+        onClick={() => onSelectView({ kind: "active" })}
       />
       {canViewSales && (
         <NavRow
