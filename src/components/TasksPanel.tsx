@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
 import TaskIssues from "@/components/TaskIssues";
+import AttachmentStrip from "@/components/AttachmentStrip";
 import { useAppDialogs } from "@/components/AppDialogs";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
@@ -203,6 +204,24 @@ export default function TasksPanel({
   );
   const toggleStepIssues = (stepId: Id<"taskSteps">) =>
     setOpenStepIssueId((current) => (current === stepId ? null : stepId));
+
+  /** Tasks whose picture/file strip is open underneath the row. */
+  const [openFileRows, setOpenFileRows] = useState<Set<Id<"tasks">>>(new Set());
+  const toggleFileRow = useCallback((taskId: Id<"tasks">) => {
+    setOpenFileRows((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }, []);
+
+  /** The one subtask whose own pictures are open underneath it. */
+  const [openStepFilesId, setOpenStepFilesId] = useState<Id<"taskSteps"> | null>(
+    null,
+  );
+  const toggleStepFiles = (stepId: Id<"taskSteps">) =>
+    setOpenStepFilesId((current) => (current === stepId ? null : stepId));
 
   const toggleStepRow = (taskId: string) =>
     setOpenStepRows((current) => {
@@ -844,6 +863,8 @@ export default function TasksPanel({
                   const taskIssues = issuesByTask.get(task._id) ?? [];
                   const issuesOpen = taskIssues.filter((i) => !i.isSolved).length;
                   const issuesDropOpen = openIssueRows.has(task._id);
+                  const filesDropOpen = openFileRows.has(task._id);
+                  const taskFiles = parseAttachments(task.attachments);
                   const hasExtras =
                     task.dueAt !== undefined ||
                     task.tags !== undefined ||
@@ -1033,9 +1054,41 @@ export default function TasksPanel({
                                   </span>
                                 ))}
                               {parseAttachments(task.attachments).length > 0 && (
-                                <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                                <span
+                                  role="button"
+                                  tabIndex={0}
+                                  aria-expanded={filesDropOpen}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleFileRow(task._id);
+                                  }}
+                                  onDoubleClick={(e) => {
+                                    // a double-click here is not a rename
+                                    e.stopPropagation();
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      toggleFileRow(task._id);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
+                                    filesDropOpen
+                                      ? "bg-sky-500/10 text-sky-700 dark:text-sky-400"
+                                      : "text-muted-foreground hover:bg-sky-500/10 hover:text-sky-700 dark:hover:text-sky-400",
+                                  )}
+                                  title="Show the pictures and files on this task"
+                                >
                                   <Paperclip className="size-2.5" />
                                   {parseAttachments(task.attachments).length}
+                                  <ChevronDown
+                                    className={cn(
+                                      "size-2.5 transition-transform",
+                                      filesDropOpen && "rotate-180",
+                                    )}
+                                  />
                                 </span>
                               )}
                               <span
@@ -1330,8 +1383,30 @@ export default function TasksPanel({
                                           )}
                                           {parseAttachments(step.attachments).length > 0 && (
                                             <span
-                                              title={`${parseAttachments(step.attachments).length} attachment(s)`}
-                                              className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 px-1 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-400"
+                                              role="button"
+                                              tabIndex={0}
+                                              aria-expanded={openStepFilesId === step._id}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleStepFiles(step._id);
+                                              }}
+                                              onDoubleClick={(e) => {
+                                                e.stopPropagation();
+                                              }}
+                                              onKeyDown={(e) => {
+                                                if (e.key === "Enter" || e.key === " ") {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  toggleStepFiles(step._id);
+                                                }
+                                              }}
+                                              title={`${parseAttachments(step.attachments).length} attachment(s) on this subtask`}
+                                              className={cn(
+                                                "inline-flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[10px] font-medium transition-colors",
+                                                openStepFilesId === step._id
+                                                  ? "bg-sky-500/20 text-sky-700 ring-1 ring-sky-500/40 dark:text-sky-400"
+                                                  : "bg-sky-500/10 text-sky-700 hover:bg-sky-500/20 dark:text-sky-400",
+                                              )}
                                             >
                                               <Paperclip className="size-3" />
                                               {parseAttachments(step.attachments).length}
@@ -1516,6 +1591,17 @@ export default function TasksPanel({
                                         />
                                       )}
                                     </li>
+                                    {/* the subtask's own pictures, listed under it */}
+                                    {openStepFilesId === step._id &&
+                                      parseAttachments(step.attachments).length > 0 && (
+                                        <li className="py-1 pl-6 pr-2">
+                                          <AttachmentStrip
+                                            attachments={parseAttachments(
+                                              step.attachments,
+                                            )}
+                                          />
+                                        </li>
+                                      )}
                                     {/* the subtask's own issues, listed under it */}
                                     {openStepIssueId === step._id && (
                                       <li className="py-1 pl-6 pr-2">
@@ -1564,6 +1650,23 @@ export default function TasksPanel({
                                   text: s.text,
                                 }))}
                               />
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                      {/* pictures: a dropdown of thumbnails, the way files read
+                          everywhere else in the app */}
+                      <AnimatePresence initial={false}>
+                        {filesDropOpen && taskFiles.length > 0 && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.18 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="border-t border-border/60 bg-sky-500/[0.03] py-2.5 pr-4 pl-1 sm:pr-5 sm:pl-2">
+                              <AttachmentStrip attachments={taskFiles} />
                             </div>
                           </motion.div>
                         )}
