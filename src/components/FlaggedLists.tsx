@@ -8,6 +8,7 @@ import PriorityChip from "@/components/PriorityChip";
 import StatusSelect from "@/components/StatusSelect";
 import AssigneeChip from "@/components/AssigneeChip";
 import { assigneesOfTask } from "@/lib/task-people";
+import { isFlaggedProjectWork } from "@/lib/project-work";
 import type { Priority } from "@/lib/task-utils";
 import {
   PRIORITY_META,
@@ -885,6 +886,13 @@ export function ProductionButton({
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const running = fg.productionStartedAt !== undefined;
+
+  // Production is the work of flagged jobs. A product with no job has nothing
+  // to produce for, and one whose flag is off has not been put on the line
+  // yet, so the start button shows for flagged job work only — the same rule
+  // the Productions tab filters by, so the two lists always agree. A batch
+  // already running still shows here, so it can always be stopped.
+  if (!running && !isFlaggedProjectWork(fg)) return null;
 
   const run = async (
     action: () => Promise<unknown>,

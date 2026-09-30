@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { getSettings } from "./settings";
+import { flagAncestors, jobIdsOf } from "./flagCascade";
 import { stockIn, stockOut } from "./stock";
 import { produceStock } from "./productStock";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -141,9 +142,10 @@ export const start = mutation({
       });
     }
 
+    const flaggedAt = fg.flaggedAt ?? Date.now();
     await ctx.db.patch(fgId, {
       isFlagged: true,
-      flaggedAt: fg.flaggedAt ?? Date.now(),
+      flaggedAt,
       // starting production leaves "Listed" for a middle status
       projectStatus: middleProjectStatus(statuses),
       isCompleted: undefined,
@@ -157,6 +159,12 @@ export const start = mutation({
         qty,
       })),
     });
+    // a run in progress is project work like any other flagged product, so the
+    // job it belongs to and that job's project carry the flag too: the batch
+    // shows up under its job in the hierarchy and on the Productions tab at the
+    // same time, rather than only in the flat product list. A product with no
+    // job has no ancestor to flag, and that is left alone.
+    await flagAncestors(ctx, userId, jobIdsOf(fg), flaggedAt);
     return fgId;
   },
 });
