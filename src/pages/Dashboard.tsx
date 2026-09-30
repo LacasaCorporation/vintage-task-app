@@ -461,6 +461,7 @@ export default function Dashboard() {
   const ledgerAccounts = useQuery(api.accounting.listAccounts);
   const quotations = useQuery(api.sales.listQuotations);
   const finishedGoods = useQuery(api.costing.listFinishedGoods);
+  const projects = useQuery(api.costing.listProjects);
   const allJobs = useQuery(api.jobs.listJobs);
   const addFgM = useMutation(api.costing.addFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
@@ -748,6 +749,7 @@ export default function Dashboard() {
             finishedGoods={finishedGoods ?? []}
             materials={materials ?? []}
             purchaseCount={purchases?.length ?? 0}
+            projectCount={projects?.length ?? 0}
             salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
             accountCount={ledgerAccounts?.length ?? 0}
             onSelectSection={handleSelectSection}
@@ -878,6 +880,7 @@ export default function Dashboard() {
                 finishedGoods={finishedGoods ?? []}
                 materials={materials ?? []}
                 purchaseCount={purchases?.length ?? 0}
+                projectCount={projects?.length ?? 0}
                 salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
                 accountCount={ledgerAccounts?.length ?? 0}
                 onSelectSection={handleSelectSection}

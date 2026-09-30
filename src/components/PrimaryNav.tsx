@@ -12,7 +12,7 @@ import {
   Receipt,
   ShoppingCart,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { CostingView } from "@/components/CostingSidebar";
 import { ACCOUNTING_TABS } from "@/lib/accounting-tabs";
 import { cn } from "@/lib/utils";
@@ -86,6 +86,7 @@ export default function PrimaryNav({
   finishedGoods,
   materials,
   purchaseCount,
+  projectCount,
   salesCount,
   accountCount,
   onSelectSection,
@@ -100,6 +101,8 @@ export default function PrimaryNav({
   finishedGoods: FgDoc[];
   materials: MaterialDoc[];
   purchaseCount: number;
+  /** How many projects exist — the Projects row counts them and nothing else. */
+  projectCount: number;
   salesCount: number;
   accountCount: number;
   onSelectSection: (section: PrimarySection) => void;
@@ -115,10 +118,6 @@ export default function PrimaryNav({
   // the Accounts drill-down opens on its own whenever you are inside it
   const [accountsExpanded, setAccountsExpanded] = useState(false);
   const inCosting = section === "costing";
-  const projectCount = useMemo(
-    () => new Set(finishedGoods.map((fg) => fg.projectName ?? "Standalone")).size,
-    [finishedGoods],
-  );
   const onMaterials = view?.kind === "materials";
   const onProducts = view?.kind === "products";
   const inAccounting = inCosting && view?.kind === "accounting";
