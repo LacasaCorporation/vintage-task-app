@@ -1573,11 +1573,27 @@ function SalesReports({ range }: { range: Range }) {
     from: range.from,
     to: range.to,
   });
+  // the query names its groupings after what it read (products, customers);
+  // the two sides share one set of tables, so the names are bridged here
+  const analysis: DocAnalysis | undefined =
+    data === undefined
+      ? undefined
+      : {
+          bucket: data.bucket,
+          item: data.byProduct,
+          party: data.byCustomer,
+          byPeriod: data.byPeriod,
+          unpaid: data.unpaid,
+          total: data.totalInvoiced,
+          totalValue: data.totalValue,
+          totalOutstanding: data.totalOutstanding,
+          empty: data.empty,
+        };
   return (
     <DocumentReports
       tabs={SALES_TABS}
       words={SALES_WORDS}
-      analysis={data as unknown as DocAnalysis | undefined}
+      analysis={analysis}
       range={range}
     />
   );
@@ -1588,11 +1604,25 @@ function PurchaseReports({ range }: { range: Range }) {
     from: range.from,
     to: range.to,
   });
+  const analysis: DocAnalysis | undefined =
+    data === undefined
+      ? undefined
+      : {
+          bucket: data.bucket,
+          item: data.byMaterial,
+          party: data.bySupplier,
+          byPeriod: data.byPeriod,
+          unpaid: data.unpaid,
+          total: data.totalBilled,
+          totalValue: data.totalValue,
+          totalOutstanding: data.totalOutstanding,
+          empty: data.empty,
+        };
   return (
     <DocumentReports
       tabs={PURCHASE_TABS}
       words={PURCHASE_WORDS}
-      analysis={data as unknown as DocAnalysis | undefined}
+      analysis={analysis}
       range={range}
     />
   );
