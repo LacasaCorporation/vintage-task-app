@@ -7,6 +7,7 @@ import StockMovementList from "@/components/StockMovementList";
 import type { StockRow } from "@/lib/stock-types";
 import {
   AlertTriangle,
+  BadgeCheck,
   ChevronDown,
   Download,
   FileSpreadsheet,
@@ -238,6 +239,12 @@ export default function MaterialsSheet({
   // managed master data for dropdowns
   const masterUnits = useQuery(api.costing.listUnits);
   const masterCategories = useQuery(api.costing.listCategories);
+  /** What still depends on each material — recipes, bills and stock. */
+  const usageData = useQuery(api.usage.masterUsage);
+  const materialUsage = useMemo(
+    () => new Map((usageData?.materials ?? []).map((u) => [u.id, u] as const)),
+    [usageData],
+  );
   const units = masterUnits ?? [];
   const allCategories = masterCategories ?? [];
   const { promptMulti, confirm } = useAppDialogs();
@@ -299,6 +306,18 @@ export default function MaterialsSheet({
   };
 
   const handleDelete = async (m: MaterialDoc) => {
+    // a material that recipes, bills or the stock ledger still use cannot go,
+    // so say what is holding it rather than letting the delete fail quietly
+    const used = materialUsage.get(m._id);
+    if (used !== undefined) {
+      await confirm({
+        title: `“${m.name}” is still in use`,
+        message: `It is ${used.reasons.join(", ")}. Remove it from those documents first, then delete the material.`,
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
     const ok = await confirm({
       title: `Delete “${m.name}”?`,
       message:
@@ -629,7 +648,20 @@ export default function MaterialsSheet({
                     </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground tabular-nums">{i + 1}</td>
                     <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{m.code ?? "—"}</td>
-                    <td className="px-3 py-2 font-medium">{m.name}</td>
+                    <td className="px-3 py-2">
+                      <span className="flex items-center gap-2">
+                        <span className="font-medium">{m.name}</span>
+                        {materialUsage.has(m._id) && (
+                          <span
+                            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+                            title={`In use — ${materialUsage.get(m._id)?.reasons.join(" · ")}`}
+                          >
+                            <BadgeCheck className="size-3" />
+                            In use
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.category ?? "—"}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.unit}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{money(m.pricePerUnit)}</td>

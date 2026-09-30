@@ -23,6 +23,7 @@ import {
 } from "../lib/project-statuses";
 import { currencySymbol } from "../lib/currency";
 import { isProductDone, productsOfJob } from "./jobs";
+import { requireUnusedMaterial, requireUnusedProduct } from "./usage";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -469,6 +470,9 @@ export const removeMaterial = mutation({
     const material = await ctx.db.get(id);
     if (material === null) throw new Error("That material no longer exists.");
     if (material.ownerId !== userId) throw new Error("Not your material.");
+    // a material sits on costing lines, arrives on purchase bills and moves
+    // through the stock ledger — it can only go once nothing points at it
+    await requireUnusedMaterial(ctx, userId, id, material.name);
     await ctx.db.delete(id);
   },
 });
@@ -1006,6 +1010,9 @@ export const removeFinishedGood = mutation({
         "This product is under a project. Remove it from the project first, then delete it.",
       );
     }
+    // and it cannot go while a document still points at it — an invoice, a
+    // quotation, a delivery note, or its own stock and production history
+    await requireUnusedProduct(ctx, userId, id, fg.name);
     const items = await ctx.db
       .query("costingItems")
       .withIndex("by_fg", (q) => q.eq("fgId", id))

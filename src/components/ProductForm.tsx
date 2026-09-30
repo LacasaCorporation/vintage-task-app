@@ -38,6 +38,7 @@ import ConnectJobDialog from "@/components/ConnectJobDialog";
 import { EditProductDialog } from "@/components/ProjectDialogs";
 import {
   AlertTriangle,
+  BadgeCheck,
   Factory,
   Link2,
   Pencil,
@@ -245,6 +246,12 @@ export default function ProductForm({
 
   // jobs under the currently selected project (for the job dropdown)
   const allJobs = useQuery(api.jobs.listJobs);
+  /** What still depends on each product — recipes, invoices, jobs and stock. */
+  const usageData = useQuery(api.usage.masterUsage);
+  const productUsage = useMemo(
+    () => new Map((usageData?.products ?? []).map((u) => [u.id, u] as const)),
+    [usageData],
+  );
   const attachToJobM = useMutation(api.costing.attachToJob);
   /** The product being connected to a job, if the dialog is open. */
   const [linkTarget, setLinkTarget] = useState<FgDoc | null>(null);
@@ -358,6 +365,18 @@ export default function ProductForm({
         title: `“${fg.name}” is completed`,
         message:
           "Deleting a completed product changes costs and stock that are already on the books. Ask a workspace admin for the “Completed / in-production products” permission, or stop production and reopen the product first.",
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
+    // a product that documents, a project or the stock ledger still point at
+    // cannot be deleted — the server refuses it, so say why before asking
+    const used = productUsage.get(fg._id);
+    if (used !== undefined) {
+      await confirm({
+        title: `“${fg.name}” is still in use`,
+        message: `It is ${used.reasons.join(", ")}. Remove it from those documents first, then delete the product.`,
         confirmLabel: "Got it",
         danger: true,
       });
@@ -839,6 +858,15 @@ export default function ProductForm({
                               </span>
                             )}
                           </span>
+                          {productUsage.has(f._id) && (
+                            <span
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
+                              title={`In use — ${productUsage.get(f._id)?.reasons.join(" · ")}`}
+                            >
+                              <BadgeCheck className="size-3" />
+                              In use
+                            </span>
+                          )}
                         </button>
                       </td>
                       <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
