@@ -11,6 +11,7 @@ import {
   ChevronDown,
   Download,
   FileSpreadsheet,
+  History,
   Layers,
   Loader2,
   Pencil,
@@ -306,22 +307,26 @@ export default function MaterialsSheet({
   };
 
   const handleDelete = async (m: MaterialDoc) => {
-    // a material that recipes, bills or the stock ledger still use cannot go,
-    // so say what is holding it rather than letting the delete fail quietly
+    // a recipe or a purchase bill holds it; its own stock ledger does not,
+    // because that goes with the material
     const used = materialUsage.get(m._id);
-    if (used !== undefined) {
+    const blocked = used?.reasons ?? [];
+    if (blocked.length > 0) {
       await confirm({
         title: `“${m.name}” is still in use`,
-        message: `It is ${used.reasons.join(", ")}. Remove it from those documents first, then delete the material.`,
+        message: `It is ${blocked.join(", ")}. Remove it from those documents first, then delete the material.`,
         confirmLabel: "Got it",
         danger: true,
       });
       return;
     }
+    const leftovers = used?.notes ?? [];
     const ok = await confirm({
       title: `Delete “${m.name}”?`,
       message:
-        "The material is removed from the master list. Existing costing lines keep their copied values.",
+        leftovers.length > 0
+          ? `The material and its stock ledger will be removed — including ${leftovers.join(", ")}. Existing costing lines keep their copied values.`
+          : "The material is removed from the master list. Existing costing lines keep their copied values.",
       confirmLabel: "Delete material",
       danger: true,
     });
@@ -651,7 +656,7 @@ export default function MaterialsSheet({
                     <td className="px-3 py-2">
                       <span className="flex items-center gap-2">
                         <span className="font-medium">{m.name}</span>
-                        {materialUsage.has(m._id) && (
+                        {(materialUsage.get(m._id)?.reasons.length ?? 0) > 0 && (
                           <span
                             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
                             title={`In use — ${materialUsage.get(m._id)?.reasons.join(" · ")}`}
@@ -660,6 +665,16 @@ export default function MaterialsSheet({
                             In use
                           </span>
                         )}
+                        {(materialUsage.get(m._id)?.reasons.length ?? 0) === 0 &&
+                          (materialUsage.get(m._id)?.notes.length ?? 0) > 0 && (
+                            <span
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                              title={`Stock only — ${materialUsage.get(m._id)?.notes.join(" · ")}. No document points at this material, so it can be deleted and its ledger will go with it.`}
+                            >
+                              <History className="size-3" />
+                              Stock only
+                            </span>
+                          )}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.category ?? "—"}</td>

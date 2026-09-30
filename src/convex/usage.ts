@@ -14,7 +14,15 @@ import { scopeUserId } from "./org";
  * asks this module first — it shows a green tick badge on anything in use, and
  * the delete is refused with the reason rather than quietly breaking the books.
  */
-export type UsageInfo = { count: number; reasons: string[] };
+/**
+ * `reasons` are the documents that make a delete impossible: an invoice, a
+ * quote, a delivery note, the project the item is part of. `notes` are things
+ * that go *with* the item — its stock on hand, its movement history — which
+ * are deleted alongside it, so they are shown as a warning rather than used to
+ * block. Work that was rolled back leaves exactly that kind of leftover: stock
+ * and movements and nothing else, so it can still be cleaned up.
+ */
+export type UsageInfo = { count: number; reasons: string[]; notes: string[] };
 
 export type MasterUsage = {
   materials: ({ id: string } & UsageInfo)[];
@@ -48,6 +56,8 @@ async function computeUsage(
 }> {
   const materialReasons = new Map<string, string[]>();
   const productReasons = new Map<string, string[]>();
+  const materialNotes = new Map<string, string[]>();
+  const productNotes = new Map<string, string[]>();
   const add = (map: Map<string, string[]>, key: string, reason: string) => {
     const list = map.get(key) ?? [];
     list.push(reason);
@@ -90,7 +100,7 @@ async function computeUsage(
     bump(materialMoves, row.materialId);
   }
   for (const [id, n] of materialMoves) {
-    add(materialReasons, id, `moved in stock ${plural(n, "time")}`);
+    add(materialNotes, id, `moved in stock ${plural(n, "time")}`);
   }
 
   for (const material of await ctx.db
@@ -99,14 +109,14 @@ async function computeUsage(
     .collect()) {
     if ((material.stock ?? 0) !== 0) {
       add(
-        materialReasons,
+        materialNotes,
         material._id,
         `holding ${quantity(material.stock ?? 0, material.unit)} in stock`,
       );
     }
     if ((material.opening ?? 0) !== 0) {
       add(
-        materialReasons,
+        materialNotes,
         material._id,
         `an opening balance of ${quantity(material.opening ?? 0, material.unit)}`,
       );
@@ -165,7 +175,7 @@ async function computeUsage(
     bump(productMoves, row.productId);
   }
   for (const [id, n] of productMoves) {
-    add(productReasons, id, `moved in stock ${plural(n, "time")}`);
+    add(productNotes, id, `moved in stock ${plural(n, "time")}`);
   }
 
   for (const fg of await ctx.db
@@ -181,31 +191,42 @@ async function computeUsage(
     }
     if ((fg.stock ?? 0) !== 0) {
       add(
-        productReasons,
+        productNotes,
         fg._id,
-        `holding ${quantity(fg.stock ?? 0, fg.unit)} in stock`,
+        `${quantity(fg.stock ?? 0, fg.unit)} in stock`,
       );
     }
     if ((fg.inProduction ?? 0) !== 0) {
       add(
-        productReasons,
+        productNotes,
         fg._id,
         `${quantity(fg.inProduction ?? 0, fg.unit)} in production`,
       );
     }
     if (fg.productionStartedAt !== undefined) {
-      add(productReasons, fg._id, "in production right now");
+      add(productNotes, fg._id, "production running");
     }
   }
 
-  const wrap = (reasons: Map<string, string[]>) => {
+  const wrap = (
+    reasons: Map<string, string[]>,
+    notes: Map<string, string[]>,
+  ) => {
     const out = new Map<string, UsageInfo>();
-    for (const [id, list] of reasons) {
-      out.set(id, { count: list.length, reasons: list });
+    for (const id of new Set([...reasons.keys(), ...notes.keys()])) {
+      const blocking = reasons.get(id) ?? [];
+      out.set(id, {
+        count: blocking.length,
+        reasons: blocking,
+        notes: notes.get(id) ?? [],
+      });
     }
     return out;
   };
-  return { materials: wrap(materialReasons), products: wrap(productReasons) };
+  return {
+    materials: wrap(materialReasons, materialNotes),
+    products: wrap(productReasons, productNotes),
+  };
 }
 
 /** Every material and product that is still depended on, for the master lists. */
@@ -229,6 +250,11 @@ function refusal(what: string, name: string, reasons: string[]): Error {
   );
 }
 
+/** The documents that make a delete impossible, if any. */
+export function blockingReasons(usage: UsageInfo | undefined): string[] {
+  return usage?.reasons ?? [];
+}
+
 /** Refuse to delete a material that documents still depend on. */
 export async function requireUnusedMaterial(
   ctx: MutationCtx,
@@ -237,9 +263,9 @@ export async function requireUnusedMaterial(
   name: string,
 ): Promise<void> {
   const { materials } = await computeUsage(ctx, orgId);
-  const usage = materials.get(materialId);
-  if (usage === undefined) return;
-  throw refusal("material", name, usage.reasons);
+  const reasons = blockingReasons(materials.get(materialId));
+  if (reasons.length === 0) return;
+  throw refusal("material", name, reasons);
 }
 
 /** Refuse to delete a product that documents, a project or stock still need. */
@@ -250,7 +276,7 @@ export async function requireUnusedProduct(
   name: string,
 ): Promise<void> {
   const { products } = await computeUsage(ctx, orgId);
-  const usage = products.get(productId);
-  if (usage === undefined) return;
-  throw refusal("product", name, usage.reasons);
+  const reasons = blockingReasons(products.get(productId));
+  if (reasons.length === 0) return;
+  throw refusal("product", name, reasons);
 }

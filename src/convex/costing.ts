@@ -471,9 +471,16 @@ export const removeMaterial = mutation({
     const material = await ctx.db.get(id);
     if (material === null) throw new Error("That material no longer exists.");
     if (material.ownerId !== userId) throw new Error("Not your material.");
-    // a material sits on costing lines, arrives on purchase bills and moves
-    // through the stock ledger — it can only go once nothing points at it
+    // a material on a costing line or a purchase bill is part of those
+    // documents and cannot go; its own stock and movement history does not
+    // hold it back, because that ledger goes with it
     await requireUnusedMaterial(ctx, userId, id, material.name);
+    for (const row of await ctx.db
+      .query("stockMovements")
+      .withIndex("by_material", (q) => q.eq("materialId", id))
+      .collect()) {
+      await ctx.db.delete(row._id);
+    }
     await ctx.db.delete(id);
   },
 });

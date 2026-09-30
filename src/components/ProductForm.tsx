@@ -40,6 +40,7 @@ import {
   AlertTriangle,
   BadgeCheck,
   Factory,
+  History,
   Link2,
   Pencil,
 } from "lucide-react";
@@ -370,22 +371,27 @@ export default function ProductForm({
       });
       return;
     }
-    // a product that documents, a project or the stock ledger still point at
-    // cannot be deleted — the server refuses it, so say why before asking
+    // only the documents that would be left pointing at nothing stop the
+    // delete; stock and movement history belong to the product and go with it,
+    // so a leftover of a rolled-back project can always be cleaned up
     const used = productUsage.get(fg._id);
-    if (used !== undefined) {
+    const blocked = used?.reasons ?? [];
+    if (blocked.length > 0) {
       await confirm({
         title: `“${fg.name}” is still in use`,
-        message: `It is ${used.reasons.join(", ")}. Remove it from those documents first, then delete the product.`,
+        message: `It is ${blocked.join(", ")}. Remove it from those documents first, then delete the product.`,
         confirmLabel: "Got it",
         danger: true,
       });
       return;
     }
+    const leftovers = used?.notes ?? [];
     const ok = await confirm({
       title: `Delete “${fg.name}”?`,
       message:
-        "The product and all its costing lines will be permanently removed, and it will disappear from the Tasks page as well. This cannot be undone.",
+        leftovers.length > 0
+          ? `The product, its costing lines and its stock ledger will be permanently removed — including ${leftovers.join(", ")}. This cannot be undone.`
+          : "The product and all its costing lines will be permanently removed, and it will disappear from the Tasks page as well. This cannot be undone.",
       confirmLabel: "Delete product",
       danger: true,
     });
@@ -858,7 +864,7 @@ export default function ProductForm({
                               </span>
                             )}
                           </span>
-                          {productUsage.has(f._id) && (
+                          {(productUsage.get(f._id)?.reasons.length ?? 0) > 0 && (
                             <span
                               className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400"
                               title={`In use — ${productUsage.get(f._id)?.reasons.join(" · ")}`}
@@ -867,6 +873,16 @@ export default function ProductForm({
                               In use
                             </span>
                           )}
+                          {(productUsage.get(f._id)?.reasons.length ?? 0) === 0 &&
+                            (productUsage.get(f._id)?.notes.length ?? 0) > 0 && (
+                              <span
+                                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                                title={`Stock only — ${productUsage.get(f._id)?.notes.join(" · ")}. No document points at this product, so it can be deleted and its ledger will go with it.`}
+                              >
+                                <History className="size-3" />
+                                Stock only
+                              </span>
+                            )}
                         </button>
                       </td>
                       <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
