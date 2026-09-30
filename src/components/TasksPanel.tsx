@@ -577,6 +577,20 @@ export default function TasksPanel({
     }
   };
 
+  /**
+   * The pane on the right shows one thing at a time — a task or one of its
+   * subtasks — so opening either closes the other. Without this, opening a
+   * subtask and then clicking a task left the subtask's panel on screen.
+   */
+  const showTaskPane = (taskId: Id<"tasks">) => {
+    setOpenStepId(null);
+    setOpenTaskId((current) => (current === taskId ? null : taskId));
+  };
+  const showStepPane = (stepId: Id<"taskSteps">) => {
+    setOpenTaskId(null);
+    setOpenStepId((current) => (current === stepId ? null : stepId));
+  };
+
   const handleDelete = async (id: Id<"tasks">) => {
     try {
       await removeTask({ id });
@@ -881,7 +895,7 @@ export default function TasksPanel({
                         )}
                         <button
                           type="button"
-                          onClick={() => setOpenTaskId(isOpen ? null : task._id)}
+                          onClick={() => showTaskPane(task._id)}
                           onDoubleClick={(e) => {
                             // double-click the name to rename it in place
                             if (!canEdit) return;
@@ -1351,11 +1365,7 @@ export default function TasksPanel({
                                       ) : (
                                         <button
                                           type="button"
-                                          onClick={() =>
-                                            setOpenStepId((current) =>
-                                              current === step._id ? null : step._id,
-                                            )
-                                          }
+                                          onClick={() => showStepPane(step._id)}
                                           onDoubleClick={(e) => {
                                             // double-click a subtask name to rename it
                                             if (!canEdit) return;
@@ -1475,11 +1485,7 @@ export default function TasksPanel({
                                             ? "bg-primary/10 text-primary"
                                             : "text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover/step:opacity-100",
                                         )}
-                                        onClick={() =>
-                                          setOpenStepId((current) =>
-                                            current === step._id ? null : step._id,
-                                          )
-                                        }
+                                        onClick={() => showStepPane(step._id)}
                                       >
                                         <ListTodo className="size-3" />
                                       </button>
