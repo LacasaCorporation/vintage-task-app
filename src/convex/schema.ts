@@ -349,6 +349,9 @@ const schema = defineSchema(
       recurrence: v.optional(taskRecurrenceValidator),
       attachments: v.optional(v.string()),
       completedAt: v.optional(v.number()),
+      // a subtask can be handed to people or a group in its own right
+      assigneeIds: v.optional(v.array(v.id("users"))),
+      groupIds: v.optional(v.array(v.id("userGroups"))),
     })
       .index("by_task", ["taskId"])
       .index("by_owner", ["ownerId"]),
@@ -357,10 +360,13 @@ const schema = defineSchema(
     taskComments: defineTable({
       ownerId: v.id("users"), // the firm scope — settings.ownerId
       taskId: v.id("tasks"),
+      /** set when the message belongs to one subtask's own thread */
+      stepId: v.optional(v.id("taskSteps")),
       authorId: v.id("users"), // the *person* who wrote it, not the firm
       text: v.string(),
     })
       .index("by_task", ["taskId"])
+      .index("by_step", ["stepId"])
       .index("by_owner", ["ownerId"]),
 
     // a problem reported against a task — or against one of its subtasks —

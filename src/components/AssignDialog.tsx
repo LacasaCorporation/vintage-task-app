@@ -51,12 +51,14 @@ const NO_GRANT: Grant = {
 };
 
 /**
- * What the popup acts on. A task and a flagged product behave the same way, so
- * they share this one popup — only the functions behind it differ.
+ * What the popup acts on. A task, a subtask and a flagged product behave the
+ * same way, so they share this one popup — only the functions behind it differ.
+ * A subtask has no permissions tab: what someone may do to a step is what they
+ * may do to the task it belongs to.
  */
 export type AssignTarget = {
-  kind: "task" | "product";
-  id: Id<"tasks"> | Id<"finishedGoods">;
+  kind: "task" | "product" | "step";
+  id: Id<"tasks"> | Id<"finishedGoods"> | Id<"taskSteps">;
   /** Who created it — the owner who may reassign and hand out permissions. */
   assigneeId?: Id<"users">;
   assignedAt?: number;
@@ -68,7 +70,7 @@ export type AssignTarget = {
  *  caller, because a Convex id does not say which table it came from. */
 export function targetOf(
   doc: {
-    _id: Id<"tasks"> | Id<"finishedGoods">;
+    _id: Id<"tasks"> | Id<"finishedGoods"> | Id<"taskSteps">;
     assigneeId?: Id<"users">;
     assignedAt?: number;
     assigneeIds?: Id<"users">[];
@@ -140,8 +142,10 @@ function AssignBody({
   onClose: () => void;
 }) {
   const isProduct = target.kind === "product";
-  const taskId = isProduct ? null : (target.id as Id<"tasks">);
+  const isStep = target.kind === "step";
+  const taskId = isProduct || isStep ? null : (target.id as Id<"tasks">);
   const productId = isProduct ? (target.id as Id<"finishedGoods">) : null;
+  const stepId = isStep ? (target.id as Id<"taskSteps">) : null;
   const peopleData = useQuery(api.tasks.people);
   const groupsData = useQuery(api.userGroups.list);
   // both kinds are queried, but the one that does not apply is skipped
@@ -153,9 +157,10 @@ function AssignBody({
     api.productTasks.grants,
     productId === null ? "skip" : { id: productId },
   );
-  const grantsData = isProduct ? productGrants : taskGrants;
+  const grantsData = isStep ? undefined : isProduct ? productGrants : taskGrants;
   const assignTask = useMutation(api.tasks.assign);
   const assignProduct = useMutation(api.productTasks.assign);
+  const assignStepM = useMutation(api.tasks.assignStep);
   const setTaskGrant = useMutation(api.tasks.setGrant);
   const setProductGrant = useMutation(api.productTasks.setGrant);
   const [tab, setTab] = useState<"people" | "groups" | "rights">("people");
@@ -261,6 +266,12 @@ function AssignBody({
           userIds: nextUsers,
           groupIds: nextGroups,
         });
+      } else if (isStep) {
+        await assignStepM({
+          id: stepId as Id<"taskSteps">,
+          userIds: nextUsers,
+          groupIds: nextGroups,
+        });
       } else {
         await assignTask({
           id: taskId as Id<"tasks">,
@@ -278,7 +289,9 @@ function AssignBody({
         who.length === 0
           ? isProduct
             ? "This product is no longer assigned to anyone."
-            : "Task is no longer assigned to anyone."
+            : isStep
+              ? "This subtask is no longer assigned to anyone."
+              : "Task is no longer assigned to anyone."
           : `Assigned to ${who.join(", ")}.`,
       );
       onClose();
@@ -286,7 +299,11 @@ function AssignBody({
       toast.error(
         messageFrom(
           error,
-          isProduct ? "Couldn't assign that product." : "Couldn't assign that task.",
+          isProduct
+            ? "Couldn't assign that product."
+            : isStep
+              ? "Couldn't assign that subtask."
+              : "Couldn't assign that task.",
         ),
       );
     } finally {
@@ -361,9 +378,11 @@ function AssignBody({
       <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            {isOwner
-              ? `You created this ${isProduct ? "product" : "task"}, so you can edit, complete, change and delete it. Tick who else may — and what they may do.`
-              : `Hand this ${isProduct ? "product" : "task"} to people or to a group. Only the person who created it can change what they may do.`}
+            {isStep
+              ? "Hand this subtask to people or to a group. What they may do to it is what they may do to the task."
+              : isOwner
+                ? `You created this ${isProduct ? "product" : "task"}, so you can edit, complete, change and delete it. Tick who else may — and what they may do.`
+                : `Hand this ${isProduct ? "product" : "task"} to people or to a group. Only the person who created it can change what they may do.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -372,8 +391,11 @@ function AssignBody({
             [
               ["people", "People", UserRound],
               ["groups", "Groups", Users],
-              ["rights", "Permissions", ShieldCheck],
-            ] as const
+              // a subtask borrows the task's permissions, so it offers none
+              ...(isStep
+                ? []
+                : [["rights", "Permissions", ShieldCheck] as const]),
+            ] as [typeof tab, string, typeof UserRound][]
           ).map(([id, label, Icon]) => (
             <button
               key={id}

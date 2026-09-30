@@ -1,5 +1,11 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useQuery } from "convex/react";
 import type { Doc } from "@/convex/_generated/dataModel";
+import { api } from "@/convex/_generated/api";
+import AssignDialog, { targetOf } from "@/components/AssignDialog";
+import TaskComments from "@/components/TaskComments";
+import TaskIssues from "@/components/TaskIssues";
+import { assigneeLabel, assigneesOfTask } from "@/lib/task-people";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -28,6 +34,8 @@ import {
   Star,
   Tag,
   Trash2,
+  UserRound,
+  Users,
   X,
 } from "lucide-react";
 
@@ -87,8 +95,9 @@ function Row({
 
 /**
  * Side detail pane for one subtask. It carries the same features as the main
- * task detail — title, notes, due date, reminder, priority, repeat, tags,
- * star and attachments — plus a one-click "copy everything from the task".
+ * task detail — title, who it is with, notes, due date, reminder, priority,
+ * repeat, tags, star, attachments, the issues raised against it and its own
+ * conversation — plus a one-click "copy everything from the task".
  */
 export default function StepDetail({
   step,
@@ -112,6 +121,35 @@ export default function StepDetail({
   onClose: () => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
+  const [assignOpen, setAssignOpen] = useState(false);
+  // the same people list the task panel uses, so a subtask can be handed to
+  // someone in its own right
+  const peopleData = useQuery(api.tasks.people);
+  const groupsData = useQuery(api.userGroups.list);
+
+  const peopleById = useMemo(
+    () => new Map((peopleData?.people ?? []).map((p) => [p.userId, p] as const)),
+    [peopleData],
+  );
+  const groupsById = useMemo(
+    () => new Map((groupsData ?? []).map((g) => [g._id, g] as const)),
+    [groupsData],
+  );
+  const assignees = useMemo(
+    () => assigneesOfTask(step, peopleById),
+    [step, peopleById],
+  );
+  const groupIds = useMemo(() => step.groupIds ?? [], [step.groupIds]);
+  const withLabel = useMemo(() => {
+    const who = assigneeLabel(assignees, peopleById);
+    const groupNames = groupIds
+      .map((id) => groupsById.get(id)?.name)
+      .filter((n): n is string => n !== undefined);
+    if (who === "Not assigned" && groupNames.length === 0) return "Not assigned";
+    return [who === "Not assigned" ? null : who, ...groupNames]
+      .filter((part): part is string => part !== null)
+      .join(" · ");
+  }, [assignees, peopleById, groupIds, groupsById]);
   // Text fields are edited locally and saved on blur / Enter. Writing every
   // keystroke straight to the server would re-render the field with the old
   // value and drop characters, so the drafts hold the text until they settle.
@@ -287,6 +325,44 @@ export default function StepDetail({
           }}
           className="h-9 rounded-lg text-sm"
         />
+      </Row>
+
+      {/* who this subtask is with — people or a group, like the task panel */}
+      <Row icon={Users} label="Assigned to">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setAssignOpen(true)}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-lg border border-border/70 px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent disabled:opacity-50",
+            (assignees.length > 0 || groupIds.length > 0) &&
+              "border-primary/40 bg-primary/5",
+          )}
+        >
+          <UserRound
+            className={cn(
+              "size-3.5 shrink-0",
+              assignees.length > 0 ? "text-primary" : "text-muted-foreground",
+            )}
+          />
+          <span className="min-w-0 flex-1 truncate">{withLabel}</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            Assign…
+          </span>
+        </button>
+        {groupIds.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {groupIds.map((id) => (
+              <span
+                key={id}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+              >
+                <Users className="size-2.5" />
+                {groupsById.get(id)?.name ?? "Group"}
+              </span>
+            ))}
+          </div>
+        )}
       </Row>
 
       <Row
@@ -480,6 +556,19 @@ export default function StepDetail({
         />
       </Row>
 
+      {/* problems raised against this subtask, and how each was put right — the
+          same panel the task uses, narrowed to this step */}
+      {task !== null && (
+        <div className="mt-3">
+          <TaskIssues
+            taskId={task._id}
+            stepId={step._id}
+            canEdit={canEdit}
+            compact
+          />
+        </div>
+      )}
+
       <Row
         icon={Paperclip}
         label="Attachments"
@@ -539,6 +628,21 @@ export default function StepDetail({
           <Paperclip className="size-3" /> Attach files
         </Button>
       </Row>
+
+      {/* the subtask's own thread, kept apart from the task's conversation */}
+      {task !== null && (
+        <div className="mt-3">
+          <TaskComments taskId={task._id} stepId={step._id} />
+        </div>
+      )}
+
+      <AssignDialog
+        target={targetOf(step, "step")}
+        title="Assign this subtask"
+        open={assignOpen}
+        onOpenChange={setAssignOpen}
+        canEdit={canEdit}
+      />
 
       <div className="mt-2 flex items-center justify-between border-t border-amber-500/25 pt-2">
         <p className="text-[11px] text-muted-foreground">

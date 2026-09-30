@@ -418,6 +418,60 @@ export const assign = mutation({
 });
 
 /**
+ * Hand a subtask to people or a group in its own right — the same rule as a
+ * task, so a step can sit with the carpenter even when the job sits with the
+ * foreman. Who may do it is judged on the step's own holders, falling back to
+ * the task's when the step has none yet.
+ */
+export const assignStep = mutation({
+  args: {
+    id: v.id("taskSteps"),
+    userIds: v.array(v.id("users")),
+    groupIds: v.optional(v.array(v.id("userGroups"))),
+  },
+  handler: async (ctx, { id, userIds, groupIds }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) throw new Error("Sign in first.");
+    const step = await ctx.db.get(id);
+    if (step === null || step.ownerId !== orgId) {
+      throw new Error("That subtask no longer exists.");
+    }
+    const current = [...new Set(step.assigneeIds ?? [])];
+    const up = await firmAncestors(ctx, userId);
+    const mayReassign =
+      current.length === 0 ||
+      userId === orgId ||
+      current.some((who) => who === userId || up.includes(who));
+    if (!mayReassign) {
+      throw new Error(
+        "Only the subtask holder, their manager, or the firm owner can assign this subtask.",
+      );
+    }
+    const allowed = await assignableIds(ctx, userId);
+    const targets = [...new Set(userIds)];
+    if (targets.some((who) => !allowed.has(who))) {
+      throw new Error(
+        "You can only assign a subtask to yourself or to someone who reports to you.",
+      );
+    }
+    const groups = [...new Set(groupIds ?? [])];
+    for (const groupId of groups) {
+      const group = await ctx.db.get(groupId);
+      if (group === null || group.ownerId !== orgId) {
+        throw new Error("One of those groups no longer exists.");
+      }
+    }
+    await ctx.db.patch(id, {
+      assigneeIds: targets.length > 0 ? targets : undefined,
+      groupIds: groups.length > 0 ? groups : undefined,
+    });
+    return { assigneeIds: targets, groupIds: groups };
+  },
+});
+
+/**
  * Who may do what with one task.
  *
  * The task's owner — the person who created it, or the firm's top user — has
@@ -1087,12 +1141,18 @@ export const removeStep = mutation({
     const step = await ctx.db.get(id);
     if (step === null) throw new Error("That step no longer exists.");
     if (step.ownerId !== userId) throw new Error("Not your step.");
-    // issues raised against it would be left pointing at nothing
+    // issues raised against it, and its own thread, would be left pointing at
+    // nothing
     const issues = await ctx.db
       .query("taskIssues")
       .withIndex("by_step", (q) => q.eq("stepId", id))
       .collect();
     for (const issue of issues) await ctx.db.delete(issue._id);
+    const comments = await ctx.db
+      .query("taskComments")
+      .withIndex("by_step", (q) => q.eq("stepId", id))
+      .collect();
+    for (const comment of comments) await ctx.db.delete(comment._id);
     await ctx.db.delete(id);
   },
 });
@@ -1271,19 +1331,26 @@ async function requireTask(
 /**
  * A task's chat history, oldest first. Everyone in the firm who can open the
  * task can read and write on it, so a site conversation lives with the job
- * rather than in a separate inbox.
+ * rather than in a separate inbox. Given a `stepId`, it is that subtask's own
+ * thread instead.
  */
 export const listComments = query({
-  args: { taskId: v.id("tasks") },
-  handler: async (ctx, { taskId }) => {
+  args: { taskId: v.id("tasks"), stepId: v.optional(v.id("taskSteps")) },
+  handler: async (ctx, { taskId, stepId }) => {
     const orgId = await scopeUserId(ctx);
     if (orgId === null) return [];
     const task = await ctx.db.get(taskId);
     if (task === null || task.ownerId !== orgId) return [];
-    const rows = await ctx.db
+    const all = await ctx.db
       .query("taskComments")
       .withIndex("by_task", (q) => q.eq("taskId", taskId))
       .collect();
+    // a step thread is its own conversation; the task's is the messages that
+    // are not tied to a subtask, so the two never talk over each other
+    const rows =
+      stepId === undefined
+        ? all.filter((c) => c.stepId === undefined)
+        : all.filter((c) => c.stepId === stepId);
     return await Promise.all(
       rows
         .sort((a, b) => a._creationTime - b._creationTime)
@@ -1298,11 +1365,21 @@ export const listComments = query({
   },
 });
 
-/** Post a message on a task. */
+/** Post a message on a task, or on one of its subtasks. */
 export const addComment = mutation({
-  args: { taskId: v.id("tasks"), text: v.string() },
-  handler: async (ctx, { taskId, text }) => {
+  args: {
+    taskId: v.id("tasks"),
+    stepId: v.optional(v.id("taskSteps")),
+    text: v.string(),
+  },
+  handler: async (ctx, { taskId, stepId, text }) => {
     const { orgId, userId } = await requireTask(ctx, taskId);
+    if (stepId !== undefined) {
+      const step = await ctx.db.get(stepId);
+      if (step === null || step.taskId !== taskId) {
+        throw new Error("That subtask is no longer on this task.");
+      }
+    }
     const trimmed = text.trim();
     if (trimmed.length === 0) throw new Error("Write something first.");
     if (trimmed.length > MAX_DESCRIPTION_LENGTH) {
@@ -1311,6 +1388,7 @@ export const addComment = mutation({
     return await ctx.db.insert("taskComments", {
       ownerId: orgId,
       taskId,
+      stepId,
       authorId: userId,
       text: trimmed,
     });
@@ -1349,18 +1427,25 @@ async function commentTaskOf(
 
 // ── Issues ──────────────────────────────────────────────────────────────
 
-/** The problems reported against a task, open ones first. */
+/** The problems reported against a task, open ones first. Given a `stepId`,
+ *  it is that subtask's own issues instead.
+ */
 export const listIssues = query({
-  args: { taskId: v.id("tasks") },
-  handler: async (ctx, { taskId }) => {
+  args: { taskId: v.id("tasks"), stepId: v.optional(v.id("taskSteps")) },
+  handler: async (ctx, { taskId, stepId }) => {
     const orgId = await scopeUserId(ctx);
     if (orgId === null) return [];
     const task = await ctx.db.get(taskId);
     if (task === null || task.ownerId !== orgId) return [];
-    const rows = await ctx.db
+    const every = await ctx.db
       .query("taskIssues")
       .withIndex("by_task", (q) => q.eq("taskId", taskId))
       .collect();
+    // the task's own issues are the ones not pinned to a subtask
+    const rows =
+      stepId === undefined
+        ? every.filter((i) => i.stepId === undefined)
+        : every.filter((i) => i.stepId === stepId);
     // an issue can sit against the task itself or against one of its subtasks,
     // so the name of the subtask is looked up to label it
     const stepText = new Map(

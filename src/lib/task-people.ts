@@ -52,6 +52,10 @@ export function assigneesOfTask(
   },
   peopleById: Map<Id<"users">, Person>,
 ): Id<"users">[] {
+  // who the assign dialog saved always wins — a task or subtask handed to
+  // people is shown with them, whoever its legacy author stamp says
+  const picked = [...new Set(task.assigneeIds ?? [])];
+  if (picked.length > 0) return picked;
   const stampedOwner =
     task.assigneeId === undefined ? null : (peopleById.get(task.assigneeId) ?? null);
   const isShared =

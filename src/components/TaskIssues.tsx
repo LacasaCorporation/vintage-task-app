@@ -50,16 +50,19 @@ export default function TaskIssues({
   taskId,
   canEdit,
   steps = [],
+  stepId,
   compact = false,
 }: {
   taskId: Id<"tasks">;
   canEdit: boolean;
   /** The task's subtasks, so an issue can be filed against one of them. */
   steps?: { _id: Id<"taskSteps">; text: string }[];
+  /** Set inside a subtask's own panel: only that step's issues are shown. */
+  stepId?: Id<"taskSteps">;
   /** The narrow version used inside a task row's issues dropdown. */
   compact?: boolean;
 }) {
-  const issues = useQuery(api.tasks.listIssues, { taskId });
+  const issues = useQuery(api.tasks.listIssues, { taskId, stepId });
   const addIssue = useMutation(api.tasks.addIssue);
   const setIssueSolved = useMutation(api.tasks.setIssueSolved);
   const removeIssue = useMutation(api.tasks.removeIssue);
@@ -68,7 +71,7 @@ export default function TaskIssues({
   const [detail, setDetail] = useState("");
   const [severity, setSeverity] = useState<Severity>("medium");
   /** Which subtask the new issue is about; "" means the task itself. */
-  const [stepId, setStepId] = useState<"" | Id<"taskSteps">>("");
+  const [pickedStep, setPickedStep] = useState<"" | Id<"taskSteps">>("");
   const [solving, setSolving] = useState<Id<"taskIssues"> | null>(null);
   const [solution, setSolution] = useState("");
 
@@ -84,12 +87,12 @@ export default function TaskIssues({
         title,
         detail,
         severity,
-        stepId: stepId === "" ? undefined : stepId,
+        stepId: stepId ?? (pickedStep === "" ? undefined : pickedStep),
       });
       setTitle("");
       setDetail("");
       setSeverity("medium");
-      setStepId("");
+      setPickedStep("");
       setComposing(false);
       toast.success("Issue reported.");
     } catch (error) {
@@ -124,7 +127,7 @@ export default function TaskIssues({
               ? "Loading issues…"
               : issues.length === 0
                 ? "Nothing reported. Log anything that goes wrong so it gets fixed rather than forgotten."
-                : `${open.length} open of ${issues.length} — this task completes once they are cleared.`}
+                : `${open.length} open of ${issues.length} — this ${stepId === undefined ? "task" : "subtask"} completes once they are cleared.`}
           </p>
         ) : (
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -310,13 +313,13 @@ export default function TaskIssues({
               className="h-8 rounded-lg text-sm"
               aria-label="Issue summary"
             />
-            {steps.length > 0 && (
+            {steps.length > 0 && stepId === undefined && (
               <div className="flex items-center gap-1.5">
                 <ListTodo className="size-3.5 shrink-0 text-muted-foreground" />
                 <select
-                  value={stepId}
+                  value={pickedStep}
                   onChange={(e) =>
-                    setStepId(e.target.value as "" | Id<"taskSteps">)
+                    setPickedStep(e.target.value as "" | Id<"taskSteps">)
                   }
                   aria-label="Which subtask is the problem with"
                   className="h-7 min-w-0 flex-1 truncate rounded-lg border border-border bg-card px-1.5 text-xs outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20"

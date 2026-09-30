@@ -1489,6 +1489,14 @@ export default function TasksPanel({
                                       >
                                         <ListTodo className="size-3" />
                                       </button>
+                                      {/* who the subtask sits with, when it has been
+                                          handed to someone in its own right */}
+                                      {(step.assigneeIds ?? []).length > 0 && (
+                                        <AssigneeChip
+                                          userIds={step.assigneeIds ?? []}
+                                          peopleById={peopleById}
+                                        />
+                                      )}
                                     </li>
                                     );
                                   })}

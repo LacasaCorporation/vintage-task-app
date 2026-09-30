@@ -15,9 +15,19 @@ import { cn } from "@/lib/utils";
  * history, so the site crew, the office and the customer contact all talk in
  * one place instead of over each other. Anyone who can open the task can post;
  * your own messages can be taken back.
+ *
+ * Given a `stepId` it is that subtask's own thread, kept apart from the task's
+ * so a long discussion about one step does not drown the rest.
  */
-export default function TaskComments({ taskId }: { taskId: Id<"tasks"> }) {
-  const comments = useQuery(api.tasks.listComments, { taskId });
+export default function TaskComments({
+  taskId,
+  stepId,
+}: {
+  taskId: Id<"tasks">;
+  /** Set inside a subtask's own panel. */
+  stepId?: Id<"taskSteps">;
+}) {
+  const comments = useQuery(api.tasks.listComments, { taskId, stepId });
   const people = useQuery(api.tasks.people);
   const addComment = useMutation(api.tasks.addComment);
   const removeComment = useMutation(api.tasks.removeComment);
@@ -31,7 +41,7 @@ export default function TaskComments({ taskId }: { taskId: Id<"tasks"> }) {
     if (text.length === 0 || sending) return;
     setSending(true);
     try {
-      await addComment({ taskId, text });
+      await addComment({ taskId, stepId, text });
       setDraft("");
     } catch (error) {
       toast.error(messageFrom(error, "Couldn't post that message."));
@@ -56,7 +66,7 @@ export default function TaskComments({ taskId }: { taskId: Id<"tasks"> }) {
         ) : comments.length === 0 ? (
           <p className="mt-1 text-xs text-muted-foreground">
             No messages yet. Ask a question or leave a note — everyone with this
-            task sees it.
+            {stepId === undefined ? " task" : " subtask"} sees it.
           </p>
         ) : (
           <ul className="mt-2 max-h-72 space-y-2 overflow-y-auto pr-1">
