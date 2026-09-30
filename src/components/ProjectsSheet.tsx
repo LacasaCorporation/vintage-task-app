@@ -750,10 +750,15 @@ export default function ProjectsSheet({
       <div className="min-w-0 space-y-4">
       {/* ── Tabs: one list per level of the hierarchy ───────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* the side panel belongs to the list it was opened from, so moving to
+            another tab closes it instead of leaving it over the new one */}
         <PageTabs
           label="Projects sections"
           value={tab}
-          onChange={setTab}
+          onChange={(next) => {
+            setTab(next);
+            setPane(null);
+          }}
           tabs={[
             { id: "projects", label: "Projects", icon: Folder, count: rows.length },
             { id: "jobs", label: "Jobs", icon: Briefcase, count: allJobs?.length ?? 0 },
