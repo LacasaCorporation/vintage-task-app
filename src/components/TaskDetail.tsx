@@ -16,6 +16,7 @@ import {
   toLocalInput,
 } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
+import { messageFrom } from "@/lib/errors";
 import {
   AlarmClock,
   CalendarDays,
@@ -720,7 +721,15 @@ export default function TaskDetail({
                         disabled={!mayEditSteps}
                         onCheckedChange={() =>
                           mayEditSteps
-                            ? void toggleStepM({ id: s._id })
+                            ? void toggleStepM({ id: s._id }).catch(
+                                (error: unknown) =>
+                                  toast.error(
+                                    messageFrom(
+                                      error,
+                                      "Couldn't update the subtask.",
+                                    ),
+                                  ),
+                              )
                             : toast.error("Editing steps is restricted for your role.")
                         }
                         className="size-4 rounded border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-2.5"
@@ -806,7 +815,11 @@ export default function TaskDetail({
 
             {/* issues raised against the task */}
             <div className="mt-4">
-              <TaskIssues taskId={task._id} canEdit={mayEdit} />
+              <TaskIssues
+                taskId={task._id}
+                canEdit={mayEdit}
+                steps={(steps ?? []).map((s) => ({ _id: s._id, text: s.text }))}
+              />
             </div>
 
             {/* attachments */}

@@ -363,10 +363,13 @@ const schema = defineSchema(
       .index("by_task", ["taskId"])
       .index("by_owner", ["ownerId"]),
 
-    // a problem reported against a task, and how it was put right
+    // a problem reported against a task — or against one of its subtasks —
+    // and how it was put right
     taskIssues: defineTable({
       ownerId: v.id("users"), // the firm scope
       taskId: v.id("tasks"),
+      /** set when the problem is with a subtask rather than the task itself */
+      stepId: v.optional(v.id("taskSteps")),
       raisedBy: v.id("users"), // who reported it
       title: v.string(),
       detail: v.optional(v.string()),
@@ -379,6 +382,7 @@ const schema = defineSchema(
       solvedAt: v.optional(v.number()),
     })
       .index("by_task", ["taskId"])
+      .index("by_step", ["stepId"])
       .index("by_owner", ["ownerId"]),
 
     // folders that group task lists

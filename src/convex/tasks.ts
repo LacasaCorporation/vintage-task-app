@@ -1045,6 +1045,22 @@ export const toggleStep = mutation({
     if (step === null) throw new Error("That step no longer exists.");
     if (step.ownerId !== userId) throw new Error("Not your step.");
     const nowCompleted = !step.isCompleted;
+    if (nowCompleted) {
+      // the same rule as a task: a subtask is not finished while something
+      // reported against it is still open
+      const issues = await ctx.db
+        .query("taskIssues")
+        .withIndex("by_step", (q) => q.eq("stepId", id))
+        .collect();
+      const open = issues.filter((i) => !(i.isSolved ?? false));
+      if (open.length > 0) {
+        throw new Error(
+          open.length === 1
+            ? "Clear the open issue on this subtask first."
+            : `Clear the ${open.length} open issues on this subtask first.`,
+        );
+      }
+    }
     await ctx.db.patch(id, {
       isCompleted: nowCompleted,
       completedAt: nowCompleted ? Date.now() : undefined,
@@ -1071,6 +1087,12 @@ export const removeStep = mutation({
     const step = await ctx.db.get(id);
     if (step === null) throw new Error("That step no longer exists.");
     if (step.ownerId !== userId) throw new Error("Not your step.");
+    // issues raised against it would be left pointing at nothing
+    const issues = await ctx.db
+      .query("taskIssues")
+      .withIndex("by_step", (q) => q.eq("stepId", id))
+      .collect();
+    for (const issue of issues) await ctx.db.delete(issue._id);
     await ctx.db.delete(id);
   },
 });
@@ -1124,6 +1146,20 @@ export const toggle = mutation({
         .collect();
       if (open.some((s) => !s.isCompleted)) {
         throw new Error("Finish all subtasks before completing this task.");
+      }
+      // and once everything that went wrong on it — on the task or on any of
+      // its subtasks — has been put right
+      const issues = await ctx.db
+        .query("taskIssues")
+        .withIndex("by_task", (q) => q.eq("taskId", id))
+        .collect();
+      const openIssues = issues.filter((i) => !(i.isSolved ?? false));
+      if (openIssues.length > 0) {
+        throw new Error(
+          openIssues.length === 1
+            ? "Clear the open issue before completing this task."
+            : `Clear the ${openIssues.length} open issues before completing this task.`,
+        );
       }
     }
     await ctx.db.patch(id, {
@@ -1325,6 +1361,16 @@ export const listIssues = query({
       .query("taskIssues")
       .withIndex("by_task", (q) => q.eq("taskId", taskId))
       .collect();
+    // an issue can sit against the task itself or against one of its subtasks,
+    // so the name of the subtask is looked up to label it
+    const stepText = new Map(
+      (
+        await ctx.db
+          .query("taskSteps")
+          .withIndex("by_task", (q) => q.eq("taskId", taskId))
+          .collect()
+      ).map((s) => [s._id, s.text] as const),
+    );
     return await Promise.all(
       rows
         .sort(
@@ -1335,6 +1381,9 @@ export const listIssues = query({
         .map(async (i) => ({
           _id: i._id,
           title: i.title,
+          stepId: i.stepId,
+          stepText:
+            i.stepId !== undefined ? stepText.get(i.stepId) : undefined,
           detail: i.detail,
           severity: i.severity,
           solution: i.solution,
@@ -1353,26 +1402,68 @@ export const listIssues = query({
   },
 });
 
-/** Report a problem against a task. */
+/**
+ * Every issue in the firm, so a task row can count what is still open on it
+ * and the list can be filtered down to the jobs that need attention.
+ */
+export const listAllIssues = query({
+  args: {},
+  handler: async (ctx) => {
+    const orgId = await scopeUserId(ctx);
+    if (orgId === null) return [];
+    const rows = await ctx.db
+      .query("taskIssues")
+      .withIndex("by_owner", (q) => q.eq("ownerId", orgId))
+      .collect();
+    return await Promise.all(
+      rows
+        .sort(
+          (a, b) =>
+            Number(a.isSolved ?? false) - Number(b.isSolved ?? false) ||
+            b._creationTime - a._creationTime,
+        )
+        .map(async (i) => ({
+          _id: i._id,
+          taskId: i.taskId,
+          stepId: i.stepId,
+          title: i.title,
+          severity: i.severity,
+          isSolved: i.isSolved ?? false,
+          at: i._creationTime,
+          raisedByLabel: await personLabel(ctx, i.raisedBy),
+        })),
+    );
+  },
+});
+
+/** Report a problem against a task, or against one of its subtasks. */
 export const addIssue = mutation({
   args: {
     taskId: v.id("tasks"),
+    stepId: v.optional(v.id("taskSteps")),
     title: v.string(),
     detail: v.optional(v.string()),
     severity: v.optional(
       v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
     ),
   },
-  handler: async (ctx, { taskId, title, detail, severity }) => {
+  handler: async (ctx, { taskId, stepId, title, detail, severity }) => {
     const { orgId, userId } = await requireTask(ctx, taskId);
     const trimmed = title.trim();
     if (trimmed.length === 0) throw new Error("Say what is wrong.");
     if (trimmed.length > MAX_TASK_LENGTH) {
       throw new Error("That summary is too long.");
     }
+    if (stepId !== undefined) {
+      const step = await ctx.db.get(stepId);
+      if (step === null || step.taskId !== taskId) {
+        throw new Error("That subtask is no longer on this task.");
+      }
+    }
     return await ctx.db.insert("taskIssues", {
       ownerId: orgId,
       taskId,
+      stepId,
       raisedBy: userId,
       title: trimmed,
       detail: detail?.trim() || undefined,
@@ -1407,6 +1498,21 @@ export const setIssueSolved = mutation({
         solvedBy: undefined,
         solvedAt: undefined,
       });
+      // reopening a problem reopens what it was holding up, exactly as
+      // reopening a subtask reopens its task
+      if (task.isCompleted) {
+        await ctx.db.patch(task._id, {
+          isCompleted: false,
+          completedAt: undefined,
+        });
+      }
+      const step = issue.stepId !== undefined ? await ctx.db.get(issue.stepId) : null;
+      if (step !== null && step.isCompleted && step.ownerId === issue.ownerId) {
+        await ctx.db.patch(step._id, {
+          isCompleted: false,
+          completedAt: undefined,
+        });
+      }
       return;
     }
     const text = solution?.trim() ?? "";

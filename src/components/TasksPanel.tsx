@@ -3,6 +3,7 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import TaskStats, { TaskQuickAdd } from "@/components/TaskQuickAdd";
+import TaskIssues from "@/components/TaskIssues";
 import { useAppDialogs } from "@/components/AppDialogs";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import type { TaskDoc, Priority } from "@/lib/task-utils";
@@ -35,6 +36,7 @@ import {
   X,
   Star,
   Trash2,
+  TriangleAlert,
   User,
 } from "lucide-react";
 import {
@@ -67,6 +69,21 @@ import {
 const TaskDetail = lazy(() => import("@/components/TaskDetail"));
 const StepDetail = lazy(() => import("@/components/StepDetail"));
 const AddSubtaskDialog = lazy(() => import("@/components/AddSubtaskDialog"));
+
+/**
+ * The one row of `api.tasks.listAllIssues` the list itself needs: enough to
+ * count what is still open on a task or a subtask, and to label the dropdown.
+ */
+type IssueRow = {
+  _id: Id<"taskIssues">;
+  taskId: Id<"tasks">;
+  stepId?: Id<"taskSteps">;
+  title: string;
+  severity?: Priority;
+  isSolved: boolean;
+  at: number;
+  raisedByLabel: string;
+};
 
 export default function TasksPanel({
   activeView,
@@ -123,6 +140,9 @@ export default function TasksPanel({
   // subtasks (steps) for the whole scope in one query, so each row can show
   // its own subtask dropdown without a query per row
   const allSteps = useQuery(api.tasks.listAllSteps);
+  // issues for the whole scope in one query, so a row can count what is still
+  // open on it and the list can be filtered down to those
+  const allIssues = useQuery(api.tasks.listAllIssues);
   const toggleStepM = useMutation(api.tasks.toggleStep);
   const addStepM = useMutation(api.tasks.addStep);
   const removeStepM = useMutation(api.tasks.removeStep);
@@ -143,6 +163,35 @@ export default function TasksPanel({
     return map;
   }, [allSteps]);
 
+  /**
+   * Issues per task, including the ones filed against a subtask — a problem
+   * with a step is still a problem with the task, and blocks it just the same.
+   */
+  const issuesByTask = useMemo(() => {
+    const map = new Map<string, IssueRow[]>();
+    for (const issue of (allIssues ?? []) as IssueRow[]) {
+      const list = map.get(issue.taskId) ?? [];
+      list.push(issue);
+      map.set(issue.taskId, list);
+    }
+    return map;
+  }, [allIssues]);
+
+  /** What is still open on one task. */
+  const openIssuesOf = useCallback(
+    (taskId: string) => (issuesByTask.get(taskId) ?? []).filter((i) => !i.isSolved),
+    [issuesByTask],
+  );
+
+  const [openIssueRows, setOpenIssueRows] = useState<Set<string>>(() => new Set());
+  const toggleIssueRow = (taskId: string) =>
+    setOpenIssueRows((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+
   const toggleStepRow = (taskId: string) =>
     setOpenStepRows((current) => {
       const next = new Set(current);
@@ -155,6 +204,8 @@ export default function TasksPanel({
   const [isAdding, setIsAdding] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<Id<"tasks"> | null>(null);
   const [showDone, setShowDone] = useState(false);
+  /** Narrow the list to the jobs that still have something wrong with them. */
+  const [hasIssues, setHasIssues] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("manual");
   /** Today is a narrowing control that rides with the sort, not a view. */
   const [todayOnly, setTodayOnly] = useState(false);
@@ -230,6 +281,7 @@ export default function TasksPanel({
     // rather than taking its place
     if (todayOnly) out = out.filter((t) => isDueToday(t) || isOverdue(t));
     if (!showDone) out = out.filter((t) => !t.isCompleted);
+    if (hasIssues) out = out.filter((t) => openIssuesOf(t._id).length > 0);
     out = out.filter(matchesQuery);
     const sorted = [...out];
     if (sortMode === "due") {
@@ -244,7 +296,7 @@ export default function TasksPanel({
       sorted.sort((a, b) => b._creationTime - a._creationTime);
     }
     return sorted;
-  }, [allTasks, activeView, todayOnly, showDone, sortMode, matchesQuery]);
+  }, [allTasks, activeView, todayOnly, showDone, sortMode, matchesQuery, hasIssues, openIssuesOf]);
 
   const doneCount = useMemo(
     () =>
@@ -272,8 +324,9 @@ export default function TasksPanel({
       mine: open.length,
       today: open.filter((t) => isDueToday(t) || isOverdue(t)).length,
       starred: open.filter((t) => t.starred).length,
+      issues: open.filter((t) => openIssuesOf(t._id).length > 0).length,
     };
-  }, [allTasks]);
+  }, [allTasks, openIssuesOf]);
 
   /** The view filters, in the order they are offered. */
   const viewFilters = useMemo(
@@ -410,10 +463,51 @@ export default function TasksPanel({
       setOpenStepRows((current) => new Set(current).add(taskId));
       return;
     }
+    // an open issue blocks the task too — it says what went wrong, and until
+    // it is put right the job is not done
+    const issues = openIssuesOf(taskId);
+    if (issues.length > 0) {
+      toast.error(
+        issues.length === 1
+          ? "Clear the open issue first."
+          : `Clear the ${issues.length} open issues first.`,
+      );
+      if (!openIssueRows.has(taskId)) toggleIssueRow(taskId);
+      return;
+    }
     try {
       await toggleTask({ id: taskId });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the task.");
+    }
+  };
+
+  /**
+   * Check a subtask off — blocked server-side while an issue reported against
+   * it is still open, so the dropdown opens and says which ones.
+   */
+  const handleToggleStep = async (step: Doc<"taskSteps">) => {
+    if (!step.isCompleted) {
+      const issues = (issuesByTask.get(step.taskId) ?? []).filter(
+        (i) => i.stepId === step._id && !i.isSolved,
+      );
+      if (issues.length > 0) {
+        toast.error(
+          issues.length === 1
+            ? "Clear the open issue on this subtask first."
+            : `Clear the ${issues.length} open issues on this subtask first.`,
+        );
+        if (!openStepRows.has(step.taskId)) toggleStepRow(step.taskId);
+        if (!openIssueRows.has(step.taskId)) toggleIssueRow(step.taskId);
+        return;
+      }
+    }
+    try {
+      await toggleStepM({ id: step._id });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't update the subtask.",
+      );
     }
   };
 
@@ -637,6 +731,24 @@ export default function TasksPanel({
           </div>
           <button
             type="button"
+            onClick={() => setHasIssues((v) => !v)}
+            aria-pressed={hasIssues}
+            title="Only the tasks that still have an open issue on them or on one of their subtasks"
+            className={cn(
+              "h-7 shrink-0 rounded-lg border px-2 text-[11px] font-medium transition-colors",
+              hasIssues
+                ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-400"
+                : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <TriangleAlert className="mr-1 inline size-3 align-[-2px]" />
+            Has issues
+            <span className="ml-1 tabular-nums opacity-70">
+              {viewCounts.issues}
+            </span>
+          </button>
+          <button
+            type="button"
             onClick={() => setShowDone((v) => !v)}
             className={cn(
               "h-7 shrink-0 rounded-lg border px-2 text-[11px] font-medium transition-colors",
@@ -667,6 +779,8 @@ export default function TasksPanel({
             <p className="mt-1 text-sm text-muted-foreground">
               {todayOnly
                 ? "Nothing due today — enjoy the calm."
+                : hasIssues
+                  ? "No open issues — everything reported has been cleared."
                 : activeView === "starred"
                   ? "Star a task to pin what matters most."
                   : activeList
@@ -701,6 +815,9 @@ export default function TasksPanel({
                   const taskSteps = stepsByTask.get(task._id) ?? [];
                   const stepsDone = taskSteps.filter((s) => s.isCompleted).length;
                   const stepsOpen = openStepRows.has(task._id);
+                  const taskIssues = issuesByTask.get(task._id) ?? [];
+                  const issuesOpen = taskIssues.filter((i) => !i.isSolved).length;
+                  const issuesDropOpen = openIssueRows.has(task._id);
                   const hasExtras =
                     task.dueAt !== undefined ||
                     task.tags !== undefined ||
@@ -977,6 +1094,55 @@ export default function TasksPanel({
                               )}
                             </span>
                           )}
+                          {/* issues get their own dropdown, on their own line of the
+                              row, so a snag reads as plainly as a subtask */}
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={issuesDropOpen}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleIssueRow(task._id);
+                            }}
+                            onDoubleClick={(e) => {
+                              // a double-click here is not a rename of the task
+                              e.stopPropagation();
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toggleIssueRow(task._id);
+                              }
+                            }}
+                            className={cn(
+                              "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
+                              issuesDropOpen || issuesOpen > 0
+                                ? "bg-rose-500/10 text-rose-700 dark:text-rose-400"
+                                : taskIssues.length > 0
+                                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                  : "bg-muted text-muted-foreground",
+                            )}
+                            title={
+                              taskIssues.length === 0
+                                ? "No issues reported — report one here"
+                                : `${issuesOpen} open of ${taskIssues.length} reported — a task only completes once they are cleared`
+                            }
+                          >
+                            <TriangleAlert className="size-2.5" />
+                            Issues
+                            {taskIssues.length > 0 && (
+                              <span className="tabular-nums">
+                                {issuesOpen}/{taskIssues.length}
+                              </span>
+                            )}
+                            <ChevronDown
+                              className={cn(
+                                "size-2.5 transition-transform",
+                                issuesDropOpen && "rotate-180",
+                              )}
+                            />
+                          </span>
                         </button>
                         <span className="flex shrink-0 items-center gap-0.5">
                           <button
@@ -1040,7 +1206,17 @@ export default function TasksPanel({
                                 </p>
                               ) : (
                                 <ul className="space-y-1">
-                                  {taskSteps.map((step) => (                                        <li
+                                  {taskSteps.map((step) => {
+                                    // issues filed against this subtask rather than
+                                    // against the task as a whole
+                                    const stepIssues = (
+                                      issuesByTask.get(task._id) ?? []
+                                    ).filter((i) => i.stepId === step._id);
+                                    const stepIssuesOpen = stepIssues.filter(
+                                      (i) => !i.isSolved,
+                                    ).length;
+                                    return (
+                                    <li
                                           key={step._id}
                                           className={cn(
                                             "group/step flex items-center gap-2 rounded-md px-1.5",
@@ -1050,7 +1226,7 @@ export default function TasksPanel({
                                       <Checkbox
                                         checked={step.isCompleted}
                                         disabled={!canEdit}
-                                        onCheckedChange={() => void toggleStepM({ id: step._id })}
+                                        onCheckedChange={() => void handleToggleStep(step)}
                                         aria-label={
                                           step.isCompleted
                                             ? `Reopen subtask “${step.text}”`
@@ -1244,6 +1420,41 @@ export default function TasksPanel({
                                           <CalendarDays className="size-3" />
                                         </span>
                                       )}
+                                      {/* issues reported against this subtask — they
+                                          live in the task's issues dropdown */}
+                                      {stepIssues.length > 0 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (!openStepRows.has(task._id)) {
+                                              toggleStepRow(task._id);
+                                            }
+                                            if (!openIssueRows.has(task._id)) {
+                                              toggleIssueRow(task._id);
+                                            }
+                                          }}
+                                          title={
+                                            stepIssuesOpen > 0
+                                              ? `${stepIssuesOpen} open issue(s) on this subtask — it can only be completed once they are cleared`
+                                              : "Every issue on this subtask is cleared"
+                                          }
+                                          className={cn(
+                                            "order-5 inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums transition-colors",
+                                            stepIssuesOpen > 0
+                                              ? "bg-rose-500/10 text-rose-700 dark:text-rose-400"
+                                              : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+                                          )}
+                                        >
+                                          {stepIssuesOpen > 0 ? (
+                                            <>
+                                              <TriangleAlert className="size-2.5" />
+                                              {stepIssuesOpen}
+                                            </>
+                                          ) : (
+                                            "✓"
+                                          )}
+                                        </button>
+                                      )}
                                       {canDelete && (
                                         <button
                                           type="button"
@@ -1273,7 +1484,8 @@ export default function TasksPanel({
                                         <ListTodo className="size-3" />
                                       </button>
                                     </li>
-                                  ))}
+                                    );
+                                  })}
                                 </ul>
                               )}
                               {canCreateSteps && stepsOpen && (
@@ -1282,6 +1494,30 @@ export default function TasksPanel({
                                   Subtasks to add another one.
                                 </p>
                               )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                      {/* issues: their own dropdown, the way subtasks have one */}
+                      <AnimatePresence initial={false}>
+                        {issuesDropOpen && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.18 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="border-t border-border/60 bg-rose-500/[0.03] py-2.5 pr-4 pl-1 sm:pr-5 sm:pl-2">
+                              <TaskIssues
+                                taskId={task._id}
+                                canEdit={canEdit}
+                                compact
+                                steps={taskSteps.map((s) => ({
+                                  _id: s._id,
+                                  text: s.text,
+                                }))}
+                              />
                             </div>
                           </motion.div>
                         )}
@@ -1303,7 +1539,15 @@ export default function TasksPanel({
                 canDelete={canDeleteSteps}
                 busy={stepBusy}
                 onPatch={(patch) => void patchOpenStep(patch)}
-                onToggle={() => void toggleStepM({ id: openStep._id })}
+                onToggle={() =>
+                  void toggleStepM({ id: openStep._id }).catch((error: unknown) =>
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : "Couldn't update the subtask.",
+                    ),
+                  )
+                }
                 onDelete={() => {
                   setOpenStepId(null);
                   void removeStepM({ id: openStep._id });

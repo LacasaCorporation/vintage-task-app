@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { CheckCircle2, Plus, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
+import {
+  CheckCircle2,
+  ListTodo,
+  Plus,
+  RotateCcw,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
@@ -26,19 +33,31 @@ const SEVERITY_DOT: Record<string, string> = {
 };
 
 /**
- * Problems raised against a task, and how each was put right.
+ * Problems raised against a task — or against one of its subtasks — and how
+ * each was put right.
  *
- * An issue is anything that went wrong — wrong part, wrong measurement, site
+ * An issue is anything that went wrong: wrong part, wrong measurement, site
  * access, a promise that could not be kept. Reporting one is separate from
- * ticking the task off: the task can only be completed once its issues are
- * solved, so a snag can't quietly disappear.
+ * ticking the task off, and it is what stops a task being completed: the task
+ * and any subtask stay open until every issue against them is solved, so a
+ * snag can't quietly disappear.
+ *
+ * The panel is used in two places — the task editor, and the issues dropdown
+ * under a task row in the list — so `compact` trims the furniture for the
+ * narrow one.
  */
 export default function TaskIssues({
   taskId,
   canEdit,
+  steps = [],
+  compact = false,
 }: {
   taskId: Id<"tasks">;
   canEdit: boolean;
+  /** The task's subtasks, so an issue can be filed against one of them. */
+  steps?: { _id: Id<"taskSteps">; text: string }[];
+  /** The narrow version used inside a task row's issues dropdown. */
+  compact?: boolean;
 }) {
   const issues = useQuery(api.tasks.listIssues, { taskId });
   const addIssue = useMutation(api.tasks.addIssue);
@@ -48,6 +67,8 @@ export default function TaskIssues({
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const [severity, setSeverity] = useState<Severity>("medium");
+  /** Which subtask the new issue is about; "" means the task itself. */
+  const [stepId, setStepId] = useState<"" | Id<"taskSteps">>("");
   const [solving, setSolving] = useState<Id<"taskIssues"> | null>(null);
   const [solution, setSolution] = useState("");
 
@@ -58,10 +79,17 @@ export default function TaskIssues({
     event.preventDefault();
     if (title.trim().length === 0) return;
     try {
-      await addIssue({ taskId, title, detail, severity });
+      await addIssue({
+        taskId,
+        title,
+        detail,
+        severity,
+        stepId: stepId === "" ? undefined : stepId,
+      });
       setTitle("");
       setDetail("");
       setSeverity("medium");
+      setStepId("");
       setComposing(false);
       toast.success("Issue reported.");
     } catch (error) {
@@ -85,25 +113,41 @@ export default function TaskIssues({
   };
 
   return (
-    <div className="flex items-start gap-2.5 px-1 py-1.5">
-      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+    <div className={cn("flex items-start gap-2.5", compact ? "py-1" : "px-1 py-1.5")}>
+      {!compact && (
+        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      )}
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          Issues
-          {issues !== undefined && issues.length > 0
-            ? ` (${open.length} open)`
-            : ""}
-        </p>
-
-        {issues === undefined ? (
-          <p className="mt-1 text-xs text-muted-foreground">Loading issues…</p>
-        ) : issues.length === 0 && !composing ? (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Nothing reported. If something on this job is wrong, log it here so
-            it gets fixed rather than forgotten.
+        {compact ? (
+          <p className="text-[11px] text-muted-foreground">
+            {issues === undefined
+              ? "Loading issues…"
+              : issues.length === 0
+                ? "Nothing reported. Log anything that goes wrong so it gets fixed rather than forgotten."
+                : `${open.length} open of ${issues.length} — this task completes once they are cleared.`}
           </p>
         ) : (
-          <ul className="mt-2 max-h-72 space-y-2 overflow-y-auto pr-1">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Issues
+            {issues !== undefined && issues.length > 0
+              ? ` (${open.length} open)`
+              : ""}
+          </p>
+        )}
+
+        {issues === undefined ? (
+          compact ? null : (
+            <p className="mt-1 text-xs text-muted-foreground">Loading issues…</p>
+          )
+        ) : issues.length === 0 && !composing ? (
+          compact ? null : (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Nothing reported. If something on this job is wrong, log it here
+              so it gets fixed rather than forgotten.
+            </p>
+          )
+        ) : (
+          <ul className={cn("mt-2 space-y-2 overflow-y-auto pr-1", compact ? "max-h-64" : "max-h-72")}>
             {[...open, ...solved].map((issue) => (
               <li
                 key={issue._id}
@@ -134,6 +178,13 @@ export default function TaskIssues({
                     >
                       {issue.title}
                     </p>
+                    {/* which subtask the problem is with, when it is not the task */}
+                    {issue.stepText !== undefined && (
+                      <span className="mt-1 inline-flex max-w-full items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        <ListTodo className="size-2.5 shrink-0" />
+                        <span className="truncate">{issue.stepText}</span>
+                      </span>
+                    )}
                     {issue.detail !== undefined && issue.detail !== "" && (
                       <p className="mt-0.5 text-xs break-words whitespace-pre-wrap text-muted-foreground">
                         {issue.detail}
@@ -161,7 +212,7 @@ export default function TaskIssues({
                         <button
                           type="button"
                           aria-label="Reopen issue"
-                          title="Reopen"
+                          title="Reopen — this puts the task back in play"
                           className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                           onClick={() =>
                             void setIssueSolved({ id: issue._id, solved: false })
@@ -259,6 +310,26 @@ export default function TaskIssues({
               className="h-8 rounded-lg text-sm"
               aria-label="Issue summary"
             />
+            {steps.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <ListTodo className="size-3.5 shrink-0 text-muted-foreground" />
+                <select
+                  value={stepId}
+                  onChange={(e) =>
+                    setStepId(e.target.value as "" | Id<"taskSteps">)
+                  }
+                  aria-label="Which subtask is the problem with"
+                  className="h-7 min-w-0 flex-1 truncate rounded-lg border border-border bg-card px-1.5 text-xs outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">On the task itself</option>
+                  {steps.map((s) => (
+                    <option key={s._id} value={s._id}>
+                      {s.text}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <Textarea
               value={detail}
               onChange={(e) => setDetail(e.target.value)}
@@ -309,7 +380,10 @@ export default function TaskIssues({
               type="button"
               variant="outline"
               size="sm"
-              className="mt-2 h-8 rounded-lg text-xs"
+              className={cn(
+                "rounded-lg text-xs",
+                compact ? "mt-2 h-7" : "mt-2 h-8",
+              )}
               onClick={() => setComposing(true)}
             >
               <Plus className="size-3.5" />
