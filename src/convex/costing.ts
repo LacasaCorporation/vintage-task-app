@@ -22,6 +22,7 @@ import {
   PROJECT_STATUS_START,
 } from "../lib/project-statuses";
 import { currencySymbol } from "../lib/currency";
+import { isProductDone, productsOfJob } from "./jobs";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -947,6 +948,10 @@ export const updateFinishedGood = mutation({
         currencySymbol((await getSettings(ctx, userId))?.currency);
     if (clearRecurrence === true) patch.recurrence = undefined;
     await ctx.db.patch(id, patch);
+    // moving a product into a job that was already finished reopens it
+    for (const jid of patch.jobIds ?? []) {
+      await syncJobCompletion(ctx, userId, jid);
+    }
   },
 });
 
@@ -1032,6 +1037,46 @@ export const removeFinishedGood = mutation({
  * Attach (or detach) a product to/from a job. A product can be attached to
  * several jobs at the same time. projectName follows the first job's project.
  */
+/**
+ * Keep a job's own completion honest: a job reads as finished only while every
+ * product under it is finished. Give a finished job a product and it reopens,
+ * because it now has work to do — the list can never show "Completed" above
+ * products that are still to be made. The project above follows it back.
+ */
+async function syncJobCompletion(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  jobId: Id<"projectJobs">,
+): Promise<void> {
+  const job = await ctx.db.get(jobId);
+  if (job === null || job.ownerId !== userId) return;
+  const finished =
+    job.status === "completed" || job.projectStatus === PROJECT_STATUS_FINISH;
+  if (!finished) return;
+  const open = (await productsOfJob(ctx, userId, jobId)).filter(
+    (f) => !isProductDone(f),
+  );
+  if (open.length === 0) return;
+  await ctx.db.patch(jobId, {
+    status: "in_progress",
+    projectStatus: undefined,
+    completedAt: undefined,
+  });
+  // a project can't stay finished while one of its jobs is open again
+  const project = await ctx.db.get(job.projectId);
+  if (
+    project !== null &&
+    project.ownerId === userId &&
+    (project.status === "completed" ||
+      project.projectStatus === PROJECT_STATUS_FINISH)
+  ) {
+    await ctx.db.patch(project._id, {
+      status: "in_progress",
+      projectStatus: undefined,
+    });
+  }
+}
+
 export const setFgJobs = mutation({
   args: {
     id: v.id("finishedGoods"),
@@ -1064,6 +1109,8 @@ export const setFgJobs = mutation({
       projectName,
       projectCode: unique.length > 0 ? fg.projectCode : undefined,
     });
+    // newly attached work reopens a job that had already been finished
+    for (const jid of unique) await syncJobCompletion(ctx, userId, jid);
   },
 });
 
@@ -1111,6 +1158,7 @@ export const attachToJob = mutation({
 
     const jobIds = Array.from(new Set([...(fg.jobIds ?? []), jobId]));
     const project = await ctx.db.get(job.projectId);
+    await syncJobCompletion(ctx, userId, jobId);
     await ctx.db.patch(fgId, {
       jobIds,
       jobId: fg.jobId ?? jobId,
@@ -1321,21 +1369,17 @@ export const setFgProjectStatus = mutation({
     for (const jid of jobIds) {
       const job = await ctx.db.get(jid);
       if (job === null || job.ownerId !== userId || job.isFlagged !== true) continue;
-      const all = await ctx.db
-        .query("finishedGoods")
-        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-        .collect();
-      const products = all.filter(
-        (f) => f.isFlagged && (f.jobId === jid || (f.jobIds ?? []).includes(jid)),
-      );
+      const products = (await productsOfJob(ctx, userId, jid)).filter((f) => f.isFlagged);
       if (products.length === 0) continue;
-      const everyDone = products.every((f) => f.projectStatus === PROJECT_STATUS_FINISH || f.isCompleted === true);
+      const everyDone = products.every(isProductDone);
       await ctx.db.patch(jid, {
         projectStatus: everyDone ? PROJECT_STATUS_FINISH : job.projectStatus === PROJECT_STATUS_FINISH ? undefined : job.projectStatus,
         status: everyDone ? "completed" : job.status === "completed" ? "in_progress" : job.status,
         completedAt: everyDone ? job.completedAt ?? Date.now() : undefined,
       });
     }
+    // and if any product under the job is still open, it cannot read as done
+    for (const jid of jobIds) await syncJobCompletion(ctx, userId, jid);
   },
 });
 
@@ -1373,13 +1417,7 @@ export const setFgCompleted = mutation({
       const job = await ctx.db.get(jid);
       if (job === null || job.ownerId !== userId || job.isFlagged !== true)
         continue;
-      const all = await ctx.db
-        .query("finishedGoods")
-        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-        .collect();
-      const products = all.filter(
-        (f) => f.isFlagged && (f.jobId === jid || (f.jobIds ?? []).includes(jid)),
-      );
+      const products = (await productsOfJob(ctx, userId, jid)).filter((f) => f.isFlagged);
       if (products.length === 0) continue;
       const everyDone = products.every((f) => f.isCompleted === true);
       if (everyDone && job.status !== "completed") {
@@ -1396,6 +1434,8 @@ export const setFgCompleted = mutation({
         });
       }
     }
+    // and if any product under the job is still open, it cannot read as done
+    for (const jid of jobIds) await syncJobCompletion(ctx, userId, jid);
   },
 });
 

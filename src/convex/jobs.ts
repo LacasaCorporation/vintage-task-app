@@ -225,7 +225,13 @@ export const updateJob = mutation({
     if (patch.assignee !== undefined)
       clean.assignee = patch.assignee.trim().slice(0, 120) || undefined;
     if (patch.dueAt !== undefined) clean.dueAt = patch.dueAt;
-    if (patch.status !== undefined) clean.status = normalizeStatus(patch.status);
+    if (patch.status !== undefined) {
+      const next = normalizeStatus(patch.status);
+      // "completed" is earned by finishing every product under the job, so
+      // editing the job cannot mark it done over work still to be made
+      if (next === "completed") await assertJobProductsDone(ctx, userId, id);
+      clean.status = next;
+    }
     if (patch.priority !== undefined) clean.priority = patch.priority;
     await ctx.db.patch(id, clean);
   },
