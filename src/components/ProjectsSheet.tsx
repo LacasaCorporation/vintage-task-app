@@ -51,6 +51,7 @@ import {
   projectStatusesOrDefaults,
 } from "@/lib/project-statuses";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { isFlaggedProjectWork } from "@/lib/project-work";
 import {
   JobDialog,
   AddProductToJobDialog,
@@ -234,7 +235,7 @@ export default function ProjectsSheet({
    * deepest flagged thing is counted.
    */
   const productionsCount = useMemo(() => {
-    const flaggedFgs = finishedGoods.filter((f) => f.isFlagged);
+    const flaggedFgs = finishedGoods.filter(isFlaggedProjectWork);
     const covered = new Set<string>();
     for (const f of flaggedFgs) {
       for (const jid of f.jobIds ?? (f.jobId !== undefined ? [f.jobId] : [])) {

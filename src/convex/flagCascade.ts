@@ -1,5 +1,6 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
+import { isFlaggedProjectWork } from "../lib/project-work";
 
 /**
  * The flag hierarchy, in one place.
@@ -93,6 +94,29 @@ export async function flagAncestors(
       await ctx.db.patch(job.projectId, { isFlagged: true, flaggedAt });
     }
   }
+}
+
+/**
+ * Forget a flag a product can no longer keep.
+ *
+ * A product earns its flag as project work, so once it is detached from the
+ * job it hung from — or from its project — the flag has nothing left to mean.
+ * It is dropped here, and the jobs it was taken out of drop their own flag if
+ * it was only there because of this product, so a deleted or emptied project
+ * cannot leave rows stranded on the Productions board.
+ */
+export async function clearStaleProductFlag(
+  ctx: Ctx,
+  userId: Id<"users">,
+  fgId: Id<"finishedGoods">,
+  affectedJobIds: Id<"projectJobs">[],
+): Promise<void> {
+  const fg = await ctx.db.get(fgId);
+  if (fg === null || fg.ownerId !== userId) return;
+  if (fg.isFlagged === true && !isFlaggedProjectWork(fg)) {
+    await ctx.db.patch(fgId, { isFlagged: undefined, flaggedAt: undefined });
+  }
+  await clearAncestorsIfOrphaned(ctx, userId, affectedJobIds);
 }
 
 /**

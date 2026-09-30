@@ -18,6 +18,7 @@ import {
   PROJECT_STATUS_START,
   projectStatusesOrDefaults,
 } from "@/lib/project-statuses";
+import { isFlaggedProjectWork } from "@/lib/project-work";
 import { toast } from "@/lib/toast";
 
 /**
@@ -65,8 +66,11 @@ export default function ProductionsBoard({
     () => (jobs ?? []).filter((j) => j.isFlagged),
     [jobs],
   );
+  // a product is on this board as project work: one left with no job — its
+  // job deleted, or it was detached from the project — has nothing to
+  // produce for, so a stale flag on it is ignored rather than stranded here
   const onlyFlaggedFgs = useMemo(
-    () => (fgs ?? []).filter((f) => f.isFlagged),
+    () => (fgs ?? []).filter(isFlaggedProjectWork),
     [fgs],
   );
 

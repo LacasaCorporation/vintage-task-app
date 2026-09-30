@@ -8,6 +8,7 @@ import {
 } from "./projectTasks";
 import {
   clearAncestorsIfOrphaned,
+  clearStaleProductFlag,
   flagAncestors,
   jobIdsOf,
   projectHasFlaggedWork,
@@ -751,6 +752,23 @@ export const removeProject = mutation({
       throw new Error(
         `This project still has ${jobs.length} job${jobs.length === 1 ? "" : "s"}. Delete the products first, then the jobs, then the project.`,
       );
+    // products that were only grouped under this project's name (no job) would
+    // be left pointing at a project that no longer exists, so they are let go
+    // with it — still products, still in the master list, no longer its work
+    for (const fg of await ctx.db
+      .query("finishedGoods")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect()) {
+      if ((fg.projectName ?? "") !== project.name) continue;
+      const jobIds = jobIdsOf(fg);
+      if (jobIds.length > 0) continue;
+      await ctx.db.patch(fg._id, {
+        projectName: undefined,
+        projectCode: undefined,
+        isFlagged: undefined,
+        flaggedAt: undefined,
+      });
+    }
     await purgeNode(ctx, "project", id);
     await ctx.db.delete(id);
   },
@@ -952,6 +970,7 @@ export const updateFinishedGood = mutation({
         currencySymbol((await getSettings(ctx, userId))?.currency);
     if (clearRecurrence === true) patch.recurrence = undefined;
     await ctx.db.patch(id, patch);
+    await clearStaleProductFlag(ctx, userId, id, jobIdsOf(fg));
     // moving a product into a job that was already finished reopens it
     for (const jid of patch.jobIds ?? []) {
       await syncJobCompletion(ctx, userId, jid);
@@ -1118,6 +1137,9 @@ export const setFgJobs = mutation({
     });
     // newly attached work reopens a job that had already been finished
     for (const jid of unique) await syncJobCompletion(ctx, userId, jid);
+    // a product taken out of every job (or out of a project) is not project
+    // work any more, so a flag it was carrying does not stay on the board
+    await clearStaleProductFlag(ctx, userId, id, jobIdsOf(fg));
   },
 });
 
@@ -1208,10 +1230,12 @@ export const detachFromJob = mutation({
         projectCode: undefined,
       });
       await syncJobCompletion(ctx, userId, jobId);
+      await clearStaleProductFlag(ctx, userId, fgId, [jobId]);
       return;
     }
     await ctx.db.patch(fgId, { jobIds, jobId: jobIds[0] });
     await syncJobCompletion(ctx, userId, jobId);
+    await clearStaleProductFlag(ctx, userId, fgId, [jobId]);
   },
 });
 
@@ -1235,6 +1259,8 @@ export const detachFromProject = mutation({
       projectName: undefined,
       projectCode: undefined,
     });
+    // it keeps its flag only while it still belongs to one of its jobs
+    await clearStaleProductFlag(ctx, userId, fgId, jobIdsOf(fg));
   },
 });
 
