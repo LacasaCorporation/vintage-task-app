@@ -22,10 +22,12 @@ export default function ActivePanel({
   scope: "active" | "inactive";
   onSelectView: (view: CostingView) => void;
 }) {
-  const active = useQuery(api.active.activeWork);
-  const inactive = useQuery(api.active.inactiveWork);
-  const data = scope === "active" ? active : inactive;
   const on = scope === "active";
+  // only the half being read is fetched — the other four lists are not needed
+  // until the switch is flipped, so they are not walked for nothing
+  const data = useQuery(
+    on ? api.active.activeWork : api.active.inactiveWork,
+  );
 
   if (data === undefined) {
     return (

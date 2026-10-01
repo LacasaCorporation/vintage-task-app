@@ -124,19 +124,25 @@ async function requireNoWorkUnder(
     .withIndex("by_project", (q) => q.eq("projectId", projectId))
     .collect();
   const mine = jobs.filter((j) => j.ownerId === userId);
-  const products: Doc<"finishedGoods">[] = [];
-  for (const job of mine) {
-    products.push(...(await productsInJob(ctx, userId, job._id)));
-  }
-  if (mine.length === 0 && products.length === 0) return;
+  if (mine.length === 0) return;
+  // one read of the firm's products, then grouped by the job they sit in —
+  // asking the database separately for each job cost a full scan per job
+  const products = await ctx.db
+    .query("finishedGoods")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .collect();
+  const jobIds = new Set(mine.map((j) => j._id as string));
+  const under = products.filter((fg) =>
+    jobIdsOf(fg).some((jid) => jobIds.has(jid)),
+  );
   const project = await ctx.db.get(projectId);
   const where = project === null ? "This project" : `“${project.name}”`;
   const bits: string[] = [];
   if (mine.length > 0)
     bits.push(`${mine.length} job${mine.length === 1 ? "" : "s"}`);
-  if (products.length > 0)
+  if (under.length > 0)
     bits.push(
-      `${products.length} product${products.length === 1 ? "" : "s"}`,
+      `${under.length} product${under.length === 1 ? "" : "s"}`,
     );
   throw new Error(
     `${where} still has ${bits.join(" and ")} under it. A project cannot be kept back while work sits in it — delete them, or take the Active mark off them first.`,
@@ -288,6 +294,47 @@ export const inactiveWork = query({
 function emptyLists(): ActiveLists {
   return { projects: [], jobs: [], products: [], materials: [] };
 }
+
+/**
+ * Just how many things sit each side of the mark — for the sidebar badges.
+ *
+ * The two full lists above read the same four tables; asking for both merely
+ * to count them meant eight full passes on every dashboard load. This walks
+ * each table once and returns the two totals, so the badges stay live while
+ * the lists themselves are only read when their panel is actually opened.
+ */
+export const activeCounts = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return { active: 0, inactive: 0 };
+    const projects = await ctx.db
+      .query("projects")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const jobs = await ctx.db
+      .query("projectJobs")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const products = await ctx.db
+      .query("finishedGoods")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const materials = await ctx.db
+      .query("rawMaterials")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    let active = 0;
+    let inactive = 0;
+    for (const rows of [projects, jobs, products, materials]) {
+      for (const row of rows) {
+        if (row.isActive === true) active++;
+        else inactive++;
+      }
+    }
+    return { active, inactive };
+  },
+});
 
 /**
  * The four lists, gathered one way. `keep` says which rows belong in them, so

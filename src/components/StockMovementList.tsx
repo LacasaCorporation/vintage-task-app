@@ -6,6 +6,11 @@ import { cn } from "@/lib/utils";
 const qty = (n: number) =>
   Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/\.?0+$/, "");
 
+// A zero amount is written as plain "0" — never "−0" — so an empty Out card
+// doesn't read as though something was issued backwards.
+const signed = (n: number, sign: "+" | "−") =>
+  n === 0 ? qty(n) : `${sign}${qty(n)}`;
+
 const when = (at: number) => {
   const days = Math.floor((Date.now() - at) / 86_400_000);
   if (days <= 0) return "today";
@@ -95,14 +100,14 @@ export default function StockMovementList({
         <Heading
           icon={ArrowDownLeft}
           label="In"
-          value={`+${qty(row.income)} ${row.unit}`}
+          value={`${signed(row.income, "+")} ${row.unit}`}
           sub="received"
           tone="in"
         />
         <Heading
           icon={ArrowUpRight}
           label="Out"
-          value={`−${qty(row.outgoing)} ${row.unit}`}
+          value={`${signed(row.outgoing, "−")} ${row.unit}`}
           sub="issued"
           tone="out"
         />
@@ -130,7 +135,7 @@ export default function StockMovementList({
                 received · {into.length}
               </span>
               <span className="ml-auto text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                +{qty(row.income)}
+                {signed(row.income, "+")}
               </span>
             </header>
             {into.length === 0 ? (
@@ -174,7 +179,7 @@ export default function StockMovementList({
                 issued · {outOf.length}
               </span>
               <span className="ml-auto text-[10px] font-semibold tabular-nums text-rose-600 dark:text-rose-400">
-                −{qty(row.outgoing)}
+                {signed(row.outgoing, "−")}
               </span>
             </header>
             {outOf.length === 0 ? (

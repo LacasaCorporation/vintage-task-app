@@ -463,20 +463,13 @@ export default function Dashboard() {
   const finishedGoods = useQuery(api.costing.listFinishedGoods);
   const projects = useQuery(api.costing.listProjects);
   const allJobs = useQuery(api.jobs.listJobs);
-  const activeWork = useQuery(api.active.activeWork);
-  const inactiveWork = useQuery(api.active.inactiveWork);
+  // The badges need only the two totals, so one light query serves them; the
+  // full Active/Inactive lists are read by ActivePanel when it is opened.
+  const activeCounts = useQuery(api.active.activeCounts);
   /** The one sidebar row that counts every kind carrying the Active mark. */
-  const activeCount =
-    (activeWork?.projects.length ?? 0) +
-    (activeWork?.jobs.length ?? 0) +
-    (activeWork?.products.length ?? 0) +
-    (activeWork?.materials.length ?? 0);
+  const activeCount = activeCounts?.active ?? 0;
   /** Its counterpart: what the mark being off has hidden from the lists. */
-  const inactiveCount =
-    (inactiveWork?.projects.length ?? 0) +
-    (inactiveWork?.jobs.length ?? 0) +
-    (inactiveWork?.products.length ?? 0) +
-    (inactiveWork?.materials.length ?? 0);
+  const inactiveCount = activeCounts?.inactive ?? 0;
   const addFgM = useMutation(api.costing.addFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
   const updateProjectM = useMutation(api.costing.updateProject);

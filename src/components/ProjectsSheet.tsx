@@ -521,8 +521,14 @@ export default function ProjectsSheet({
     URL.revokeObjectURL(url);
   };
 
-  /** The rows the print sheet renders: the current tab, current filters. */
+  /**
+   * The rows the print sheet renders: the current tab, current filters.
+   *
+   * Built only while a print is actually being prepared — otherwise every
+   * keystroke in the search box would rebuild the whole document off-screen.
+   */
   const printRows: PrintRow[] = useMemo(() => {
+    if (!printing) return [];
     if (tab === "customers" || tab === "productions") return [];
     if (tab === "projects") {
       const projectDocs = (projects ?? []).filter((p) =>
@@ -583,7 +589,7 @@ export default function ProjectsSheet({
         (fg.category ?? "").toLowerCase().includes(q)
       );
     });
-  }, [tab, projects, allJobs, finishedGoods, costByFg, filtered, search, jobFilter, productFilter, projectStatusesList, projectNameForJob]);
+  }, [printing, tab, projects, allJobs, finishedGoods, costByFg, filtered, search, jobFilter, productFilter, projectStatusesList, projectNameForJob]);
 
   /**
    * Deleting a job from the Job list. The server refuses it while any
