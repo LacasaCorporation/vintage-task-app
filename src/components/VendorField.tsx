@@ -32,8 +32,18 @@ export default function VendorField({
   const removeVendor = useMutation(api.contacts.removeVendor);
   const [menuOpen, setMenuOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
   const linked = vendors?.find((vendor) => vendor._id === supplierId);
+  const needle = query.trim().toLowerCase();
+  const matches =
+    needle === ""
+      ? (vendors ?? [])
+      : (vendors ?? []).filter((vendor) =>
+          [vendor.name, vendor.contactName, vendor.phone, vendor.email]
+            .filter(Boolean)
+            .some((field) => field!.toLowerCase().includes(needle)),
+        );
 
   return (
     <div className="space-y-2">
@@ -81,9 +91,22 @@ export default function VendorField({
                 type="button"
                 aria-label="Close vendor list"
                 className="fixed inset-0 z-10 cursor-default"
-                onClick={() => setMenuOpen(false)}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setQuery("");
+                }}
               />
               <ul className="absolute top-full left-0 z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border bg-card py-1 shadow-lg">
+                <li className="sticky top-0 bg-card px-1.5 pb-1.5">
+                  <input
+                    autoFocus
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search vendors…"
+                    aria-label="Search vendors"
+                    className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </li>
                 {vendors === undefined ? (
                   <li className="flex items-center gap-2 px-2.5 py-2 text-xs text-muted-foreground">
                     <Loader2 className="size-3 animate-spin" /> Loading…
@@ -92,8 +115,12 @@ export default function VendorField({
                   <li className="px-2.5 py-2 text-xs text-muted-foreground">
                     No vendors yet — use “New vendor”.
                   </li>
+                ) : matches.length === 0 ? (
+                  <li className="px-2.5 py-2 text-xs text-muted-foreground">
+                    No vendor matches that.
+                  </li>
                 ) : (
-                  vendors.map((vendor) => (
+                  matches.map((vendor) => (
                     <li key={vendor._id}>
                       <button
                         type="button"
@@ -104,6 +131,7 @@ export default function VendorField({
                             supplierAddress: vendor.address ?? "",
                           });
                           setMenuOpen(false);
+                          setQuery("");
                         }}
                         className={cn(
                           "flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-sm hover:bg-accent",

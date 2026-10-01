@@ -347,7 +347,7 @@ export default function LpoPanel({
   /** Opens the bill form pre-filled from this order's lines. */
   onCreateBill: (lpo: LpoDoc) => void;
   /** The bill number an order was raised into, so the row can name it. */
-  billNumberOf: (billId: Id<"purchases">) => string | undefined;
+  billNumberOf?: (billId: Id<"purchases">) => string | undefined;
 }) {
   const lpos = useQuery(api.lpo.list);
   const { format: money } = useWorkspaceCurrency();
@@ -476,7 +476,7 @@ export default function LpoPanel({
                         </span>
                         {l.billId !== undefined && (
                           <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
-                            {billNumberOf(l.billId) ?? "billed"}
+                            {billNumberOf?.(l.billId) ?? "billed"}
                           </span>
                         )}
                       </td>

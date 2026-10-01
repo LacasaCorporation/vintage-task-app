@@ -547,6 +547,7 @@ const schema = defineSchema(
       source: v.union(
         v.literal("purchase"),
         v.literal("lpo"),
+        v.literal("grv"),
         v.literal("production"),
         v.literal("production-return"),
         v.literal("adjustment"),
@@ -621,6 +622,67 @@ const schema = defineSchema(
     })
       .index("by_owner", ["ownerId"])
       .index("by_status", ["status"]),
+
+    /**
+     * A goods received voucher: the goods have physically arrived and are put
+     * into stock before the supplier's bill turns up. It sits between an order
+     * and a bill, so a delivery is never lost while the paperwork catches up.
+     */
+    grvs: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // auto GRV0001, GRV0002, …
+      vendorId: v.optional(v.id("vendors")),
+      vendor: v.optional(v.string()),
+      receivedAt: v.number(), // ms
+      /** The order this delivery answers, when there is one. */
+      lpoId: v.optional(v.id("lpos")),
+      note: v.optional(v.string()),
+      reference: v.optional(v.string()), // supplier's delivery note number
+      lines: v.array(
+        v.object({
+          materialId: v.id("rawMaterials"),
+          name: v.string(),
+          unit: v.string(),
+          qty: v.number(),
+          unitCost: v.number(),
+        }),
+      ),
+      total: v.number(),
+      /**
+       * draft = recorded but not counted in, received = the goods are in stock.
+       * Goods cannot be counted in twice, so a received voucher is the only
+       * one that writes movements.
+       */
+      status: v.union(v.literal("draft"), v.literal("received")),
+      receivedInto: v.optional(v.number()), // ms, when it was counted in
+    }).index("by_owner", ["ownerId"]),
+
+    /**
+     * A payment made to a supplier: money leaving the till or the bank. It is
+     * its own document because money moving is its own event, separate from
+     * the bill that prompted it — one payment can cover several bills, and a
+     * bill can be paid in more than one go.
+     */
+    payments: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // auto PAY0001, PAY0002, …
+      vendorId: v.optional(v.id("vendors")),
+      vendor: v.optional(v.string()),
+      at: v.number(), // ms, when the money left
+      amount: v.number(),
+      /** The account the money left: cash or bank. */
+      paidFrom: v.optional(v.id("accounts")),
+      reference: v.optional(v.string()), // cheque / transfer number
+      note: v.optional(v.string()),
+      /**
+       * The bill this payment settles, when it is settling one. Setting it
+       * marks the bill paid with this payment's entry, so the bill and the
+       * payment tell the same story instead of two entries for one outflow.
+       */
+      billId: v.optional(v.id("purchases")),
+      /** The journal entry this payment posted. */
+      entryId: v.optional(v.id("journalEntries")),
+    }).index("by_owner", ["ownerId"]),
 
     /**
      * Money spent that is not stock: transport, rent, wages, utilities. Each

@@ -9,6 +9,7 @@ export type MovementDirection = "in" | "out";
 export type MovementSource =
   | "purchase" // a bill brought it in
   | "lpo" // a purchase order was received
+  | "grv" // a goods received voucher counted it in
   | "production" // a product consumed it
   | "production-return" // production stopped, so it went back
   | "adjustment"; // a manual stock correction

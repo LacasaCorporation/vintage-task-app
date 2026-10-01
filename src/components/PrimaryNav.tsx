@@ -17,6 +17,7 @@ import {
 import { useState } from "react";
 import type { CostingView } from "@/components/CostingSidebar";
 import { ACCOUNTING_TABS } from "@/lib/accounting-tabs";
+import { PURCHASE_TABS } from "@/lib/purchase-tabs";
 import { cn } from "@/lib/utils";
 
 type FgDoc = Doc<"finishedGoods">;
@@ -129,6 +130,14 @@ export default function PrimaryNav({
   const onMaterials = view?.kind === "materials";
   const onProducts = view?.kind === "products";
   const inAccounting = inCosting && view?.kind === "accounting";
+  // the Purchase drill-down works the same way: open whenever you are inside
+  const inPurchase = inCosting && view?.kind === "purchase";
+  const [purchaseExpanded, setPurchaseExpanded] = useState(inPurchase);
+  const [wasInPurchase, setWasInPurchase] = useState(inPurchase);
+  if (wasInPurchase !== inPurchase) {
+    setWasInPurchase(inPurchase);
+    if (inPurchase) setPurchaseExpanded(true);
+  }
   /**
    * The header row IS "Chart of accounts", so it is left out of the
    * drill-down. That way exactly one row is ever highlighted: the header when
@@ -162,13 +171,88 @@ export default function PrimaryNav({
       <div className="my-2 h-px bg-border/60" />
 
       {canViewPurchase && (
-        <NavRow
-          label="Purchase"
-          Icon={Receipt}
-          active={inCosting && view?.kind === "purchase"}
-          n={purchaseCount}
-          onClick={() => onSelectView({ kind: "purchase" })}
-        />
+        <div>
+          <div
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-2 py-1 transition-colors",
+              inPurchase && view?.tab === "bills"
+                ? "bg-primary/10"
+                : "hover:bg-accent",
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setPurchaseExpanded((v) => !v)}
+              aria-expanded={purchaseExpanded}
+              title={purchaseExpanded ? "Hide the Purchase pages" : "Show the Purchase pages"}
+              aria-label={
+                purchaseExpanded ? "Hide the Purchase pages" : "Show the Purchase pages"
+              }
+              className="grid size-4 shrink-0 place-items-center rounded text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none"
+            >
+              <ChevronDown
+                className={cn(
+                  "size-3 transition-transform",
+                  !purchaseExpanded && "-rotate-90",
+                )}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (inPurchase && view?.tab === "bills" && purchaseExpanded) {
+                  setPurchaseExpanded(false);
+                  return;
+                }
+                setPurchaseExpanded(true);
+                onSelectView({ kind: "purchase", tab: "bills" });
+              }}
+              title={
+                inPurchase && view?.tab === "bills" && purchaseExpanded
+                  ? "Hide the Purchase pages"
+                  : "Open the purchase bills"
+              }
+              aria-expanded={purchaseExpanded}
+              aria-current={inPurchase && view?.tab === "bills" ? "page" : undefined}
+              className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
+            >
+              <Receipt
+                className={cn(
+                  "size-4 shrink-0",
+                  inPurchase && view?.tab === "bills"
+                    ? "text-primary"
+                    : "text-muted-foreground/70",
+                )}
+              />
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-sm",
+                  inPurchase && view?.tab === "bills"
+                    ? "font-medium text-primary"
+                    : "text-foreground/85",
+                )}
+              >
+                Purchase
+              </span>
+              <span className={countCls}>{purchaseCount}</span>
+            </button>
+          </div>
+
+          {purchaseExpanded && (
+            <div className="ml-3 border-l border-border/60 pl-1">
+              {PURCHASE_TABS.filter((t) => t.id !== "bills").map((t) => (
+                <NavRow
+                  key={t.id}
+                  label={t.label}
+                  Icon={t.icon}
+                  active={inPurchase && view?.tab === t.id}
+                  sub
+                  onClick={() => onSelectView({ kind: "purchase", tab: t.id })}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       )}
       <NavRow
         label="Projects"

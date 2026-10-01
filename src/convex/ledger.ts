@@ -116,6 +116,44 @@ export async function postBillPayment(
 }
 
 /**
+ * Money paid to a supplier against a payable: the payable is cleared by money
+ * leaving cash or bank. Stands on its own rather than being bolted onto a bill
+ * because a payment is its own event — it can clear a bill, part of one, or
+ * several, and it has to be readable either way.
+ */
+export async function postSupplierPayment(
+  ctx: Ctx,
+  ownerId: Id<"users">,
+  args: {
+    amount: number;
+    at: number;
+    vendor?: string;
+    memo: string;
+    /** Whichever account the money left — defaults to the configured cash. */
+    fromAccountId?: Id<"accounts">;
+    /** Bank is preferred over cash when nothing was chosen. */
+    preferBank?: boolean;
+  },
+): Promise<Id<"journalEntries">> {
+  const d = await resolveDefaults(ctx, ownerId);
+  const from =
+    args.fromAccountId !== undefined
+      ? (await ctx.db.get(args.fromAccountId)) ??
+        (await settlementAccount(ctx, ownerId, args.preferBank ?? false))
+      : await settlementAccount(ctx, ownerId, args.preferBank ?? false);
+  return postEntry(ctx, ownerId, {
+    at: args.at,
+    kind: "payment",
+    memo: args.memo,
+    party: args.vendor?.trim() || undefined,
+    lines: [
+      { accountId: d.payable._id, debit: round2(args.amount), credit: 0 },
+      { accountId: from._id, debit: 0, credit: round2(args.amount) },
+    ],
+  });
+}
+
+/**
  * A customer invoice. Unpaid invoices sit in accounts receivable; one marked
  * paid went straight into the till.
  */

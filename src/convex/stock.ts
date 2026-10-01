@@ -3,11 +3,10 @@ import { scopeUserId } from "./org";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type {
-  MovementDirection,
-  MovementSource,
-  StockRow,
-} from "../lib/stock-types";
+import type { MovementDirection, StockRow } from "../lib/stock-types";
+
+/** The movement sources the table allows, read from the schema itself. */
+type MaterialSource = Doc<"stockMovements">["source"];
 
 export type { StockRow };
 
@@ -22,7 +21,7 @@ type MoveArgs = {
    * the stock, because a correction can go either way.
    */
   qty: number;
-  source: MovementSource;
+  source: MaterialSource;
   /** Bill number or product name, shown next to the movement. */
   ref?: string;
   at?: number;
@@ -103,8 +102,11 @@ async function ledgerTotals(
     .collect();
   for (const m of moves) {
     if (m.materialId !== materialId) continue;
-    // a received purchase order is stock bought, same as a bill line
-    if (m.source === "lpo" && m.direction === "in") income += m.qty;
+    // goods received — on an order or on a voucher — are stock bought, the
+    // same as a bill line
+    if ((m.source === "lpo" || m.source === "grv") && m.direction === "in") {
+      income += m.qty;
+    }
     // production is the only real consumer; a stop hands the same units back
     if (m.source === "production" && m.direction === "out") outgoing += m.qty;
     if (m.source === "production-return" && m.direction === "in") outgoing -= m.qty;
@@ -199,8 +201,11 @@ export const report = query({
         outgoing: 0,
         movements: [],
       };
-      // a received purchase order is stock bought, same as a bill line
-      if (m.source === "lpo" && m.direction === "in") entry.lpoIncome += m.qty;
+      // goods received — on an order or on a voucher — are stock bought, the
+      // same as a bill line
+      if ((m.source === "lpo" || m.source === "grv") && m.direction === "in") {
+        entry.lpoIncome += m.qty;
+      }
       // only production consumes stock; corrections adjust the opening, and a
       // stopped run hands its units back, so neither belongs in "issued"
       if (m.source === "production" && m.direction === "out") {

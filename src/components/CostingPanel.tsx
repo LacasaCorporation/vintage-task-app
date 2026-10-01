@@ -737,6 +737,8 @@ export default function CostingPanel({
             canCreate={canCreatePurchase}
             canEdit={canEditPurchase}
             canDelete={canDeletePurchase}
+            tab={view.tab}
+            onTabChange={(tab) => onSelectView({ kind: "purchase", tab })}
           />
         </Suspense>
       ) : view?.kind === "sales" && canViewSales ? (

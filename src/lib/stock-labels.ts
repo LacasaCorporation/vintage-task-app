@@ -7,6 +7,7 @@
 export const MATERIAL_SOURCE_LABEL: Record<string, string> = {
   purchase: "Bought",
   lpo: "Received on order",
+  grv: "Goods received",
   production: "Used in production",
   "production-return": "Returned from production",
   adjustment: "Stock correction",
