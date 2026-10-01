@@ -19,6 +19,7 @@ export type ProductFilter =
   | "all"
   | "flagged"
   | "active"
+  | "inactive"
   | "in-production"
   | "finished"
   | "unflagged";
@@ -28,6 +29,7 @@ export const PRODUCT_FILTERS: readonly FilterOption<ProductFilter>[] = [
   { value: "all", label: "All items", hint: "Every product" },
   { value: "flagged", label: "Flagged", hint: "On the Projects board" },
   { value: "active", label: "Active", hint: "Marked as being worked on" },
+  { value: "inactive", label: "Inactive", hint: "Kept back from the list" },
   { value: "in-production", label: "In production", hint: "Materials out of stock" },
   { value: "finished", label: "Finished", hint: "Completed products" },
   { value: "unflagged", label: "Not flagged", hint: "Everything still to plan" },
@@ -38,6 +40,7 @@ export type JobFilter =
   | "all"
   | "flagged"
   | "active"
+  | "inactive"
   | "open"
   | "completed";
 
@@ -46,17 +49,25 @@ export const JOB_FILTERS: readonly FilterOption<JobFilter>[] = [
   { value: "all", label: "All items", hint: "Every job" },
   { value: "flagged", label: "Flagged", hint: "On the Projects board" },
   { value: "active", label: "Active", hint: "Marked as being worked on" },
+  { value: "inactive", label: "Inactive", hint: "Kept back from the list" },
   { value: "open", label: "Open", hint: "Not finished yet" },
   { value: "completed", label: "Completed", hint: "Already done" },
 ];
 
-/** Does this filter keep the given product? */
+/**
+ * Does this filter keep the given product?
+ *
+ * Active is the default, so anything whose mark was taken off is kept out of
+ * every list unless the reader explicitly asked for the inactive ones.
+ */
 export function keepsProduct(fg: FgDoc, filter: ProductFilter): boolean {
+  if (filter === "inactive") return fg.isActive !== true;
+  if (fg.isActive !== true) return false;
   switch (filter) {
     case "flagged":
       return fg.isFlagged === true;
     case "active":
-      return fg.isActive === true;
+      return true;
     case "unflagged":
       return fg.isFlagged !== true;
     case "in-production":
@@ -68,13 +79,15 @@ export function keepsProduct(fg: FgDoc, filter: ProductFilter): boolean {
   }
 }
 
-/** Does this filter keep the given job? */
+/** Does this filter keep the given job? Same rule as keepsProduct. */
 export function keepsJob(job: JobDoc, filter: JobFilter): boolean {
+  if (filter === "inactive") return job.isActive !== true;
+  if (job.isActive !== true) return false;
   switch (filter) {
     case "flagged":
       return job.isFlagged === true;
     case "active":
-      return job.isActive === true;
+      return true;
     case "open":
       return job.status !== "completed" && job.status !== "cancelled";
     case "completed":

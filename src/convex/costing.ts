@@ -236,6 +236,10 @@ export const addMaterial = mutation({
       ownerId: userId,
       code: code?.trim() || autoCode,
       name: clean,
+      // new work is active by default — the mark is only ever taken off
+      // deliberately, never something you have to remember to switch on
+      isActive: true,
+      activeAt: Date.now(),
       category: category?.trim() || undefined,
       subCategory: subCategory?.trim() || undefined,
       unit: cleanUnit,
@@ -435,6 +439,8 @@ export const bulkImportMaterials = mutation({
           ownerId: userId,
           code: finalCode,
           name,
+          isActive: true,
+          activeAt: Date.now(),
           category: categoryName,
           subCategory: subCategoryName,
           unit: unitName,
@@ -632,6 +638,8 @@ export const addProject = mutation({
       ownerId: userId,
       name: name.slice(0, MAX_NAME_LENGTH),
       code,
+      isActive: true,
+      activeAt: Date.now(),
       description: opts.description?.trim().slice(0, 2000) || undefined,
       client: opts.client?.trim().slice(0, 120) || undefined,
       assignee: opts.assignee?.trim().slice(0, 120) || undefined,
@@ -861,6 +869,8 @@ export const addFinishedGood = mutation({
     }
     return await ctx.db.insert("finishedGoods", {
       ownerId: userId,
+      isActive: true,
+      activeAt: Date.now(),
       // the person who added the product owns it, and may hand out permissions
       ...(creator !== null
         ? { assigneeId: creator, assignedAt: Date.now(), assigneeIds: [creator] }
@@ -1498,6 +1508,8 @@ export const cloneFinishedGood = mutation({
     const fgCode = await nextCode(ctx, userId, "FG");
     const cloneId = await ctx.db.insert("finishedGoods", {
       ownerId: userId,
+      isActive: true,
+      activeAt: Date.now(),
       name: `${fg.name.slice(0, MAX_NAME_LENGTH - 7)} (copy)`.slice(
         0,
         MAX_NAME_LENGTH,

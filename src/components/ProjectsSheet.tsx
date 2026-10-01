@@ -63,12 +63,13 @@ import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
 const ProjectDetailPanel = lazy(() => import("@/components/ProjectDetailPanel"));
 const ProductDetailPanel = lazy(() => import("@/components/ProductDetailPanel"));
 
-type ProjectFilter = "all" | "flagged" | "active";
+type ProjectFilter = "all" | "flagged" | "active" | "inactive";
 
 const PROJECT_FILTERS: readonly FilterOption<ProjectFilter>[] = [
   { value: "all", label: "All items", hint: "Every project" },
   { value: "flagged", label: "Flagged", hint: "On the Projects board" },
   { value: "active", label: "Active", hint: "Marked as being worked on" },
+  { value: "inactive", label: "Inactive", hint: "Kept back from the list" },
 ];
 import ProjectsPrintSheet, {
   buildPrintRows,
@@ -432,6 +433,14 @@ export default function ProjectsSheet({
 
   const filtered = useMemo(() => {
     let list = rows;
+    // a project whose Active mark was taken off stays out of the list until
+    // the reader asks for it. Name-only groups have no project record to carry
+    // a mark, so they are never treated as inactive.
+    if (flagFilter === "inactive") {
+      list = list.filter((p) => p.project !== undefined && p.project.isActive !== true);
+    } else {
+      list = list.filter((p) => p.project?.isActive !== false);
+    }
     if (flagFilter === "flagged") {
       // only projects that have something flagged in them
       list = list.filter((p) => {
@@ -921,8 +930,17 @@ export default function ProjectsSheet({
                   (j) => f.jobId === j._id || (f.jobIds ?? []).includes(j._id),
                 );
                 if (inAJob) return false;
+                // the same rule as every other list: an inactive product only
+                // shows when the reader asked for the inactive ones
+                if (flagFilter === "inactive") {
+                  if (f.isActive !== true) return true;
+                } else if (f.isActive !== true) return false;
                 return flagFilter === "flagged" ? f.isFlagged === true : true;
               });
+              const shownJobs =
+                flagFilter === "inactive"
+                  ? p.jobs.filter((j) => j.isActive !== true)
+                  : p.jobs.filter((j) => j.isActive === true);
               return (
                 <li
                   key={p.key}
@@ -1073,7 +1091,7 @@ export default function ProjectsSheet({
                           onClick={() => setExpanded(expanded === p.key ? null : p.key)}
                         >
                           <Briefcase className="size-3" />
-                          {p.jobs.length} job{p.jobs.length === 1 ? "" : "s"}
+                          {shownJobs.length} job{shownJobs.length === 1 ? "" : "s"}
                           <ChevronDown
                             className={cn(
                               "size-3 transition-transform",
@@ -1180,7 +1198,7 @@ export default function ProjectsSheet({
                   {/* jobs of this project */}
                   {expanded === p.key && (
                     <div className="mt-2 ml-6 space-y-1 rounded-xl border border-dashed bg-muted/20 p-2">
-                      {p.jobs.length === 0 ? (
+                      {shownJobs.length === 0 ? (
                         <div className="px-1 py-1.5 text-[11px] text-muted-foreground">
                           {detail ? (
                             <p>
@@ -1211,14 +1229,17 @@ export default function ProjectsSheet({
                           )}
                         </div>
                       ) : (
-                        p.jobs.map((job) => {
+                        shownJobs.map((job) => {
                           const meta = job.status
                             ? JOB_STATUS_META[job.status]
                             : undefined;
                           const allJobProducts = finishedGoods.filter(
                             (f) =>
-                              f.jobId === job._id ||
-                              (f.jobIds ?? []).includes(job._id),
+                              (f.jobId === job._id ||
+                                (f.jobIds ?? []).includes(job._id)) &&
+                              (flagFilter === "inactive"
+                                ? f.isActive !== true
+                                : f.isActive === true),
                           );
                           // Flagged view: a flagged job shows ALL its
                           // products; a normal job shows only its flagged

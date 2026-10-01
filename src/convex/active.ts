@@ -63,6 +63,70 @@ export const setActive = mutation({
   },
 });
 
+/**
+ * One-off: mark everything that has no mark yet as active. Active is the
+ * default, so records written before that default existed must be brought in
+ * line or they would all read as inactive and vanish from every list.
+ */
+export const backfillActiveDefaults = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    let patched = 0;
+    const now = Date.now();
+    const projects = await ctx.db
+      .query("projects")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    for (const row of projects) {
+      if (row.isActive === true) continue;
+      await ctx.db.patch(row._id, {
+        isActive: true,
+        activeAt: row.activeAt ?? now,
+      });
+      patched++;
+    }
+    const jobs = await ctx.db
+      .query("projectJobs")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    for (const row of jobs) {
+      if (row.isActive === true) continue;
+      await ctx.db.patch(row._id, {
+        isActive: true,
+        activeAt: row.activeAt ?? now,
+      });
+      patched++;
+    }
+    const products = await ctx.db
+      .query("finishedGoods")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    for (const row of products) {
+      if (row.isActive === true) continue;
+      await ctx.db.patch(row._id, {
+        isActive: true,
+        activeAt: row.activeAt ?? now,
+      });
+      patched++;
+    }
+    const materials = await ctx.db
+      .query("rawMaterials")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    for (const row of materials) {
+      if (row.isActive === true) continue;
+      await ctx.db.patch(row._id, {
+        isActive: true,
+        activeAt: row.activeAt ?? now,
+      });
+      patched++;
+    }
+    return patched;
+  },
+});
+
 /** What the Active list shows, one list per kind of thing. */
 export type ActiveLists = {
   projects: {

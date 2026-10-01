@@ -184,6 +184,8 @@ export const addJob = mutation({
     return await ctx.db.insert("projectJobs", {
       ownerId: userId,
       projectId: opts.projectId,
+      isActive: true,
+      activeAt: Date.now(),
       name: name.slice(0, MAX_NAME_LENGTH),
       code,
       description: opts.description?.trim().slice(0, 2000) || undefined,

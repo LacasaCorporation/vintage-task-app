@@ -12,6 +12,7 @@ import {
   BadgeCheck,
   ChevronDown,
   Download,
+  EyeOff,
   FileSpreadsheet,
   History,
   Layers,
@@ -40,12 +41,13 @@ import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 type MaterialDoc = Doc<"rawMaterials">;
 
-/** All materials, or only the ones marked active. */
-type MaterialFilter = "all" | "active";
+/** All materials, or only the ones marked active or taken off the list. */
+type MaterialFilter = "all" | "active" | "inactive";
 
 const MATERIAL_FILTERS: readonly FilterOption<MaterialFilter>[] = [
   { value: "all", label: "All materials", hint: "The whole master list" },
   { value: "active", label: "Active", hint: "Marked as being worked on" },
+  { value: "inactive", label: "Inactive", hint: "Kept back from the list" },
 ];
 
 /**
@@ -354,6 +356,8 @@ export default function MaterialsSheet({
   const [categoryFilter, setCategoryFilter] = useState("all");
   /** All materials, or only the ones carrying the Active mark. */
   const [usageFilter, setUsageFilter] = useState<MaterialFilter>("all");
+  /** Reveal the materials whose Active mark has been taken off. */
+  const [showInactive, setShowInactive] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   /** the material whose income / outgoing transactions are open */
   const [openStock, setOpenStock] = useState<Id<"rawMaterials"> | null>(null);
@@ -371,12 +375,22 @@ export default function MaterialsSheet({
     [materials],
   );
 
+  const inactiveCount = useMemo(
+    () => materials.filter((m) => m.isActive !== true).length,
+    [materials],
+  );
+
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
+    // a material whose Active mark was taken off stays out of the list until
+    // the reader asks for it — either with the filter or the reveal button
+    const showAll = showInactive || usageFilter === "inactive";
     return materials
       .filter((m) => {
         if (categoryFilter !== "all" && (m.category ?? "") !== categoryFilter) return false;
+        if (!showAll && m.isActive !== true) return false;
         if (usageFilter === "active" && m.isActive !== true) return false;
+        if (usageFilter === "inactive" && m.isActive === true) return false;
         if (!q) return true;
         return (
           m.name.toLowerCase().includes(q) ||
@@ -385,7 +399,7 @@ export default function MaterialsSheet({
         );
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [materials, search, categoryFilter, usageFilter]);
+  }, [materials, search, categoryFilter, usageFilter, showInactive]);
 
   const exportCsv = () => {
     const lines = [
@@ -478,6 +492,29 @@ export default function MaterialsSheet({
             onChange={setUsageFilter}
             label="Show materials"
           />
+          {inactiveCount > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-pressed={showInactive}
+              onClick={() => setShowInactive((v) => !v)}
+              title={
+                showInactive
+                  ? "Hide the materials whose Active mark was taken off"
+                  : "Show the inactive materials alongside the active ones"
+              }
+              className={cn(
+                "h-7 gap-1.5 rounded-lg text-xs",
+                showInactive &&
+                  "border-primary/40 bg-primary/[0.06] text-primary hover:bg-primary/10",
+              )}
+            >
+              <EyeOff className="size-3" />
+              {showInactive ? "Hiding inactive" : "Show inactive"}
+              <span className="tabular-nums opacity-70">{inactiveCount}</span>
+            </Button>
+          )}
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}

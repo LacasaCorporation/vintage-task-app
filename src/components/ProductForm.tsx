@@ -14,6 +14,7 @@ import {
 import {
   ChevronDown,
   Download,
+  EyeOff,
   Loader2,
   Package,
   PackageCheck,
@@ -68,6 +69,7 @@ const isLocked = (fg: FgDoc) =>
 type ProductionFilter =
   | "all"
   | "active"
+  | "inactive"
   | "not-started"
   | "in-production"
   | "finished";
@@ -75,6 +77,7 @@ type ProductionFilter =
 const PRODUCTION_FILTERS: readonly FilterOption<ProductionFilter>[] = [
   { value: "all", label: "All states", hint: "Every product" },
   { value: "active", label: "Active", hint: "Marked as being worked on" },
+  { value: "inactive", label: "Inactive", hint: "Kept back from the list" },
   { value: "not-started", label: "Not started", hint: "Production not begun" },
   { value: "in-production", label: "In production", hint: "Materials are out of stock" },
   { value: "finished", label: "Finished", hint: "Completed products" },
@@ -84,6 +87,8 @@ function keepsProduction(fg: FgDoc, filter: ProductionFilter): boolean {
   switch (filter) {
     case "active":
       return fg.isActive === true;
+    case "inactive":
+      return fg.isActive !== true;
     case "not-started":
       return fg.productionStartedAt === undefined;
     case "in-production":
@@ -213,6 +218,8 @@ export default function ProductForm({
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [productionFilter, setProductionFilter] = useState<ProductionFilter>("all");
+  /** Reveal the products whose Active mark has been taken off. */
+  const [showInactive, setShowInactive] = useState(false);
   const [showForm, setShowForm] = useState(false);
   /** The product whose transactions are open, if any. */
   const [openStock, setOpenStock] = useState<Id<"finishedGoods"> | null>(null);
@@ -279,10 +286,19 @@ export default function ProductForm({
     [allJobs, selectedProjectId],
   );
 
+  const inactiveCount = useMemo(
+    () => finishedGoods.filter((f) => f.isActive !== true).length,
+    [finishedGoods],
+  );
+
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
+    // Active is the default, so a product is only hidden once its mark has
+    // been deliberately taken off — and only until the reader asks for them.
+    const showAll = showInactive || productionFilter === "inactive";
     return finishedGoods
       .filter((f) => {
+        if (!showAll && f.isActive !== true) return false;
         if (!keepsProduction(f, productionFilter)) return false;
         if (!q) return true;
         return (
@@ -293,7 +309,7 @@ export default function ProductForm({
         );
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [finishedGoods, search, productionFilter]);
+  }, [finishedGoods, search, productionFilter, showInactive]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -767,6 +783,29 @@ export default function ProductForm({
               label="Filter production"
               icon={Factory}
             />
+            {inactiveCount > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-pressed={showInactive}
+                onClick={() => setShowInactive((v) => !v)}
+                title={
+                  showInactive
+                    ? "Hide the products whose Active mark was taken off"
+                    : `Show the ${inactiveCount} inactive product${inactiveCount === 1 ? "" : "s"} alongside the active ones`
+                }
+                className={cn(
+                  "h-7 gap-1.5 rounded-lg text-xs",
+                  showInactive &&
+                    "border-primary/40 bg-primary/[0.06] text-primary hover:bg-primary/10",
+                )}
+              >
+                <EyeOff className="size-3" />
+                {showInactive ? "Hiding inactive" : "Show inactive"}
+                <span className="tabular-nums opacity-70">{inactiveCount}</span>
+              </Button>
+            )}
             {rows.length > 0 && (
               <Button type="button" variant="outline" size="sm" className="h-7 rounded-lg text-xs" onClick={exportCsv}>
                 <Download className="size-3" />
