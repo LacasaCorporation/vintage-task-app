@@ -14,6 +14,7 @@ import {
   Factory,
   FileSpreadsheet,
   ImagePlus,
+  Link2,
   Loader2,
   Package,
   Pencil,
@@ -23,6 +24,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import ConnectJobDialog from "@/components/ConnectJobDialog";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -175,6 +177,15 @@ export default function CostingPanel({
   const setFgImage = useMutation(api.costing.setFgImage);
   const clearFgImageM = useMutation(api.costing.clearFgImage);
   const mergeDuplicates = useMutation(api.costing.mergeFgDuplicateItems);
+  /**
+   * Putting this product into a job. A product stands on its own until it is
+   * given one, and the job's own totals count it from that moment — so the
+   * button lives on the sheet, next to Save, where the product is being worked
+   * on.
+   */
+  const attachToJobM = useMutation(api.costing.attachToJob);
+  const allJobs = useQuery(api.jobs.listJobs);
+  const [connectOpen, setConnectOpen] = useState(false);
   const mergedOnceFor = useRef<Id<"finishedGoods"> | null>(null);
   const { confirm, promptMulti } = useAppDialogs();
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -276,6 +287,23 @@ export default function CostingPanel({
     activeFgId === null ? "skip" : { fgId: activeFgId },
   );
   const rows = useMemo(() => items ?? [], [items]);
+
+  /** The jobs this product already sits in, so the button can say so. */
+  const jobNames = useMemo(() => {
+    const ids =
+      activeFg?.jobIds ??
+      (activeFg?.jobId !== undefined ? [activeFg.jobId] : []);
+    return ids
+      .map((id) => (allJobs ?? []).find((j) => j._id === id)?.name)
+      .filter((name): name is string => name !== undefined);
+  }, [activeFg, allJobs]);
+
+  /** Every job in the firm, as the connect dialog's options. */
+  const jobOptions = useMemo(
+    () =>
+      (allJobs ?? []).map((j) => ({ _id: j._id, name: j.name, code: j.code })),
+    [allJobs],
+  );
 
   /** Searchable options for the "add a material" picker. */
   const materialOptions = useMemo<PickerItem[]>(
@@ -862,6 +890,7 @@ export default function CostingPanel({
                 {activeFg.unit ? ` · per ${activeFg.unit}` : ""}
                 {activeFg.productionStartedAt !== undefined && " · in production"}
                 {activeFg.isCompleted === true && " · finished"}
+                {jobNames.length > 0 && ` · in ${jobNames.join(", ")}`}
               </p>
               {activeFg.note && (
                 <p className="truncate text-[11px] text-muted-foreground/80">{activeFg.note}</p>
@@ -922,6 +951,17 @@ export default function CostingPanel({
                 >
                   Unsaved changes
                 </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConnectOpen(true)}
+                  title="Put this product into a job — the job's cost and sales value then include it"
+                  className="h-7 shrink-0 gap-1.5 rounded-lg text-xs"
+                >
+                  <Link2 className="size-3" />
+                  Put into a job
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
@@ -1330,6 +1370,26 @@ export default function CostingPanel({
             </div>
           )}
         </>
+          {/* putting the product into a job: the dialog closes the sheet's
+              own dialog behind it, so it is mounted outside that content */}
+          {connectOpen && (
+            <ConnectJobDialog
+              open
+              productName={activeFg.name}
+              productUnit={activeFg.unit ?? "pcs"}
+              defaultQty={activeFg.qty ?? 1}
+              jobs={jobOptions}
+              currentJobId={activeFg.jobId}
+              onClose={() => setConnectOpen(false)}
+              onSubmit={async (jobId, qty) => {
+                await attachToJobM({ fgId: activeFg._id, jobId, qty });
+                const job = (allJobs ?? []).find((j) => j._id === jobId);
+                toast.success(
+                  `“${activeFg.name}” put into ${job?.name ?? "the job"} — ${qty} needed.`,
+                );
+              }}
+            />
+          )}
           </DialogContent>
         </Dialog>
       ) : loading ? (
