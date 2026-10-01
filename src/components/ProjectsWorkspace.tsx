@@ -200,6 +200,17 @@ export default function ProjectsWorkspace({
             <Loader2 className="size-4 animate-spin" />
             Loading projects…
           </div>
+        ) : items === null ? (
+          /* nothing is flagged at all, so there is nothing to produce — said
+              once for every level, rather than an empty project tree that looks
+              like a project with no work in it */
+          <div className="px-6 py-14 text-center">
+            <Flag className="mx-auto size-8 text-amber-500/40" />
+            <p className="mt-3 font-medium">Nothing flagged</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Flag a job or product in the Projects page and it will show up here.
+            </p>
+          </div>
         ) : filter === "projects" ? (
           activeView === "hierarchy" ? (
             <ProjectHierarchy
@@ -227,14 +238,6 @@ export default function ProjectsWorkspace({
               onSelect={onSelect}
             />
           )
-        ) : items === null ? (
-          <div className="px-6 py-14 text-center">
-            <Flag className="mx-auto size-8 text-amber-500/40" />
-            <p className="mt-3 font-medium">Nothing flagged</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Flag a job or product in the Projects page and it will show up here.
-            </p>
-          </div>
         ) : filter === "products" ? (
           activeView === "report" ? (
             <ProductionReport

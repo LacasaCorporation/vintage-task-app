@@ -74,20 +74,40 @@ export default function ProductionsBoard({
     [fgs],
   );
 
+  /**
+   * Only the projects that have something to produce.
+   *
+   * Jobs and products arrive here already filtered to the flagged ones, but
+   * the project list did not — so a project with nothing flagged in it was
+   * still drawn, empty, on a board whose own tab reads 0. A project earns its
+   * place by holding a flagged job, or a flagged product in one of its jobs.
+   */
+  const productionProjects = useMemo(() => {
+    const withNames = new Set<string>();
+    for (const fg of onlyFlaggedFgs) {
+      const name = fg.projectName?.trim().toLowerCase();
+      if (name !== undefined && name !== "") withNames.add(name);
+    }
+    return (projects ?? []).filter(
+      (p) =>
+        onlyFlaggedJobs.some((j) => j.projectId === p._id) ||
+        withNames.has(p.name.trim().toLowerCase()),
+    );
+  }, [projects, onlyFlaggedJobs, onlyFlaggedFgs]);
+
   /** Flagged jobs (with their project) and flagged products. */
   const items = useMemo<FlaggedData | null>(() => {
     if (onlyFlaggedJobs.length === 0 && onlyFlaggedFgs.length === 0) return null;
-    const projectNameOf = (job: JobDoc): string => {
-      const project = (projects ?? []).find((p) => p._id === job.projectId);
-      return project?.name ?? "Project";
-    };
+    const byId = new Map((projects ?? []).map((p) => [p._id, p.name] as const));
+    const projectNameOf = (job: JobDoc): string =>
+      byId.get(job.projectId) ?? "Project";
     return {
       jobs: onlyFlaggedJobs,
       fgs: onlyFlaggedFgs,
-      projects: projects ?? [],
+      projects: productionProjects,
       projectNameOf,
     };
-  }, [onlyFlaggedJobs, onlyFlaggedFgs, projects]);
+  }, [onlyFlaggedJobs, onlyFlaggedFgs, productionProjects, projects]);
 
   const saveProjectStatuses = async () => {
     if (statusDraft === null) return;
@@ -155,7 +175,7 @@ export default function ProductionsBoard({
   return (
     <ProjectsWorkspace
       canEdit={canEdit}
-      projects={projects}
+      projects={productionProjects}
       jobs={onlyFlaggedJobs}
       fgs={onlyFlaggedFgs}
       items={items}
