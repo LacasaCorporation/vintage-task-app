@@ -730,10 +730,19 @@ export default function CostingPanel({
         <Suspense fallback={<AreaLoading label="reports" />}>
           <ReportsPanel />
         </Suspense>
-      ) : view?.kind === "active" ? (
+      ) : view?.kind === "active" || view?.kind === "inactive" ? (
         <div className="mt-4">
-          <Suspense fallback={<AreaLoading label="the Active list" />}>
-            <ActivePanel onSelectView={onSelectView} />
+          <Suspense
+            fallback={
+              <AreaLoading
+                label={view.kind === "active" ? "the Active list" : "the Inactive list"}
+              />
+            }
+          >
+            <ActivePanel
+              scope={view.kind}
+              onSelectView={onSelectView}
+            />
           </Suspense>
         </div>
       ) : view?.kind === "materials" && canViewMaterials ? (

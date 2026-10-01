@@ -464,12 +464,19 @@ export default function Dashboard() {
   const projects = useQuery(api.costing.listProjects);
   const allJobs = useQuery(api.jobs.listJobs);
   const activeWork = useQuery(api.active.activeWork);
+  const inactiveWork = useQuery(api.active.inactiveWork);
   /** The one sidebar row that counts every kind carrying the Active mark. */
   const activeCount =
     (activeWork?.projects.length ?? 0) +
     (activeWork?.jobs.length ?? 0) +
     (activeWork?.products.length ?? 0) +
     (activeWork?.materials.length ?? 0);
+  /** Its counterpart: what the mark being off has hidden from the lists. */
+  const inactiveCount =
+    (inactiveWork?.projects.length ?? 0) +
+    (inactiveWork?.jobs.length ?? 0) +
+    (inactiveWork?.products.length ?? 0) +
+    (inactiveWork?.materials.length ?? 0);
   const addFgM = useMutation(api.costing.addFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
   const updateProjectM = useMutation(api.costing.updateProject);
@@ -758,6 +765,7 @@ export default function Dashboard() {
             purchaseCount={purchases?.length ?? 0}
             projectCount={projects?.length ?? 0}
             activeCount={activeCount}
+            inactiveCount={inactiveCount}
             salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
             accountCount={ledgerAccounts?.length ?? 0}
             onSelectSection={handleSelectSection}
@@ -890,6 +898,7 @@ export default function Dashboard() {
                 purchaseCount={purchases?.length ?? 0}
                 projectCount={projects?.length ?? 0}
                 activeCount={activeCount}
+                inactiveCount={inactiveCount}
                 salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
                 accountCount={ledgerAccounts?.length ?? 0}
                 onSelectSection={handleSelectSection}

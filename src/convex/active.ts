@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
+import type { QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 
 /**
@@ -166,74 +167,100 @@ export type ActiveLists = {
 /** Everything marked active in the firm, newest mark first. */
 export const activeWork = query({
   args: {},
-  handler: async (ctx): Promise<ActiveLists> => {
+  handler: async (ctx) => {
     const userId = await scopeUserId(ctx);
-    if (userId === null)
-      return { projects: [], jobs: [], products: [], materials: [] };
-
-    const projects = await ctx.db
-      .query("projects")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    const jobs = await ctx.db
-      .query("projectJobs")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    const products = await ctx.db
-      .query("finishedGoods")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    const materials = await ctx.db
-      .query("rawMaterials")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-
-    // names to hang beside a marked job or product
-    const projectName = new Map(projects.map((p) => [p._id, p.name] as const));
-    const jobName = new Map(jobs.map((j) => [j._id, j.name] as const));
-    const marked = <T extends { isActive?: boolean; activeAt?: number }>(
-      rows: T[],
-    ) =>
-      rows
-        .filter((row) => row.isActive === true)
-        .sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0));
-
-    return {
-      projects: marked(projects).map((p) => ({
-        _id: p._id,
-        name: p.name,
-        code: p.code,
-        status: p.projectStatus ?? p.status,
-        markedAt: p.activeAt ?? 0,
-      })),
-      jobs: marked(jobs).map((j) => ({
-        _id: j._id,
-        name: j.name,
-        code: j.code,
-        projectName: projectName.get(j.projectId),
-        status: j.projectStatus ?? j.status,
-        markedAt: j.activeAt ?? 0,
-      })),
-      products: marked(products).map((fg) => {
-        const ids = fg.jobIds ?? (fg.jobId !== undefined ? [fg.jobId] : []);
-        return {
-          _id: fg._id,
-          name: fg.name,
-          code: fg.code,
-          jobName: ids.length > 0 ? jobName.get(ids[0]!) : undefined,
-          projectName: fg.projectName,
-          stock: fg.stock ?? 0,
-          markedAt: fg.activeAt ?? 0,
-        };
-      }),
-      materials: marked(materials).map((m) => ({
-        _id: m._id,
-        name: m.name,
-        code: m.code,
-        unit: m.unit,
-        stock: m.stock ?? 0,
-        markedAt: m.activeAt ?? 0,
-      })),
-    };
+    if (userId === null) return emptyLists();
+    return await collect(ctx, userId, (row) => row.isActive === true);
   },
 });
+
+/**
+ * Everything whose Active mark has been taken off — the other half of the
+ * sidebar's switch. Same four lists, same shape, so the panel reads them the
+ * same way; only the test is reversed.
+ */
+export const inactiveWork = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return emptyLists();
+    return await collect(ctx, userId, (row) => row.isActive !== true);
+  },
+});
+
+function emptyLists(): ActiveLists {
+  return { projects: [], jobs: [], products: [], materials: [] };
+}
+
+/**
+ * The four lists, gathered one way. `keep` says which rows belong in them, so
+ * the Active list and the Inactive list cannot drift apart.
+ */
+async function collect(
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  keep: (row: { isActive?: boolean }) => boolean,
+): Promise<ActiveLists> {
+  const projects = await ctx.db
+    .query("projects")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .collect();
+  const jobs = await ctx.db
+    .query("projectJobs")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .collect();
+  const products = await ctx.db
+    .query("finishedGoods")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .collect();
+  const materials = await ctx.db
+    .query("rawMaterials")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .collect();
+
+  // names to hang beside a marked job or product
+  const projectName = new Map(projects.map((p) => [p._id, p.name] as const));
+  const jobName = new Map(jobs.map((j) => [j._id, j.name] as const));
+  const marked = <T extends { isActive?: boolean; activeAt?: number }>(
+    rows: T[],
+  ) =>
+    rows.filter(keep).sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0));
+
+  return {
+      projects: marked(projects).map((p) => ({
+      _id: p._id,
+      name: p.name,
+      code: p.code,
+      status: p.projectStatus ?? p.status,
+      markedAt: p.activeAt ?? 0,
+    })),
+    jobs: marked(jobs).map((j) => ({
+      _id: j._id,
+      name: j.name,
+      code: j.code,
+      projectName: projectName.get(j.projectId),
+      status: j.projectStatus ?? j.status,
+      markedAt: j.activeAt ?? 0,
+    })),
+    products: marked(products).map((fg) => {
+      const ids = fg.jobIds ?? (fg.jobId !== undefined ? [fg.jobId] : []);
+      return {
+        _id: fg._id,
+        name: fg.name,
+        code: fg.code,
+        jobName: ids.length > 0 ? jobName.get(ids[0]!) : undefined,
+        projectName: fg.projectName,
+        stock: fg.stock ?? 0,
+        markedAt: fg.activeAt ?? 0,
+      };
+    }),
+    materials: marked(materials).map((m) => ({
+      _id: m._id,
+      name: m.name,
+      code: m.code,
+      unit: m.unit,
+      stock: m.stock ?? 0,
+      markedAt: m.activeAt ?? 0,
+    })),
+  };
+}

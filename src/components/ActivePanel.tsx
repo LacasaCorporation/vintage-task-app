@@ -6,25 +6,32 @@ import { useQuery } from "convex/react";
 import type { ReactNode } from "react";
 
 /**
- * Everything carrying the Active mark, in one place.
+ * Everything carrying the Active mark, in one place — or everything whose
+ * mark has been taken off, which is the same four lists read the other way.
  *
  * The Active button sits on projects, jobs, products and raw materials alike,
  * so the list that gathers them is read the same way: one section per kind,
- * newest mark first, with the same button here to take the mark off again.
+ * newest mark first, with the same button here to change the mark.
  * Opening a row goes to where that thing is worked on.
  */
 export default function ActivePanel({
+  scope,
   onSelectView,
 }: {
+  /** Which half of the mark to show. */
+  scope: "active" | "inactive";
   onSelectView: (view: CostingView) => void;
 }) {
-  const data = useQuery(api.active.activeWork);
+  const active = useQuery(api.active.activeWork);
+  const inactive = useQuery(api.active.inactiveWork);
+  const data = scope === "active" ? active : inactive;
+  const on = scope === "active";
 
   if (data === undefined) {
     return (
       <p className="mt-6 flex items-center gap-2 px-1 text-sm text-muted-foreground">
         <Loader2 className="size-3.5 animate-spin" />
-        Reading the Active list…
+        Reading the {on ? "Active" : "Inactive"} list…
       </p>
     );
   }
@@ -40,20 +47,37 @@ export default function ActivePanel({
       <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
           <p className="text-sm font-semibold">
-            Active
+            {on ? "Active" : "Inactive"}
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {total === 1 ? "1 item being worked on" : `${total} items being worked on`}
+              {total === 0
+                ? "nothing here"
+                : total === 1
+                  ? on
+                    ? "1 item being worked on"
+                    : "1 item kept back from the lists"
+                  : on
+                    ? `${total} items being worked on`
+                    : `${total} items kept back from the lists`}
             </span>
           </p>
           <span className="text-[11px] text-muted-foreground">
-            Marked by hand, whatever their status
+            {on ? "Marked by hand, whatever their status" : "Hidden from every list until marked active again"}
           </span>
         </div>
 
         {total === 0 ? (
           <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-            Nothing is marked active yet — the <strong>Active</strong> button on any
-            project, job, product or material gathers it here.
+            {on ? (
+              <>
+                Nothing is marked active yet — the <strong>Active</strong> button on
+                any project, job, product or material gathers it here.
+              </>
+            ) : (
+              <>
+                Nothing is inactive — every project, job, product and material is
+                marked active.
+              </>
+            )}
           </p>
         ) : (
           <div className="divide-y divide-border/60">
@@ -72,7 +96,7 @@ export default function ActivePanel({
                   toggle={
                     <ActiveToggle
                       target={{ kind: "project", id: row._id }}
-                      active
+                      active={on}
                     />
                   }
                 />
@@ -90,10 +114,12 @@ export default function ActivePanel({
                   name={row.name}
                   code={row.code}
                   context={row.projectName ?? row.status}
-                  onOpen={() => onSelectView({ kind: "projects" })}
-                  toggle={
-                    <ActiveToggle target={{ kind: "job", id: row._id }} active />
-                  }
+                  onOpen={() => onSelectView({ kind: "projects" })}toggle={
+                      <ActiveToggle
+                        target={{ kind: "job", id: row._id }}
+                        active={on}
+                      />
+                    }
                 />
               ))}
             </Section>
@@ -117,7 +143,7 @@ export default function ActivePanel({
                   toggle={
                     <ActiveToggle
                       target={{ kind: "product", id: row._id }}
-                      active
+                      active={on}
                     />
                   }
                 />
@@ -139,7 +165,7 @@ export default function ActivePanel({
                   toggle={
                     <ActiveToggle
                       target={{ kind: "material", id: row._id }}
-                      active
+                      active={on}
                     />
                   }
                 />
@@ -150,8 +176,20 @@ export default function ActivePanel({
       </section>
 
       <p className="text-xs text-muted-foreground">
-        The mark is yours to set: it does not change a status, a flag or a
-        costing figure, and taking it off only removes the row from this list.
+        {on ? (
+          <>
+            The mark is yours to set: it does not change a status, a flag or a
+            costing figure. Taking it off moves the row to the{" "}
+            <strong>Inactive</strong> list and out of the everyday lists until you
+            put it back.
+          </>
+        ) : (
+          <>
+            These are hidden from the project, job, product and material lists.
+            Mark one <strong>Active</strong> again and it goes straight back into
+            them.
+          </>
+        )}
       </p>
     </div>
   );

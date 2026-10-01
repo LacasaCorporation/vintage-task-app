@@ -15,6 +15,8 @@ export type CostingView =
   | { kind: "materials" }
   /** Everything carrying the Active mark, gathered in one list. */
   | { kind: "active" }
+  /** Everything whose Active mark has been taken off. */
+  | { kind: "inactive" }
   | { kind: "purchase" }
   | { kind: "sales" }
   | { kind: "products" }
