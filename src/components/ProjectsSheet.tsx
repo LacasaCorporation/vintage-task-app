@@ -29,6 +29,8 @@ import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { ProductionButton } from "@/components/FlaggedLists";
 import ActiveToggle from "@/components/ActiveToggle";
+// the same rule the server uses to know which products sit in which job
+import { jobIdsOf } from "@/lib/project-work";
 import ProductCodeInline from "@/components/ProductCodeInline";
 import ProductTagsInline from "@/components/ProductTagsInline";
 import { batchCost, batchQty, costByProduct } from "@/lib/product-cost";
@@ -941,6 +943,16 @@ export default function ProjectsSheet({
                 flagFilter === "inactive"
                   ? p.jobs.filter((j) => j.isActive !== true)
                   : p.jobs.filter((j) => j.isActive === true);
+              // what sits under this project, active or not — the mark cannot
+              // be taken off a project while work is still in it
+              const underProducts = finishedGoods.filter(
+                (f) =>
+                  jobIdsOf(f).some((jid) =>
+                    p.jobs.some((j) => j._id === jid),
+                  ) ||
+                  (f.projectName ?? "").trim().toLowerCase() ===
+                    p.name.trim().toLowerCase(),
+              ).length;
               return (
                 <li
                   key={p.key}
@@ -1041,6 +1053,10 @@ export default function ProjectsSheet({
                         <ActiveToggle
                           target={{ kind: "project", id: detail._id }}
                           active={detail.isActive === true}
+                          blockedBy={{
+                            jobs: p.jobs.length,
+                            products: underProducts,
+                          }}
                           compact
                         />
                       )}
@@ -1403,6 +1419,11 @@ export default function ProjectsSheet({
                               <ActiveToggle
                                 target={{ kind: "job", id: job._id }}
                                 active={job.isActive === true}
+                                blockedBy={{
+                                  products: finishedGoods.filter((f) =>
+                                    jobIdsOf(f).includes(job._id),
+                                  ).length,
+                                }}
                                 compact
                               />
 

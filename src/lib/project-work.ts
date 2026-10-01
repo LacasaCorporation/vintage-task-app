@@ -1,4 +1,19 @@
 /**
+ * Every job a product belongs to — products moved to a single or multi link.
+ *
+ * Lives here rather than in the Convex module so the browser and the server
+ * answer "which job is this product in?" the same way.
+ */
+export function jobIdsOf(fg: {
+  jobId?: unknown;
+  jobIds?: readonly unknown[] | undefined;
+}): string[] {
+  const many = fg.jobIds ?? [];
+  if (many.length > 0) return many.map(String);
+  return fg.jobId !== undefined ? [String(fg.jobId)] : [];
+}
+
+/**
  * Whether a flagged product still counts as project work.
  *
  * The Productions board is the work inside projects: the flag cascades through

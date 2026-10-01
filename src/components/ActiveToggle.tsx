@@ -24,14 +24,33 @@ export default function ActiveToggle({
   target,
   active,
   compact = false,
+  /** What stands under this job or project, so the tooltip can warn first. */
+  blockedBy,
 }: {
   target: ActiveTarget;
   active: boolean;
   /** Dense rows get the dot alone — the tooltip still names it. */
   compact?: boolean;
+  /**
+   * How many things sit under a job or project. A parent cannot be kept back
+   * while work is inside it, so the button says so before it is pressed rather
+   * than only refusing afterwards.
+   */
+  blockedBy?: { jobs?: number; products?: number };
 }) {
   const setActive = useMutation(api.active.setActive);
   const [busy, setBusy] = useState(false);
+  const what = target.kind === "project" ? "project" : "job";
+  const bits: string[] = [];
+  if (blockedBy?.jobs !== undefined && blockedBy.jobs > 0)
+    bits.push(
+      `${blockedBy.jobs} job${blockedBy.jobs === 1 ? "" : "s"}`,
+    );
+  if (blockedBy?.products !== undefined && blockedBy.products > 0)
+    bits.push(
+      `${blockedBy.products} product${blockedBy.products === 1 ? "" : "s"}`,
+    );
+  const under = bits.join(" and ");
 
   const toggle = async () => {
     setBusy(true);
@@ -50,7 +69,9 @@ export default function ActiveToggle({
   };
 
   const title = active
-    ? "On the Active list — click to take the mark off"
+    ? under
+      ? `Still has ${under} under it — a ${what} cannot be kept back while work sits in it`
+      : "On the Active list — click to take the mark off"
     : "Mark active — gather it on the Active list";
 
   return (
@@ -59,6 +80,8 @@ export default function ActiveToggle({
       disabled={busy}
       onClick={() => void toggle()}
       aria-pressed={active}
+      // the mark can still be pressed — the server has the last word — but the
+      // warning is in the tooltip and in the toast if it refuses
       aria-label={title}
       title={title}
       className={cn(

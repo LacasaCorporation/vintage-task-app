@@ -1,7 +1,9 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
-import type { QueryCtx } from "./_generated/server";
+import { jobIdsOf } from "./flagCascade";
+import type { Doc } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 
 /**
@@ -22,7 +24,17 @@ const activeTarget = v.union(
   v.object({ kind: v.literal("material"), id: v.id("rawMaterials") }),
 );
 
-/** Mark one thing active, or take the mark off again. */
+/**
+ * Mark one thing active, or take the mark off again.
+ *
+ * The mark is owned by the leaf, exactly as the flag is: a product is the
+ * thing actually being worked on, and its job and project only carry the work.
+ * So a job or project can never be kept back while products still sit inside
+ * it (or, for a project, while its jobs do) — that would hide the work itself
+ * from every list. Take the mark off the leaves, or delete them, first. In the
+ * other direction marking a product active brings its job and project back,
+ * so a marked product can never sit inside a hidden parent.
+ */
 export const setActive = mutation({
   args: { target: activeTarget, active: v.boolean() },
   handler: async (ctx, { target, active }) => {
@@ -36,6 +48,7 @@ export const setActive = mutation({
         const doc = await ctx.db.get(target.id);
         if (doc === null || doc.ownerId !== userId)
           throw new Error("That project no longer exists.");
+        if (!active) await requireNoWorkUnder(ctx, userId, doc._id);
         await ctx.db.patch(target.id, active ? mark : clear);
         return;
       }
@@ -43,6 +56,7 @@ export const setActive = mutation({
         const doc = await ctx.db.get(target.id);
         if (doc === null || doc.ownerId !== userId)
           throw new Error("That job no longer exists.");
+        if (!active) await requireEmptyJob(ctx, userId, doc._id);
         await ctx.db.patch(target.id, active ? mark : clear);
         return;
       }
@@ -51,6 +65,9 @@ export const setActive = mutation({
         if (doc === null || doc.ownerId !== userId)
           throw new Error("That product no longer exists.");
         await ctx.db.patch(target.id, active ? mark : clear);
+        // a product being worked on cannot sit inside a job and project that
+        // have been kept back, so its parents are marked with it
+        if (active) await markAncestors(ctx, userId, jobIdsOf(doc), Date.now());
         return;
       }
       case "material": {
@@ -63,6 +80,86 @@ export const setActive = mutation({
     }
   },
 });
+
+/** Products sitting in this job, active or not. */
+async function productsInJob(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  jobId: Id<"projectJobs">,
+): Promise<Doc<"finishedGoods">[]> {
+  const products = await ctx.db
+    .query("finishedGoods")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .collect();
+  return products.filter((fg) => jobIdsOf(fg).includes(jobId));
+}
+
+/** Refuse to keep a job back while products still live inside it. */
+async function requireEmptyJob(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  jobId: Id<"projectJobs">,
+): Promise<void> {
+  const products = await productsInJob(ctx, userId, jobId);
+  if (products.length === 0) return;
+  const job = await ctx.db.get(jobId);
+  const where = job === null ? "This job" : `“${job.name}”`;
+  const active = products.filter((p) => p.isActive === true).length;
+  throw new Error(
+    `${where} still has ${products.length} product${products.length === 1 ? "" : "s"}${active > 0 ? ` (${active} still active)` : ""}. A job cannot be kept back while products sit in it — delete the products, or take the Active mark off them first.`,
+  );
+}
+
+/**
+ * Refuse to keep a project back while anything still sits under it — its jobs,
+ * and the products in them.
+ */
+async function requireNoWorkUnder(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  projectId: Id<"projects">,
+): Promise<void> {
+  const jobs = await ctx.db
+    .query("projectJobs")
+    .withIndex("by_project", (q) => q.eq("projectId", projectId))
+    .collect();
+  const mine = jobs.filter((j) => j.ownerId === userId);
+  const products: Doc<"finishedGoods">[] = [];
+  for (const job of mine) {
+    products.push(...(await productsInJob(ctx, userId, job._id)));
+  }
+  if (mine.length === 0 && products.length === 0) return;
+  const project = await ctx.db.get(projectId);
+  const where = project === null ? "This project" : `“${project.name}”`;
+  const bits: string[] = [];
+  if (mine.length > 0)
+    bits.push(`${mine.length} job${mine.length === 1 ? "" : "s"}`);
+  if (products.length > 0)
+    bits.push(
+      `${products.length} product${products.length === 1 ? "" : "s"}`,
+    );
+  throw new Error(
+    `${where} still has ${bits.join(" and ")} under it. A project cannot be kept back while work sits in it — delete them, or take the Active mark off them first.`,
+  );
+}
+
+/** Mark these jobs, and the projects they belong to, active too. */
+async function markAncestors(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  jobIds: Id<"projectJobs">[],
+  activeAt: number,
+): Promise<void> {
+  const mark = { isActive: true, activeAt };
+  for (const jid of jobIds) {
+    const job = await ctx.db.get(jid);
+    if (job === null || job.ownerId !== userId) continue;
+    if (job.isActive !== true) await ctx.db.patch(jid, mark);
+    const project = await ctx.db.get(job.projectId);
+    if (project === null || project.ownerId !== userId) continue;
+    if (project.isActive !== true) await ctx.db.patch(job.projectId, mark);
+  }
+}
 
 /**
  * One-off: mark everything that has no mark yet as active. Active is the
@@ -227,7 +324,7 @@ async function collect(
     rows.filter(keep).sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0));
 
   return {
-      projects: marked(projects).map((p) => ({
+    projects: marked(projects).map((p) => ({
       _id: p._id,
       name: p.name,
       code: p.code,

@@ -17,7 +17,12 @@ import { isFlaggedProjectWork } from "../lib/project-work";
 
 type Ctx = MutationCtx;
 
-/** Every job a product belongs to — products moved to a single or multi link. */
+/**
+ * Every job a product belongs to — products moved to a single or multi link.
+ *
+ * The rule itself lives in `lib/project-work`, where the browser can use it
+ * too; this is the typed server-side view of it.
+ */
 export function jobIdsOf(
   fg: Pick<Doc<"finishedGoods">, "jobId" | "jobIds">,
 ): Id<"projectJobs">[] {

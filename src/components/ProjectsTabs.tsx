@@ -245,6 +245,7 @@ export function JobsList({
                       <ActiveToggle
                         target={{ kind: "job", id: job._id }}
                         active={job.isActive === true}
+                        blockedBy={{ products: products.length }}
                       />
                     </span>
                   </td>
