@@ -1,6 +1,7 @@
 import type { Doc } from "@/convex/_generated/dataModel";
 import type { AccountingTab } from "@/components/AccountingPanel";
 import type { PurchaseTab } from "@/lib/purchase-tabs";
+import type { SalesTab } from "@/lib/sales-tabs";
 
 type FgDoc = Doc<"finishedGoods">;
 
@@ -20,7 +21,8 @@ export type CostingView =
   | { kind: "inactive" }
   /** Buying: one sub-page per kind of purchase document. */
   | { kind: "purchase"; tab: PurchaseTab }
-  | { kind: "sales" }
+  /** Selling: one sub-page per kind of sales document. */
+  | { kind: "sales"; tab: SalesTab }
   | { kind: "products" }
   | { kind: "projects" }
   | { kind: "fg"; fgId: FgDoc["_id"] }

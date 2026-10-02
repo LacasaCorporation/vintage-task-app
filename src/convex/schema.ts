@@ -867,6 +867,82 @@ const schema = defineSchema(
       .index("by_owner", ["ownerId"])
       .index("by_sale", ["saleId"]),
 
+    /**
+     * A sales order: what the customer has confirmed they will take.
+     *
+     * It sits between the quotation and the invoice. A quotation is an offer
+     * and moves nothing; an order is the commitment and still asks for no
+     * money; the invoice is what asks for the money and takes the goods out of
+     * stock. Invoicing an order closes it, so one order can never raise two
+     * invoices.
+     */
+    salesOrders: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // auto SO0001, SO0002, …
+      customerId: v.optional(v.id("customers")),
+      customerName: v.optional(v.string()),
+      customerAddress: v.optional(v.string()),
+      orderedAt: v.number(), // ms
+      /** When the customer expects to take the goods. */
+      expectedAt: v.optional(v.number()), // ms
+      note: v.optional(v.string()),
+      poRef: v.optional(v.string()),
+      terms: v.optional(v.string()),
+      currency: v.optional(v.string()),
+      discountPct: v.optional(v.number()),
+      taxPct: v.optional(v.number()),
+      lines: v.array(
+        v.object({
+          productId: v.id("finishedGoods"),
+          name: v.string(),
+          unit: v.optional(v.string()),
+          qty: v.number(),
+          unitPrice: v.number(),
+        }),
+      ),
+      total: v.number(),
+      status: v.union(
+        v.literal("draft"),
+        v.literal("ordered"),
+        v.literal("invoiced"),
+        v.literal("cancelled"),
+      ),
+      /** The invoice raised from this order. */
+      invoiceId: v.optional(v.id("sales")),
+      invoicedAt: v.optional(v.number()),
+      /** The quotation this order was confirmed from. */
+      quotationId: v.optional(v.id("quotations")),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_customer", ["customerId"]),
+
+    /**
+     * A receipt: money actually received from a customer.
+     *
+     * Naming the invoice it settles clears that invoice, so what a customer
+     * still owes follows from the receipts on file rather than a single flag
+     * on the invoice — a part payment is a real thing and the statement has to
+     * survive it.
+     */
+    receipts: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(), // auto RCP0001, RCP0002, …
+      customerId: v.optional(v.id("customers")),
+      customerName: v.optional(v.string()),
+      at: v.number(), // ms
+      amount: v.number(),
+      /** Whichever account the money landed in — cash, bank, mobile money. */
+      receivedInto: v.optional(v.id("accounts")),
+      reference: v.optional(v.string()),
+      note: v.optional(v.string()),
+      /** The invoice this money settles. */
+      invoiceId: v.optional(v.id("sales")),
+      /** The journal entry this receipt posted. */
+      entryId: v.optional(v.id("journalEntries")),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_customer", ["customerId"]),
+
     // a costing sheet for a job / project / task
     costingSheets: defineTable({
       ownerId: v.id("users"),

@@ -17,6 +17,8 @@ import {
   ChevronDown,
   Eye,
   FileText,
+  HandCoins,
+  ShoppingCart,
   Loader2,
   Mail,
   Pencil,
@@ -33,7 +35,12 @@ import {
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
-import PageTabs from "@/components/PageTabs";
+import SalesDashboard from "@/components/SalesDashboard";
+import SalesOrdersPanel, {
+  type SalesOrderSeed,
+} from "@/components/SalesOrdersPanel";
+import ReceiptsPanel, { type ReceiptSeed } from "@/components/ReceiptsPanel";
+import { type SalesTab } from "@/lib/sales-tabs";
 import ContactDialog, { type Contact } from "@/components/ContactDialog";
 import StatusSelect from "@/components/StatusSelect";
 import CustomerLedgerDialog from "@/components/CustomerLedgerDialog";
@@ -52,6 +59,7 @@ type QuotationDoc = Doc<"quotations">;
 type SaleDoc = Doc<"sales">;
 type CustomerDoc = Doc<"customers">;
 
+/** The four lists that were tabs here before the sidebar took over. */
 type Tab = "sales" | "quotes" | "deliveries" | "customers";
 
 
@@ -122,10 +130,15 @@ export default function SalesPanel({
   canCreate,
   canEdit,
   canDelete,
+  tab: tabProp,
+  onTabChange,
 }: {
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  /** Which sales page is open — the sidebar decides. */
+  tab: SalesTab;
+  onTabChange: (tab: SalesTab) => void;
 }) {
   const quotations = useQuery(api.sales.listQuotations);
   const sales = useQuery(api.sales.listSales);
@@ -145,7 +158,42 @@ export default function SalesPanel({
   const editCustomer = useMutation(api.contacts.updateCustomer);
   const dropCustomer = useMutation(api.contacts.removeCustomer);
 
-  const [tab, setTab] = useState<Tab>("sales");
+  /**
+   * A sales order or a receipt started from somewhere else in the module. The
+   * keys force the panel to remount so it opens from the seed rather than
+   * filling itself in afterwards.
+   */
+  const [orderSeed, setOrderSeed] = useState<SalesOrderSeed | null>(null);
+  const [orderKey, setOrderKey] = useState(0);
+  const [receiptSeed, setReceiptSeed] = useState<ReceiptSeed | null>(null);
+  const [receiptKey, setReceiptKey] = useState(0);
+
+  /** An accepted quotation the customer has confirmed — make it an order. */
+  const startOrderFromQuote = (quote: QuotationDoc) => {
+    setOrderSeed({ mode: "fromQuotation", quotation: quote });
+    setOrderKey((k) => k + 1);
+    onTabChange("orders");
+  };
+
+  /** Money coming in against an invoice, from that invoice's own row. */
+  const startReceiptForInvoice = (sale: SaleDoc) => {
+    setReceiptSeed({ mode: "forInvoice", invoiceId: sale._id });
+    setReceiptKey((k) => k + 1);
+    onTabChange("receipts");
+  };
+
+  /**
+   * The four older lists, as one of the pages the sidebar lists. The newer
+   * pages are whole panels of their own, rendered below.
+   */
+  const tab: Tab =
+    tabProp === "deliveries"
+      ? "deliveries"
+      : tabProp === "customers"
+        ? "customers"
+        : tabProp === "quotations"
+          ? "quotes"
+          : "sales";
   /**
    * The document being written, read or printed now has a page of its own, so
    * nothing is held open over the list any more.
@@ -287,7 +335,7 @@ export default function SalesPanel({
     try {
       await convertQuote({ id: quote._id });
       toast.success(`${quote.number} turned into a sales bill.`);
-      setTab("sales");
+      onTabChange("invoices");
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Couldn't convert the quote.",
@@ -297,21 +345,57 @@ export default function SalesPanel({
     }
   };
 
+  /* ── the pages that are whole panels of their own ─────────────── */
+  if (tabProp === "dashboard") return <SalesDashboard onTabChange={onTabChange} />;
+
+  if (tabProp === "orders") {
+    return (
+      <SalesOrdersPanel
+        key={orderKey}
+        canCreate={canCreate}
+        canEdit={canEdit}
+        canDelete={canDelete}
+        seed={orderSeed}
+        onInvoiced={() => onTabChange("invoices")}
+      />
+    );
+  }
+
+  if (tabProp === "receipts") {
+    return (
+      <ReceiptsPanel
+        key={receiptKey}
+        canCreate={canCreate}
+        canDelete={canDelete}
+        seed={receiptSeed}
+      />
+    );
+  }
+
   return (
     <div className="mt-4 space-y-4">
-      {/* ── Header: the two lists, then the two entry forms ─────────── */}
+      {/* ── Header: what this page is, then the way into a new one ── */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <PageTabs
-          label="Sales sections"
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { id: "sales", label: "Invoices", icon: Receipt, count: sales?.length ?? 0 },
-            { id: "quotes", label: "Quotations", icon: FileText, count: quotations?.length ?? 0 },
-            { id: "deliveries", label: "Delivery notes", icon: Truck, count: notes?.length ?? 0 },
-            { id: "customers", label: "Customers", icon: Users, count: customers?.length ?? 0 },
-          ]}
-        />
+        <div className="min-w-0">
+          <h1 className="font-display text-xl font-semibold tracking-tight">
+            {tab === "sales"
+              ? "Invoices"
+              : tab === "quotes"
+                ? "Quotations"
+                : tab === "deliveries"
+                  ? "Delivery notes"
+                  : "Customers"}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {tab === "sales"
+              ? `${sales?.length ?? 0} invoice(s) · ${money((sales ?? []).reduce((s, b) => s + b.total, 0))} invoiced`
+              : tab === "quotes"
+                ? "Offers sent to customers, waiting to be accepted"
+                : tab === "deliveries"
+                  ? "Goods handed over against an invoice"
+                  : "Who you sell to, and what they owe"}
+          </p>
+        </div>
         {canCreate && (
           <div className="flex items-center gap-2">
             {/* One create action per tab, so whatever is on screen is what you
@@ -543,6 +627,20 @@ export default function SalesPanel({
                           >
                             <CheckCircle2 className="size-3.5" />
                           </button>
+                          {canCreate && sale.isPaid !== true && (
+                            <button
+                              type="button"
+                              title="Record money received against this invoice"
+                              aria-label={`Receive payment for ${sale.number}`}
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startReceiptForInvoice(sale);
+                              }}
+                            >
+                              <HandCoins className="size-3.5" />
+                            </button>
+                          )}
                           {canCreate && (
                             <button
                               type="button"
@@ -716,6 +814,21 @@ export default function SalesPanel({
                                 }}
                               >
                                 <Receipt className="size-3.5" />
+                              </button>
+                            )}
+                            {canCreate && quote.invoicedAs === undefined && (
+                              <button
+                                type="button"
+                                title="The customer confirmed — record it as a sales order"
+                                aria-label={`Make ${quote.number} a sales order`}
+                                className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                disabled={busyId === quote._id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startOrderFromQuote(quote);
+                                }}
+                              >
+                                <ShoppingCart className="size-3.5" />
                               </button>
                             )}
                             <button

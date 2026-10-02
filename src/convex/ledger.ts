@@ -154,6 +154,46 @@ export async function postSupplierPayment(
 }
 
 /**
+ * Money received from a customer.
+ *
+ * The counterpart to a supplier payment: the cash or bank account the money
+ * landed in is debited and what the customer owed is credited. Each receipt is
+ * one event, so each is one entry — a part payment leaves the rest of the
+ * debt standing on the invoice.
+ */
+export async function postCustomerReceipt(
+  ctx: Ctx,
+  ownerId: Id<"users">,
+  args: {
+    amount: number;
+    at: number;
+    customer?: string;
+    memo: string;
+    /** Whichever account the money landed in — defaults to the configured cash. */
+    intoAccountId?: Id<"accounts">;
+    /** Bank is preferred over cash when nothing was chosen. */
+    preferBank?: boolean;
+  },
+): Promise<Id<"journalEntries">> {
+  const d = await resolveDefaults(ctx, ownerId);
+  const into =
+    args.intoAccountId !== undefined
+      ? ((await ctx.db.get(args.intoAccountId)) ??
+        (await settlementAccount(ctx, ownerId, args.preferBank ?? false)))
+      : await settlementAccount(ctx, ownerId, args.preferBank ?? false);
+  return postEntry(ctx, ownerId, {
+    at: args.at,
+    kind: "receipt",
+    memo: args.memo,
+    party: args.customer?.trim() || undefined,
+    lines: [
+      { accountId: into._id, debit: round2(args.amount), credit: 0 },
+      { accountId: d.receivable._id, debit: 0, credit: round2(args.amount) },
+    ],
+  });
+}
+
+/**
  * A customer invoice. Unpaid invoices sit in accounts receivable; one marked
  * paid went straight into the till.
  */

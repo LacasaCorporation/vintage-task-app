@@ -17,7 +17,7 @@ import { v } from "convex/values";
  * is allowed — the stock simply goes negative, which is what makes the
  * shortfall visible instead of silently refusing the sale.
  */
-async function sellStock(
+export async function sellStock(
   ctx: MutationCtx,
   ownerId: Id<"users">,
   lines: readonly { productId: Id<"finishedGoods">; qty: number }[],
@@ -32,9 +32,9 @@ async function sellStock(
 }
 
 /** Next sequential number in a series: QT0001, SAL0002, … */
-async function nextNumber(
+export async function nextNumber(
   ctx: MutationCtx,
-  table: "quotations" | "sales" | "deliveryNotes",
+  table: "quotations" | "sales" | "deliveryNotes" | "salesOrders",
   ownerId: Id<"users">,
   prefix: string,
 ): Promise<string> {
@@ -58,11 +58,14 @@ const lineValidator = v.array(
   }),
 );
 
+/** The product lines every sales document takes. */
+export const salesLineValidator = lineValidator;
+
 /**
  * Price a document the same way a purchase bill is priced: line totals, less a
  * percentage discount, plus tax on what is left.
  */
-function priceLines(
+export function priceLines(
   lines: { qty: number; unitPrice: number }[],
   discountPct: number | undefined,
   taxPct: number | undefined,

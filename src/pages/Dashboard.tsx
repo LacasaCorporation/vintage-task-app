@@ -477,7 +477,7 @@ export default function Dashboard() {
   const [costingView, setCostingView] = useState<CostingView>(() => {
     // a document page links back to the list it was raised from
     const asked = new URLSearchParams(window.location.search).get("view");
-    if (asked === "sales") return { kind: "sales" };
+    if (asked === "sales") return { kind: "sales", tab: "dashboard" };
     return { kind: "projects" };
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

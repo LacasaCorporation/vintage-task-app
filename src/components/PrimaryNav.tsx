@@ -18,6 +18,7 @@ import { useState } from "react";
 import type { CostingView } from "@/components/CostingSidebar";
 import { ACCOUNTING_TABS } from "@/lib/accounting-tabs";
 import { PURCHASE_TABS } from "@/lib/purchase-tabs";
+import { SALES_TABS } from "@/lib/sales-tabs";
 import { cn } from "@/lib/utils";
 
 type FgDoc = Doc<"finishedGoods">;
@@ -132,6 +133,14 @@ export default function PrimaryNav({
   const inAccounting = inCosting && view?.kind === "accounting";
   // the Purchase drill-down works the same way: open whenever you are inside
   const inPurchase = inCosting && view?.kind === "purchase";
+  // the Sales drill-down works the same way: open whenever you are inside it
+  const inSales = inCosting && view?.kind === "sales";
+  const [salesExpanded, setSalesExpanded] = useState(inSales);
+  const [wasInSales, setWasInSales] = useState(inSales);
+  if (wasInSales !== inSales) {
+    setWasInSales(inSales);
+    if (inSales) setSalesExpanded(true);
+  }
   const [purchaseExpanded, setPurchaseExpanded] = useState(inPurchase);
   const [wasInPurchase, setWasInPurchase] = useState(inPurchase);
   if (wasInPurchase !== inPurchase) {
@@ -282,13 +291,86 @@ export default function PrimaryNav({
         onClick={() => onSelectView({ kind: "inactive" })}
       />
       {canViewSales && (
-        <NavRow
-          label="Sales"
-          Icon={ShoppingCart}
-          active={inCosting && view?.kind === "sales"}
-          n={salesCount}
-          onClick={() => onSelectView({ kind: "sales" })}
-        />
+        <div>
+          <div
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-2 py-1 transition-colors",
+              inSales && view?.tab === "dashboard"
+                ? "bg-primary/10"
+                : "hover:bg-accent",
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setSalesExpanded((v) => !v)}
+              aria-expanded={salesExpanded}
+              title={salesExpanded ? "Hide the Sales pages" : "Show the Sales pages"}
+              aria-label={salesExpanded ? "Hide the Sales pages" : "Show the Sales pages"}
+              className="grid size-4 shrink-0 place-items-center rounded text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none"
+            >
+              <ChevronDown
+                className={cn(
+                  "size-3 transition-transform",
+                  !salesExpanded && "-rotate-90",
+                )}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (inSales && view?.tab === "dashboard" && salesExpanded) {
+                  setSalesExpanded(false);
+                  return;
+                }
+                setSalesExpanded(true);
+                onSelectView({ kind: "sales", tab: "dashboard" });
+              }}
+              title={
+                inSales && view?.tab === "dashboard" && salesExpanded
+                  ? "Hide the Sales pages"
+                  : "Open the sales dashboard"
+              }
+              aria-expanded={salesExpanded}
+              aria-current={inSales && view?.tab === "dashboard" ? "page" : undefined}
+              className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
+            >
+              <ShoppingCart
+                className={cn(
+                  "size-4 shrink-0",
+                  inSales && view?.tab === "dashboard"
+                    ? "text-primary"
+                    : "text-muted-foreground/70",
+                )}
+              />
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-sm",
+                  inSales && view?.tab === "dashboard"
+                    ? "font-medium text-primary"
+                    : "text-foreground/85",
+                )}
+              >
+                Sales
+              </span>
+              <span className={countCls}>{salesCount}</span>
+            </button>
+          </div>
+
+          {salesExpanded && (
+            <div className="ml-3 border-l border-border/60 pl-1">
+              {SALES_TABS.filter((t) => t.id !== "dashboard").map((t) => (
+                <NavRow
+                  key={t.id}
+                  label={t.label}
+                  Icon={t.icon}
+                  active={inSales && view?.tab === t.id}
+                  sub
+                  onClick={() => onSelectView({ kind: "sales", tab: t.id })}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       )}
       {/* accounts: a group whose header is the chart of accounts itself */}
       {canViewAccounting && (
