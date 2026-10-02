@@ -30,7 +30,6 @@ import { canItem, type ActionKey, type GranularPerms, type ItemKey, type Section
  */
 const CostingPanel = lazy(() => import("@/components/CostingPanel"));
 const SettingsPanel = lazy(() => import("@/components/SettingsPanel"));
-const SettingsSidebar = lazy(() => import("@/components/SettingsSidebar"));
 const NotesPanel = lazy(() => import("@/components/NotesPanel"));
 const NotesSidebar = lazy(() => import("@/components/NotesSidebar"));
 
@@ -240,7 +239,7 @@ export default function Dashboard() {
       toast.success("Notebook deleted.");
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Couldn't delete notebook.",
+        error instanceof Error ? error.message : "Couldn't delete the notebook.",
       );
     }
   };
@@ -299,7 +298,7 @@ export default function Dashboard() {
       toast.success("Page deleted.");
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Couldn't delete page.",
+        error instanceof Error ? error.message : "Couldn't delete the page.",
       );
     }
   };
@@ -396,6 +395,7 @@ export default function Dashboard() {
     }
     try {
       await addFolderM({ name: clean });
+      toast.success("Folder created.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't create folder.");
     }
@@ -523,7 +523,7 @@ export default function Dashboard() {
     const statusOptions = ["planning", "in_progress", "on_hold", "completed", "cancelled"];
     const rawStatus = (result.status ?? "planning").trim().toLowerCase().replace(/[\s-]+/g, "_");
     const status = statusOptions.includes(rawStatus) ? rawStatus : "planning";
-    const rawPriority = (result.priority ?? "").trim().toLowerCase();
+    const rawPriority = (result.priority ?? "medium").trim().toLowerCase();
     const priority = ["high", "medium", "low"].includes(rawPriority)
       ? (rawPriority as "high" | "medium" | "low")
       : undefined;
@@ -769,11 +769,6 @@ export default function Dashboard() {
             canViewAccounting={canDoItem("accounting", "view")}
           />
 
-          {section === "settings" && (
-            <Suspense fallback={null}>
-              <SettingsSidebar />
-            </Suspense>
-          )}
           {section === "tasks" && (
             <TasksSidebar
               lists={taskLists ?? []}
