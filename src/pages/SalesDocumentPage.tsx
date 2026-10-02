@@ -68,7 +68,12 @@ export default function SalesDocumentPage() {
   const { format: money } = useWorkspaceCurrency();
 
   const kind: SalesDocKind | undefined = SECTIONS[params.section ?? ""];
-  const id = params.id;
+  /**
+   * "new" is the address the module links to for a blank document, not an id.
+   * Left as the id it reached the editor as an edit of a record called "new",
+   * which is not a document at all.
+   */
+  const id = params.id === "new" ? undefined : params.id;
   const readOnly = query.get("view") === "1";
   const invoiceId = query.get("invoice");
   const customerId = query.get("customer");
