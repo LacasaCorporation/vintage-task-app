@@ -1,28 +1,23 @@
 import { useState } from "react";
 import { api } from "@/convex/_generated/api";
-import type { Id } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
+  ArrowLeft,
   FileSpreadsheet,
   Loader2,
   Plus,
+  Save,
   Trash2,
   Wallet,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { toast } from "@/lib/toast";
 import { toLocalInput } from "@/lib/task-utils";
+import { useAppDialogs } from "@/components/AppDialogs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 
 const day = (ms: number) =>
@@ -35,13 +30,28 @@ const day = (ms: number) =>
 const num = (value: string) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
 const selectCls =
-  "h-9 rounded-lg border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30";
+  "mt-1 h-9 w-full rounded-lg border bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30";
 
-/** Records one expense, which posts straight to the ledger. */
-function ExpenseForm({ onClose }: { onClose: () => void }) {
+const fieldLabel =
+  "text-[11px] font-semibold tracking-widest text-muted-foreground uppercase";
+
+/**
+ * Records one expense, full screen. An expense is a small thing, but it is a
+ * document like any other: a date, an amount, an account to charge and a place
+ * it was paid from. It gets the whole working area rather than a dialog over
+ * the register, so all six purchase sections behave the same way.
+ */
+function ExpenseForm({
+  canCreate,
+  onClose,
+}: {
+  canCreate: boolean;
+  onClose: () => void;
+}) {
   const options = useQuery(api.expenses.options);
   const vendors = useQuery(api.contacts.listVendors);
   const createExpense = useMutation(api.expenses.create);
+  const { format: money } = useWorkspaceCurrency();
   const [at, setAt] = useState(() => toLocalInput(new Date()));
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
@@ -56,7 +66,20 @@ function ExpenseForm({ onClose }: { onClose: () => void }) {
   const chosen = categories.find((c) => c.id === category) ?? categories[0];
   const vendor = vendors?.find((v) => v._id === vendorId);
 
-  const submit = async () => {
+  /** Blank the form without leaving it. */
+  const clear = () => {
+    setAt(toLocalInput(new Date()));
+    setCategory("");
+    setDescription("");
+    setAmount("");
+    setPaidFrom("");
+    setVendorId("");
+    setReference("");
+    setNote("");
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!chosen) {
       toast.error("Set up an expense account first — add one in Accounting.");
       return;
@@ -90,157 +113,186 @@ function ExpenseForm({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[min(100%,560px)]">
-        <DialogHeader>
-          <DialogTitle>Record an expense</DialogTitle>
-          <DialogDescription>
-            Money spent that is not stock — transport, rent, wages, utilities. It
-            is written to the ledger as you save, so the accounts always add up.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="space-y-1 text-xs font-medium">
-            <span className="text-muted-foreground">Date</span>
-            <Input
-              type="date"
-              value={at}
-              onChange={(e) => setAt(e.target.value)}
-              className="h-9"
-            />
-          </label>
-          <label className="space-y-1 text-xs font-medium">
-            <span className="text-muted-foreground">Amount</span>
-            <Input
-              type="number"
-              min="0"
-              step="any"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              className="h-9 text-right"
-            />
-          </label>
-          <label className="space-y-1 text-xs font-medium">
-            <span className="text-muted-foreground">Spent on</span>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className={selectCls}
-            >
-              <option value="">Choose an expense account…</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1 text-xs font-medium">
-            <span className="text-muted-foreground">Paid from</span>
-            <select
-              value={paidFrom}
-              onChange={(e) => setPaidFrom(e.target.value as Id<"accounts"> | "")}
-              className={selectCls}
-            >
-              <option value="">Cash in hand (default)</option>
-              {(options?.payFrom ?? []).map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </label>
+    <form onSubmit={submit} className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/30 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 rounded-lg text-xs"
+            onClick={onClose}
+          >
+            <ArrowLeft className="size-3.5" /> Expenses
+          </Button>
+          <h2 className="font-display text-lg font-semibold">Record an expense</h2>
         </div>
+        {canCreate && (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 rounded-lg text-xs"
+              onClick={clear}
+            >
+              Clear
+            </Button>
+            <Button type="submit" size="sm" disabled={busy} className="h-8 rounded-lg text-xs">
+              {busy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
+              Record expense
+            </Button>
+          </div>
+        )}
+      </div>
 
-        <label className="space-y-1 text-xs font-medium">
-          <span className="text-muted-foreground">Description</span>
+      <p className="border-b border-border/60 px-5 py-2.5 text-xs text-muted-foreground">
+        Money spent that is not stock — transport, rent, wages, utilities. It is
+        written to the ledger as you save, so the accounts always add up.
+      </p>
+
+      <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-3">
+        <label className="block">
+          <span className={fieldLabel}>Date</span>
+          <Input
+            type="date"
+            value={at}
+            onChange={(e) => setAt(e.target.value)}
+            className="mt-1 h-9 rounded-lg text-sm"
+          />
+        </label>
+        <label className="block">
+          <span className={fieldLabel}>Amount</span>
+          <Input
+            type="number"
+            min="0"
+            step="any"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            className="mt-1 h-9 rounded-lg text-right text-sm"
+          />
+        </label>
+        <label className="block">
+          <span className={fieldLabel}>Spent on</span>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className={selectCls}
+          >
+            <option value="">Choose an expense account…</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-2">
+        <label className="block">
+          <span className={fieldLabel}>Description</span>
           <Input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="e.g. Delivery charges for the March order"
-            className="h-9"
+            className="mt-1 h-9 rounded-lg text-sm"
           />
         </label>
+        <label className="block">
+          <span className={fieldLabel}>Paid from</span>
+          <select
+            value={paidFrom}
+            onChange={(e) => setPaidFrom(e.target.value as Id<"accounts"> | "")}
+            className={selectCls}
+          >
+            <option value="">Cash in hand (default)</option>
+            {(options?.payFrom ?? []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="space-y-1 text-xs font-medium">
-            <span className="text-muted-foreground">Paid to</span>
-            <select
-              value={vendorId}
-              onChange={(e) => setVendorId(e.target.value as Id<"vendors"> | "")}
-              className={selectCls}
-            >
-              <option value="">Nobody in particular</option>
-              {(vendors ?? []).map((v) => (
-                <option key={v._id} value={v._id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1 text-xs font-medium">
-            <span className="text-muted-foreground">Receipt no.</span>
-            <Input
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-              placeholder="Optional"
-              className="h-9"
-            />
-          </label>
-        </div>
+      <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-2">
+        <label className="block">
+          <span className={fieldLabel}>Paid to</span>
+          <select
+            value={vendorId}
+            onChange={(e) => setVendorId(e.target.value as Id<"vendors"> | "")}
+            className={selectCls}
+          >
+            <option value="">Nobody in particular</option>
+            {(vendors ?? []).map((v) => (
+              <option key={v._id} value={v._id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className={fieldLabel}>Receipt no.</span>
+          <Input
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder="Optional"
+            className="mt-1 h-9 rounded-lg text-sm"
+          />
+        </label>
+      </div>
 
-        <label className="space-y-1 text-xs font-medium">
-          <span className="text-muted-foreground">Note</span>
+      <div className="flex flex-wrap items-end justify-between gap-4 px-5 py-4">
+        <label className="block min-w-[240px] flex-1">
+          <span className={fieldLabel}>Note</span>
           <Textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={2}
             placeholder="Anything worth remembering later…"
+            className="mt-1"
           />
         </label>
-
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} className="rounded-lg">
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={() => void submit()}
-            disabled={busy}
-            className="rounded-lg"
-          >
-            {busy && <Loader2 className="size-4 animate-spin" />}
-            Record expense
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div className="space-y-1.5 text-sm">
+          <div className="flex items-center justify-between gap-6 text-muted-foreground">
+            <span>Charged to</span>
+            <span>{chosen?.name ?? "No account chosen"}</span>
+          </div>
+          <div className="flex items-center justify-between gap-6 border-t border-border pt-2 text-base font-semibold">
+            <span>Amount</span>
+            <span className="tabular-nums">{money(num(amount))}</span>
+          </div>
+        </div>
+      </div>
+    </form>
   );
 }
 
 /**
- * The expense register: money out that never touched stock. Every row is a
- * balanced journal entry, so deleting one takes its entry with it and the
- * accounts stay true.
+ * The expense register: money out that never touched stock, plus the
+ * full-screen form for recording one. Every row is a balanced journal entry,
+ * so deleting one takes its entry with it and the accounts stay true.
  */
 export default function ExpensesPanel({
   canCreate,
   canDelete,
-  formOpen,
-  onFormOpenChange,
 }: {
   canCreate: boolean;
   canDelete: boolean;
-  formOpen: boolean;
-  onFormOpenChange: (open: boolean) => void;
 }) {
   const expenses = useQuery(api.expenses.list);
   const totals = useQuery(api.expenses.byCategory);
   const removeExpense = useMutation(api.expenses.remove);
   const postMissing = useMutation(api.expenses.postMissing);
+  const { confirm } = useAppDialogs();
   const { format: money } = useWorkspaceCurrency();
+  const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState<Id<"expenses"> | null>(null);
 
   const rows = expenses ?? [];
@@ -273,10 +325,17 @@ export default function ExpensesPanel({
     }
   };
 
-  const drop = async (id: Id<"expenses">) => {
-    setBusy(id);
+  const drop = async (expense: Doc<"expenses">) => {
+    const ok = await confirm({
+      title: "Remove this expense?",
+      message: `The ${money(expense.amount)} ${expense.category.toLowerCase()} entry is deleted and its ledger entry is reversed.`,
+      confirmLabel: "Remove expense",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(expense._id);
     try {
-      await removeExpense({ id });
+      await removeExpense({ id: expense._id });
       toast.success("Expense removed and its ledger entry reversed.");
     } catch (error) {
       toast.error(
@@ -287,6 +346,12 @@ export default function ExpensesPanel({
     }
   };
 
+  /* ── the expense form, full-screen ─────────────────────────────── */
+  if (formOpen && canCreate) {
+    return <ExpenseForm canCreate={canCreate} onClose={() => setFormOpen(false)} />;
+  }
+
+  /* ── the register ─────────────────────────────────────────────── */
   return (
     <div className="space-y-4">
       {unposted.length > 0 && (
@@ -329,27 +394,26 @@ export default function ExpensesPanel({
         </div>
       )}
 
-      <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-2.5">
-          <h2 className="text-sm font-semibold">
-            Expenses
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {rows.length} entr{rows.length === 1 ? "y" : "ies"} · {money(spent)} spent
-            </span>
-          </h2>
-          {canCreate && (
-            <button
-              type="button"
-              onClick={() => onFormOpenChange(true)}
-              aria-label="Record expense"
-              title="Record expense"
-              className="grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-primary"
-            >
-              <Plus className="size-4" />
-            </button>
-          )}
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">
+          Expenses
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {rows.length} entr{rows.length === 1 ? "y" : "ies"} · {money(spent)} spent
+          </span>
+        </h2>
+        {canCreate && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setFormOpen(true)}
+            className="h-9 rounded-xl px-3 text-sm"
+          >
+            <Plus className="size-4" /> Add expense
+          </Button>
+        )}
+      </div>
 
+      <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
         {expenses === undefined ? (
           <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" /> Loading expenses…
@@ -416,7 +480,7 @@ export default function ExpensesPanel({
                           type="button"
                           aria-label="Remove expense"
                           disabled={busy === e._id}
-                          onClick={() => void drop(e._id)}
+                          onClick={() => void drop(e)}
                           className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-destructive"
                         >
                           {busy === e._id ? (
@@ -434,8 +498,6 @@ export default function ExpensesPanel({
           </div>
         )}
       </section>
-
-      {formOpen && canCreate && <ExpenseForm onClose={() => onFormOpenChange(false)} />}
     </div>
   );
 }

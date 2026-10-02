@@ -45,7 +45,6 @@ export default function PurchasePanel({
   const [billKey, setBillKey] = useState(0);
   const [paymentSeed, setPaymentSeed] = useState<PaymentSeed>(null);
   const [paymentKey, setPaymentKey] = useState(0);
-  const [expenseFormOpen, setExpenseFormOpen] = useState(false);
 
   /**
    * A cross-link — raising a bill from an order, paying a vendor — is consumed
@@ -59,7 +58,6 @@ export default function PurchasePanel({
     setLastTab(tab);
     if (tab !== "bills" && billSeed !== null) setBillSeed(null);
     if (tab !== "payments" && paymentSeed !== null) setPaymentSeed(null);
-    if (tab !== "expenses" && expenseFormOpen) setExpenseFormOpen(false);
   }
 
   const startBillFromLpo = (lpo: LpoDoc) => {
@@ -130,8 +128,6 @@ export default function PurchasePanel({
       <ExpensesPanel
         canCreate={canCreate}
         canDelete={canDelete}
-        formOpen={expenseFormOpen}
-        onFormOpenChange={setExpenseFormOpen}
       />
     );
   }
