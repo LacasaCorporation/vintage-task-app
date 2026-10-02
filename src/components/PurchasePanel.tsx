@@ -45,7 +45,6 @@ export default function PurchasePanel({
   const [billKey, setBillKey] = useState(0);
   const [paymentSeed, setPaymentSeed] = useState<PaymentSeed>(null);
   const [paymentKey, setPaymentKey] = useState(0);
-  const [lpoFormOpen, setLpoFormOpen] = useState(false);
   const [expenseFormOpen, setExpenseFormOpen] = useState(false);
 
   /**
@@ -60,7 +59,6 @@ export default function PurchasePanel({
     setLastTab(tab);
     if (tab !== "bills" && billSeed !== null) setBillSeed(null);
     if (tab !== "payments" && paymentSeed !== null) setPaymentSeed(null);
-    if (tab !== "lpo" && lpoFormOpen) setLpoFormOpen(false);
     if (tab !== "expenses" && expenseFormOpen) setExpenseFormOpen(false);
   }
 
@@ -100,8 +98,6 @@ export default function PurchasePanel({
         canCreate={canCreate}
         canEdit={canEdit}
         canDelete={canDelete}
-        formOpen={lpoFormOpen}
-        onFormOpenChange={setLpoFormOpen}
         onCreateBill={startBillFromLpo}
       />
     );
