@@ -135,6 +135,23 @@ export default function SalesPanel({
    */
   const [doc, setDoc] = useState<SalesDocTarget | null>(null);
 
+  /**
+   * Leaving a page drops whatever was open on it.
+   *
+   * The panel stays mounted as you move between sales pages, so an open
+   * document and a seeded order or receipt would otherwise follow you — land on
+   * Delivery notes and find a quotation still on screen. Kept as derived state
+   * during render, the way the sidebar follows the open area, rather than as an
+   * effect that would fire a second render every time.
+   */
+  const [lastTab, setLastTab] = useState(tabProp);
+  if (lastTab !== tabProp) {
+    setLastTab(tabProp);
+    if (doc !== null) setDoc(null);
+    if (orderSeed !== null) setOrderSeed(null);
+    if (receiptSeed !== null) setReceiptSeed(null);
+  }
+
   /** An accepted quotation the customer has confirmed — make it an order. */
   const startOrderFromQuote = (quote: QuotationDoc) => {
     setOrderSeed({ mode: "fromQuotation", quotation: quote });
@@ -161,6 +178,7 @@ export default function SalesPanel({
         : tabProp === "quotations"
           ? "quotes"
           : "sales";
+
   /**
    * The document being written, read or printed now has a page of its own, so
    * nothing is held open over the list any more.
