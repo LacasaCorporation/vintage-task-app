@@ -175,7 +175,7 @@ export default function PrimaryNav({
           <div
             className={cn(
               "flex items-center gap-2 rounded-lg px-2 py-1 transition-colors",
-              inPurchase && view?.tab === "bills"
+              inPurchase && view?.tab === "dashboard"
                 ? "bg-primary/10"
                 : "hover:bg-accent",
             )}
@@ -200,26 +200,26 @@ export default function PrimaryNav({
             <button
               type="button"
               onClick={() => {
-                if (inPurchase && view?.tab === "bills" && purchaseExpanded) {
+                if (inPurchase && view?.tab === "dashboard" && purchaseExpanded) {
                   setPurchaseExpanded(false);
                   return;
                 }
                 setPurchaseExpanded(true);
-                onSelectView({ kind: "purchase", tab: "bills" });
+                onSelectView({ kind: "purchase", tab: "dashboard" });
               }}
               title={
-                inPurchase && view?.tab === "bills" && purchaseExpanded
+                inPurchase && view?.tab === "dashboard" && purchaseExpanded
                   ? "Hide the Purchase pages"
-                  : "Open the purchase bills"
+                  : "Open the purchase dashboard"
               }
               aria-expanded={purchaseExpanded}
-              aria-current={inPurchase && view?.tab === "bills" ? "page" : undefined}
+              aria-current={inPurchase && view?.tab === "dashboard" ? "page" : undefined}
               className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
             >
               <Receipt
                 className={cn(
                   "size-4 shrink-0",
-                  inPurchase && view?.tab === "bills"
+                  inPurchase && view?.tab === "dashboard"
                     ? "text-primary"
                     : "text-muted-foreground/70",
                 )}
@@ -227,7 +227,7 @@ export default function PrimaryNav({
               <span
                 className={cn(
                   "min-w-0 flex-1 truncate text-sm",
-                  inPurchase && view?.tab === "bills"
+                  inPurchase && view?.tab === "dashboard"
                     ? "font-medium text-primary"
                     : "text-foreground/85",
                 )}
@@ -240,7 +240,7 @@ export default function PrimaryNav({
 
           {purchaseExpanded && (
             <div className="ml-3 border-l border-border/60 pl-1">
-              {PURCHASE_TABS.filter((t) => t.id !== "bills").map((t) => (
+              {PURCHASE_TABS.filter((t) => t.id !== "dashboard").map((t) => (
                 <NavRow
                   key={t.id}
                   label={t.label}

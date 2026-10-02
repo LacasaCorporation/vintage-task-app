@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import LpoPanel from "@/components/LpoPanel";
+import PurchaseDashboard from "@/components/PurchaseDashboard";
 import ExpensesPanel from "@/components/ExpensesPanel";
 import BillsPanel, { type BillSeed } from "@/components/BillsPanel";
 import PaymentsPanel, { type PaymentSeed } from "@/components/PaymentsPanel";
@@ -88,6 +89,10 @@ export default function PurchasePanel({
     setPaymentKey((k) => k + 1);
     onTabChange("payments");
   };
+
+  if (tab === "dashboard") {
+    return <PurchaseDashboard onTabChange={onTabChange} />;
+  }
 
   if (tab === "lpo") {
     return (

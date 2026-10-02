@@ -1,6 +1,7 @@
 import {
   ClipboardList,
   HandCoins,
+  LayoutDashboard,
   PackageCheck,
   Receipt,
   Store,
@@ -8,7 +9,11 @@ import {
 } from "lucide-react";
 
 /**
- * The sub-pages of the purchase module, in the order the sidebar lists them.
+ * The pages of the purchase module, in the order the sidebar lists them.
+ *
+ * The order follows the way buying actually runs: an overview, then the four
+ * documents in sequence — order, delivery, bill, payment — and the two
+ * supporting lists that hang off them.
  *
  * They live here, apart from the panels that draw them, because the navigation
  * needs the names and the icons and nothing else — importing them from the
@@ -16,6 +21,7 @@ import {
  * buttons.
  */
 export type PurchaseTab =
+  | "dashboard"
   | "bills"
   | "lpo"
   | "grv"
@@ -30,10 +36,10 @@ export const PURCHASE_TABS: {
   hint: string;
 }[] = [
   {
-    id: "bills",
-    label: "Purchase bills",
-    icon: Receipt,
-    hint: "Bills from suppliers — saving one brings the stock in",
+    id: "dashboard",
+    label: "Purchase dashboard",
+    icon: LayoutDashboard,
+    hint: "Where buying stands — what is on order, owed and paid",
   },
   {
     id: "lpo",
@@ -46,6 +52,12 @@ export const PURCHASE_TABS: {
     label: "Goods received",
     icon: PackageCheck,
     hint: "Deliveries counted into stock before the bill arrives",
+  },
+  {
+    id: "bills",
+    label: "Purchase bill",
+    icon: Receipt,
+    hint: "Bills from suppliers — saving one brings the stock in",
   },
   {
     id: "payments",
