@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
@@ -13,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  ArrowLeft,
   CheckCircle2,
   ChevronDown,
   Eye,
@@ -44,7 +44,7 @@ import { type SalesTab } from "@/lib/sales-tabs";
 import ContactDialog, { type Contact } from "@/components/ContactDialog";
 import StatusSelect from "@/components/StatusSelect";
 import CustomerLedgerDialog from "@/components/CustomerLedgerDialog";
-import { type SalesDocTarget } from "@/components/SalesDocumentForm";
+import SalesDocumentForm, { type SalesDocTarget } from "@/components/SalesDocumentForm";
 
 import {
   printDocument,
@@ -75,49 +75,6 @@ const QUOTE_STATUS: Record<
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-/**
- * A document is a page, not a popup.
- *
- * Everything the sales list can raise — a quotation, an invoice, a delivery
- * note against a chosen invoice, a new invoice for a customer who owes money —
- * is an address. Back works, refresh works, and a link can be sent to someone.
- */
-function docPath(target: SalesDocTarget): string {
-  if (target.mode === "newDelivery")
-    return `/sales/delivery-notes/new?invoice=${target.saleId}`;
-  if (target.mode === "view") return "/dashboard?view=sales"; // read mode has its own path
-  if (target.mode === "new") {
-    const section = target.kind === "quotation" ? "quotations" : "invoices";
-    const q = new URLSearchParams();
-    const c = target.customer;
-    if (c) {
-      if (c.id) q.set("customer", c.id);
-      if (c.name) q.set("name", c.name);
-      if (c.address) q.set("address", c.address);
-    }
-    const search = q.toString();
-    return `/sales/${section}/new${search === "" ? "" : `?${search}`}`;
-  }
-  const section =
-    target.kind === "invoice"
-      ? "invoices"
-      : target.kind === "delivery"
-        ? "delivery-notes"
-        : "quotations";
-  return `/sales/${section}/${target.id}`;
-}
-
-/** Where a document already on file lives. */
-function recordPath(record: SalesDocRecord, view: boolean): string {
-  const section =
-    "deliveredAt" in record
-      ? "delivery-notes"
-      : "soldAt" in record
-        ? "invoices"
-        : "quotations";
-  return `/sales/${section}/${record._id}${view ? "?view=1" : ""}`;
-}
-
 const chipBase =
   "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium";
 
@@ -144,7 +101,6 @@ export default function SalesPanel({
   const sales = useQuery(api.sales.listSales);
   const customers = useQuery(api.contacts.listCustomers);
   const { format: money, symbol } = useWorkspaceCurrency();
-  const navigate = useNavigate();
 
   /** Searchable options for the per-line product pickers. */
 
@@ -167,6 +123,17 @@ export default function SalesPanel({
   const [orderKey, setOrderKey] = useState(0);
   const [receiptSeed, setReceiptSeed] = useState<ReceiptSeed | null>(null);
   const [receiptKey, setReceiptKey] = useState(0);
+
+  /**
+   * The quotation, invoice or delivery note being written or read.
+   *
+   * These used to live on their own route, which took the whole app away —
+   * the navigation, the firm, everything — for a document you spend minutes
+   * on. A document is now a screen inside the sales page, so the sidebar stays
+   * put and closing it puts you back on the list you came from. The route is
+   * still there for a link to send someone.
+   */
+  const [doc, setDoc] = useState<SalesDocTarget | null>(null);
 
   /** An accepted quotation the customer has confirmed — make it an order. */
   const startOrderFromQuote = (quote: QuotationDoc) => {
@@ -294,6 +261,7 @@ export default function SalesPanel({
   );
 
   const notes = useQuery(api.sales.listDeliveryNotes);
+  const products = useQuery(api.costing.listFinishedGoods);
   const dropNote = useMutation(api.sales.removeDeliveryNote);
   const firm = useQuery(api.settings.firmProfile) as FirmProfile | null;
 
@@ -310,8 +278,12 @@ export default function SalesPanel({
       if (!opened) toast.error("Allow pop-ups to print this document.");
       return;
     }
-    navigate(recordPath(record, true));
+    // read it here, with the rest of the app around it
+    setDoc({ mode: "view", doc: printable });
   };
+
+  /** Open a document as its own screen — the sidebar and all. */
+  const openDoc = (target: SalesDocTarget) => setDoc(target);
 
 
   const setStatus = async (
@@ -344,6 +316,42 @@ export default function SalesPanel({
       setBusyId(null);
     }
   };
+
+  /* ── a document, as a screen of its own with the app around it ─── */
+  if (doc !== null) {
+    return (
+      <div className="mt-4 space-y-4">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 rounded-lg text-xs"
+          onClick={() => setDoc(null)}
+        >
+          <ArrowLeft className="size-3.5" />
+          {tab === "quotes"
+            ? "Quotations"
+            : tab === "deliveries"
+              ? "Delivery notes"
+              : "Invoices"}
+        </Button>
+        <SalesDocumentForm
+          key={
+            doc.mode === "view"
+              ? `view-${doc.doc.number}`
+              : doc.mode === "new" || doc.mode === "newDelivery"
+                ? doc.mode
+                : `${doc.mode}-${doc.id}`
+          }
+          layout="page"
+          target={doc}
+          products={products ?? []}
+          onClose={() => setDoc(null)}
+          onSaved={() => setDoc(null)}
+        />
+      </div>
+    );
+  }
 
   /* ── the pages that are whole panels of their own ─────────────── */
   if (tabProp === "dashboard") return <SalesDashboard onTabChange={onTabChange} />;
@@ -407,7 +415,7 @@ export default function SalesPanel({
                 size="sm"
                 variant="outline"
                 className="h-9 rounded-xl px-3 text-sm"
-                onClick={() => navigate(docPath({ mode: "new", kind: "quotation" }))}
+                onClick={() => openDoc({ mode: "new", kind: "quotation" })}
               >
                 <Send className="size-4" /> New quotation
               </Button>
@@ -440,9 +448,7 @@ export default function SalesPanel({
                       .map((s) => (
                         <DropdownMenuItem
                           key={s._id}
-                          onSelect={() =>
-                            navigate(docPath({ mode: "newDelivery", saleId: s._id }))
-                          }
+                          onSelect={() => openDoc({ mode: "newDelivery", saleId: s._id })}
                           className="flex items-center gap-2"
                         >
                           <span className="font-mono text-xs">{s.number}</span>
@@ -475,12 +481,10 @@ export default function SalesPanel({
                 size="sm"
                 className="h-9 rounded-xl px-3 text-sm"
                 onClick={() =>
-                  navigate(
-                    docPath({
-                      mode: "new",
-                      kind: tab === "quotes" ? "quotation" : "invoice",
-                    }),
-                  )
+                  openDoc({
+                    mode: "new",
+                    kind: tab === "quotes" ? "quotation" : "invoice",
+                  })
                 }
               >
                 <Plus className="size-4" />
@@ -530,7 +534,7 @@ export default function SalesPanel({
                   {sales.map((sale: SaleDoc) => (
                     <tr
                       key={sale._id}
-                      onClick={() => navigate(recordPath(sale, true))}
+                      onClick={() => openOrPrint(sale, false)}
                       title={`Open ${sale.number}`}
                       className="cursor-pointer transition-colors hover:bg-accent/40"
                     >
@@ -567,13 +571,11 @@ export default function SalesPanel({
                             disabled={sale.isPaid === true || !canEdit}
                             onClick={(e) => {
                               e.stopPropagation();
-                              navigate(
-                                docPath({
-                                  mode: "edit",
-                                  kind: "invoice",
-                                  id: sale._id,
-                                }),
-                              );
+                              openDoc({
+                                mode: "edit",
+                                kind: "invoice",
+                                id: sale._id,
+                              });
                             }}
                           >
                             <Pencil className="size-3.5" />
@@ -649,12 +651,7 @@ export default function SalesPanel({
                               className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigate(
-                                  docPath({
-                                    mode: "newDelivery",
-                                    saleId: sale._id,
-                                  }),
-                                );
+                                openDoc({ mode: "newDelivery", saleId: sale._id });
                               }}
                             >
                               <Truck className="size-3.5" />
@@ -732,7 +729,7 @@ export default function SalesPanel({
                     return (
                       <tr
                         key={quote._id}
-                        onClick={() => navigate(recordPath(quote, true))}
+                        onClick={() => openOrPrint(quote, false)}
                         title={`Open ${quote.number}`}
                         className="cursor-pointer transition-colors hover:bg-accent/40"
                       >
@@ -778,13 +775,11 @@ export default function SalesPanel({
                               disabled={!canEdit}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigate(
-                                  docPath({
-                                    mode: "edit",
-                                    kind: "quotation",
-                                    id: quote._id,
-                                  }),
-                                );
+                                openDoc({
+                                  mode: "edit",
+                                  kind: "quotation",
+                                  id: quote._id,
+                                });
                               }}
                             >
                               <Pencil className="size-3.5" />
@@ -1035,16 +1030,14 @@ export default function SalesPanel({
                                   aria-label={`New quotation for ${row.name}`}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    navigate(
-                                      docPath({
-                                        mode: "new",
-                                        kind: "quotation",
-                                        customer: {
-                                          id: saved._id,
-                                          name: saved.name,
-                                        },
-                                      }),
-                                    );
+                                    openDoc({
+                                      mode: "new",
+                                      kind: "quotation",
+                                      customer: {
+                                        id: saved._id,
+                                        name: saved.name,
+                                      },
+                                    });
                                   }}
                                   className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
                                 >
@@ -1288,17 +1281,15 @@ export default function SalesPanel({
             else toast.error("That invoice is no longer on file.");
           }}
           onNewInvoice={() =>
-            navigate(
-              docPath({
-                mode: "new",
-                kind: "invoice",
-                customer: {
-                  id: ledgerCustomer._id,
-                  name: ledgerCustomer.name,
-                  address: ledgerCustomer.address,
-                },
-              }),
-            )
+            openDoc({
+              mode: "new",
+              kind: "invoice",
+              customer: {
+                id: ledgerCustomer._id,
+                name: ledgerCustomer.name,
+                address: ledgerCustomer.address,
+              },
+            })
           }
         />
       )}
