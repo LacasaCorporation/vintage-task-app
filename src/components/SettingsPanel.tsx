@@ -990,39 +990,34 @@ export default function SettingsPanel() {
 
   return (
     <div className="space-y-6">
-      {/* header */}
-      <div>
-        <h1 className="font-display flex items-center gap-2 text-3xl font-bold tracking-tight">
-          <SettingsIcon className="size-6 text-primary" />
+      {/* header and role summary, kept on one line so settings opens compactly */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border bg-card px-3 py-2 shadow-sm">
+        <h1 className="font-display flex shrink-0 items-center gap-1.5 text-base font-bold tracking-tight">
+          <SettingsIcon className="size-4 text-primary" />
           Settings
         </h1>
-        <p className="mt-1 text-muted-foreground">
+        <p className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground sm:block">
           Create users, assign roles, and control exactly what each person can
           view, create, edit, and delete.
         </p>
-      </div>
-
-      {/* my role summary */}
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border bg-card p-4 shadow-sm">
-        <span className="grid size-9 place-items-center rounded-xl bg-primary/10 text-primary">
-          <ShieldCheck className="size-5" />
-        </span>
-        <div className="min-w-0">
-          <p className="text-sm font-medium">
-            You are signed in as{" "}
-            {currentUser?.name ?? currentUser?.email ?? "a user"}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Role:{" "}
-            <span
-              className={cn(
-                "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-                ROLE_META[role].chip,
-              )}
-            >
-              {ROLE_META[role].label}
+        <div className="flex shrink-0 items-center gap-2 sm:ml-2 sm:border-l sm:border-border/60 sm:pl-3">
+          <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+            <ShieldCheck className="size-3.5" />
+          </span>
+          <p className="min-w-0 truncate text-xs">
+            Signed in as{" "}
+            <span className="font-medium">
+              {currentUser?.name ?? currentUser?.email ?? "a user"}
             </span>
           </p>
+          <span
+            className={cn(
+              "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+              ROLE_META[role].chip,
+            )}
+          >
+            {ROLE_META[role].label}
+          </span>
         </div>
       </div>
 
