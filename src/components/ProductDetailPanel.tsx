@@ -28,6 +28,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useAppDialogs } from "@/components/AppDialogs";
 import AssignDialog, { targetOf } from "@/components/AssignDialog";
 import NodeComments from "@/components/NodeComments";
+import ProductionDetails from "@/components/ProductionDetails";
 import NodeIssues from "@/components/NodeIssues";
 import type { FgDoc, JobDoc } from "@/components/FlaggedLists";
 import { PRIORITY_META, tagChip } from "@/components/FlaggedLists";
@@ -362,6 +363,10 @@ export default function ProductDetailPanel({
             )}
             {fg.code ? ` · ${fg.code}` : ""}
           </p>
+
+          {/* everything about the production itself: the run, the batch, what
+              it costs and what it has moved on and off the shelf */}
+          <ProductionDetails fg={fg} />
 
           <div className="mt-4">
             {/* assigned to */}
