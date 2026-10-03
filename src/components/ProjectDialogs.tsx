@@ -14,6 +14,7 @@ import {
   Briefcase,
   Copy,
   Loader2,
+  Lock,
   Package,
   PackagePlus,
   Plus,
@@ -458,7 +459,6 @@ export function EditProductDialog({
 }) {
   const updateFg = useMutation(api.costing.updateFinishedGood);
   const [name, setName] = useState(fg.name);
-  const [code, setCode] = useState(fg.code ?? "");
   const [qty, setQty] = useState(fg.qty === undefined ? "" : String(fg.qty));
   const [unit, setUnit] = useState(fg.unit ?? "");
   const [project, setProject] = useState(fg.projectName ?? "");
@@ -477,7 +477,8 @@ export function EditProductDialog({
       await updateFg({
         id: fg._id,
         name: clean,
-        code: code.trim(),
+        // sent back unchanged: the code is fixed once created
+        code: fg.code ?? "",
         qty: qty.trim() === "" ? undefined : Number(qty),
         unit: unit.trim(),
         projectName: project.trim() || undefined,
@@ -533,12 +534,18 @@ export function EditProductDialog({
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium">Code</label>
-            <Input
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="Auto (FG0001)"
-              className={inputCls}
-            />
+            {/* the code is the product's identity on every sheet, order and
+                ledger line that quotes it, so it is shown rather than typed */}
+            <div
+              className={cn(
+                inputCls,
+                "flex items-center justify-between gap-2 bg-muted/50 text-muted-foreground",
+              )}
+              title="Fixed — the code is the product's identity and cannot change."
+            >
+              <span className="truncate font-mono">{fg.code || "—"}</span>
+              <Lock className="size-3 shrink-0 opacity-60" />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

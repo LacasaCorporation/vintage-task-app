@@ -64,6 +64,56 @@ async function nextCode(
   return `${prefix}${String(max + 1).padStart(4, "0")}`;
 }
 
+/**
+ * A code is a document's identity, so it is fixed the moment it is created.
+ *
+ * Editing a product, material or account is allowed to send the code it
+ * already has — several screens save the whole record and would otherwise have
+ * to be rewritten — but a *different* code is refused rather than applied. A
+ * blank value is the same as leaving it alone; only a real change is an error.
+ */
+function assertCodeUnchanged(
+  incoming: string,
+  current: string | undefined,
+): void {
+  const next = incoming.trim();
+  if (next === "") return;
+  if (next !== (current ?? "")) {
+    throw new Error(
+      "The code is this record's identity and cannot be changed once it exists.",
+    );
+  }
+}
+
+/**
+ * A code identifies one record, so no two may share it. Checked when a
+ * product or material is created — the auto-generated codes cannot collide
+ * with each other, but a typed one can collide with anything.
+ */
+async function assertCodeFree(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+  table: "finishedGoods" | "rawMaterials",
+  code: string,
+): Promise<void> {
+  const clash = await ctx.db
+    .query(table)
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+    .collect()
+    .then((rows) =>
+      rows.some(
+        (row) =>
+          "code" in row &&
+          (row.code ?? "").toLowerCase() === code.toLowerCase(),
+      ),
+    );
+  if (clash) {
+    throw new Error(
+      `${code} is already used. Codes are unique and never change — pick another.`,
+    );
+  }
+}
+
 // ── Units of measure (managed master data) ─────────────────────────────
 
 /** All units for the user, A→Z. */
@@ -232,9 +282,13 @@ export const addMaterial = mutation({
     if (pricePerUnit < 0) throw new Error("Price can't be negative.");
     // Auto-code: RM0001, RM0002, … unless the user typed their own code.
     const autoCode = await nextCode(ctx, userId, "RM");
+    const finalCode = code?.trim() || autoCode;
+    // the code is how a material is identified on every sheet, bill and ledger
+    // line, so two materials can never share one
+    await assertCodeFree(ctx, userId, "rawMaterials", finalCode);
     return await ctx.db.insert("rawMaterials", {
       ownerId: userId,
-      code: code?.trim() || autoCode,
+      code: finalCode,
       name: clean,
       // new work is active by default — the mark is only ever taken off
       // deliberately, never something you have to remember to switch on
@@ -248,7 +302,7 @@ export const addMaterial = mutation({
   },
 });
 
-/** Edit a raw material (code, name, category, sub-category, unit, or price). */
+/** Edit a raw material (name, category, sub-category, unit, or price). */
 export const updateMaterial = mutation({
   args: {
     id: v.id("rawMaterials"),
@@ -272,7 +326,14 @@ export const updateMaterial = mutation({
       patch.name = clean;
     }
     if (patch.unit !== undefined) patch.unit = patch.unit.trim() || "pcs";
-    if (patch.code !== undefined) patch.code = patch.code.trim() || undefined;
+    // the code is this material's identity on every sheet, bill and ledger
+    // line that quotes it, so it is fixed once the material exists; the arg
+    // stays so older callers keep working, but only the same code is accepted,
+    // and a blank one is left alone rather than wiping the code off the record
+    if (patch.code !== undefined) {
+      assertCodeUnchanged(patch.code, material.code);
+      patch.code = patch.code.trim() || material.code;
+    }
     if (patch.category !== undefined)
       patch.category = patch.category.trim() || undefined;
     if (patch.subCategory !== undefined)
@@ -867,6 +928,10 @@ export const addFinishedGood = mutation({
       const project = job ? await ctx.db.get(job.projectId) : null;
       if (project) projectName = project.name.slice(0, MAX_NAME_LENGTH);
     }
+    const fgFinalCode = opts.code?.trim() || fgCode;
+    // the code is how a product is identified on every sheet, order and ledger
+    // line, so two products can never share one
+    await assertCodeFree(ctx, userId, "finishedGoods", fgFinalCode);
     return await ctx.db.insert("finishedGoods", {
       ownerId: userId,
       isActive: true,
@@ -880,7 +945,7 @@ export const addFinishedGood = mutation({
       jobId: jobList[0],
       jobIds: jobList.length > 0 ? jobList : undefined,
       name: cleanName.slice(0, MAX_NAME_LENGTH),
-      code: opts.code?.trim() || fgCode,
+      code: fgFinalCode,
       qty: opts.qty !== undefined && opts.qty > 0 ? opts.qty : undefined,
       unit: opts.unit?.trim() || undefined,
       category: opts.category?.trim() || undefined,
@@ -968,7 +1033,13 @@ export const updateFinishedGood = mutation({
       // keep the legacy single link in sync with the first job
       patch.jobId = unique[0];
     }
-    if (patch.code !== undefined) patch.code = patch.code.trim() || undefined;
+    // the code is the product's identity on every sheet, order and ledger line
+    // that quotes it, so it is fixed once the product exists; a blank code is
+    // left alone rather than wiping it off the record
+    if (patch.code !== undefined) {
+      assertCodeUnchanged(patch.code, fg.code);
+      patch.code = patch.code.trim() || fg.code;
+    }
     if (patch.qty !== undefined) {
       if (patch.qty < 0) throw new Error("Quantity can't be negative.");
       patch.qty = patch.qty > 0 ? patch.qty : undefined;

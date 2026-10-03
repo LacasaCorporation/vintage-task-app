@@ -266,11 +266,10 @@ export default function MaterialsSheet({
   const handleEdit = async (m: MaterialDoc) => {
     const result = await promptMulti({
       title: `Edit “${m.name}”`,
-      message: "Update the raw material details.",
+      message: `Update the raw material details. Its code ${m.code ?? "—"} is fixed — it is what every sheet, bill and ledger line quotes.`,
       columns: 2,
       confirmLabel: "Save changes",
       fields: [
-        { key: "code", label: "Code", initial: m.code ?? "", placeholder: "RM0001" },
         { key: "name", label: "Material name", initial: m.name, required: true },
         {
           key: "category",
@@ -305,7 +304,8 @@ export default function MaterialsSheet({
     try {
       await updateMaterial({
         id: m._id,
-        code: result.code,
+        // sent back unchanged: the code is fixed once created
+        code: m.code ?? "",
         name: result.name,
         category: result.category,
         subCategory: result.subCategory,
