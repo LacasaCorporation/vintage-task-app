@@ -55,7 +55,13 @@ export default function ProductionsBoard({
   // list-vs-hierarchy-vs-board presentation of the current level
   const [filter, setFilter] = useState<FlagFilter>("projects");
   const [status, setStatus] = useState<FlagStatusFilter>("all");
-  const [view, setView] = useState<WorkspaceView>("list");
+  // the tree is the level's default presentation: it is the only one that
+  // draws the chevron on a project, so starting on the flat list left the
+  // board with no way to expand a project's jobs without reaching for the
+  // view toggles
+  const [view, setView] = useState<WorkspaceView>(
+    DEFAULT_VIEW_BY_FILTER.projects ?? "hierarchy",
+  );
   const [selection, setSelection] = useState<FlaggedSel>(null);
   // the print sheet is mounted on demand, then the browser print dialog opens
   const [printing, setPrinting] = useState(false);
