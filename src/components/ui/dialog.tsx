@@ -44,10 +44,28 @@ function DialogOverlay({
   )
 }
 
+/**
+ * Whether a pointer interaction landed on a control that only *looks* outside
+ * the dialog: a combobox, select or menu opened inside it renders through its
+ * own portal at the document root, so Radix's outside-click logic sees a click
+ * on our own dropdown as a click on the backdrop. Treating that as outside
+ * would either close the dialog or swallow the selection.
+ */
+function isPortalledControl(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest(
+      '[data-radix-popper-content-wrapper], [data-slot="select-content"]',
+    ) !== null
+  );
+}
+
 function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onPointerDownOutside,
+  onInteractOutside,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -61,6 +79,14 @@ function DialogContent({
           "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 outline-none sm:max-w-lg",
           className
         )}
+        onPointerDownOutside={(event) => {
+          onPointerDownOutside?.(event);
+          if (isPortalledControl(event.target)) event.preventDefault();
+        }}
+        onInteractOutside={(event) => {
+          onInteractOutside?.(event);
+          if (isPortalledControl(event.target)) event.preventDefault();
+        }}
         {...props}
       >
         {children}

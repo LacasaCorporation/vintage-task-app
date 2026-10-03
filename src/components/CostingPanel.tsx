@@ -106,6 +106,52 @@ function Figure({
   );
 }
 
+/**
+ * The “production is running — continue?” prompt.
+ *
+ * It is rendered inside the costing sheet whenever the sheet is open, because
+ * a banner at the top of the page sits behind the sheet's modal: the edit
+ * would go through with no prompt ever seen, or look like it silently did
+ * nothing.
+ */
+function ProductionWarning({
+  label,
+  onContinue,
+  onCancel,
+}: {
+  label: string;
+  onContinue: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+      <AlertTriangle className="size-4 shrink-0" />
+      <span className="min-w-0 flex-1">
+        <strong>Production is running</strong> — {label} will change the
+        materials this production uses. Stock is adjusted by the difference
+        right away, and stopping production returns whatever is left. Continue?
+      </span>
+      <Button
+        type="button"
+        size="sm"
+        className="h-8 rounded-lg bg-amber-600 px-3 text-xs text-white hover:bg-amber-700"
+        onClick={onContinue}
+      >
+        Continue
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 rounded-lg px-3 text-xs"
+        onClick={onCancel}
+      >
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
 /** Main costing area: raw-materials sheet, product form/list, or FG costing grid. */
 export default function CostingPanel({
   materials,
@@ -277,6 +323,9 @@ export default function CostingPanel({
     activeFgId === null
       ? null
       : (finishedGoods.find((f) => f._id === activeFgId) ?? null);
+  // the sheet renders as a modal over everything else, so anything it needs to
+  // show the user has to live inside that modal
+  const sheetOpen = (view?.kind === "fg" || sheetId !== null) && activeFg !== null;
   const { format, format: money, code: currencyCode } = useWorkspaceCurrency();
   const markupPct = activeFg?.markupPct ?? 0;
 
@@ -677,37 +726,20 @@ export default function CostingPanel({
 
   return (
     <div>
-      {/* ── Production warning: editing a running product asks first ── */}
-      {pendingEdit !== null && (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
-          <AlertTriangle className="size-4 shrink-0" />
-          <span className="min-w-0 flex-1">
-            <strong>Production is running</strong> — {pendingEdit.label} will change the
-            materials this production uses. Stock is adjusted by the difference right
-            away, and stopping production returns whatever is left. Continue?
-          </span>
-          <Button
-            type="button"
-            size="sm"
-            className="h-8 rounded-lg bg-amber-600 px-3 text-xs text-white hover:bg-amber-700"
-            onClick={() => {
-              const run = pendingEdit.run;
-              setPendingEdit(null);
-              void run();
-            }}
-          >
-            Continue
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-lg px-3 text-xs"
-            onClick={() => setPendingEdit(null)}
-          >
-            Cancel
-          </Button>
-        </div>
+      {/* ── Production warning: editing a running product asks first ──
+          Shown on the page only while the sheet is closed; when the sheet is
+          open it renders inside the sheet's modal instead, or it would sit
+          behind it and never be seen. */}
+      {pendingEdit !== null && !sheetOpen && (
+        <ProductionWarning
+          label={pendingEdit.label}
+          onContinue={() => {
+            const run = pendingEdit.run;
+            setPendingEdit(null);
+            void run();
+          }}
+          onCancel={() => setPendingEdit(null)}
+        />
       )}
 
       {/* ── Open product chip (navigation lives in the sidebar) ──────── */}
@@ -827,6 +859,17 @@ export default function CostingPanel({
               Costing sheet — {activeFg.name}
             </DialogTitle>
         <>
+          {pendingEdit !== null && (
+            <ProductionWarning
+              label={pendingEdit.label}
+              onContinue={() => {
+                const run = pendingEdit.run;
+                setPendingEdit(null);
+                void run();
+              }}
+              onCancel={() => setPendingEdit(null)}
+            />
+          )}
           {/* product header */}
           <div className="mt-3 flex flex-wrap items-center gap-2.5 rounded-xl border bg-card px-3 py-2 shadow-sm">
             {/* product image: thumbnail or add button */}
