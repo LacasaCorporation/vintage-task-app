@@ -1671,7 +1671,7 @@ export default function ProjectsSheet({
                                   >
                                     <Plus className="size-3" />
                                   </button>
-                                  <ProductionButton fg={fg} />
+                                  <ProductionButton fg={fg} jobId={job._id} />
                                   {/* a finished or in-production product cannot
                                       be moved, so the control says why instead
                                       of failing when it is used */}

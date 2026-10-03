@@ -468,7 +468,7 @@ function JobRow({
                   )
                 }
               />
-              <ProductionButton fg={fg} hideStatusPill />
+              <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
             </li>
           ))}
         </ul>

@@ -572,6 +572,7 @@ const schema = defineSchema(
       direction: v.union(v.literal("in"), v.literal("out")),
       source: v.union(
         v.literal("production"),
+        v.literal("production-reverse"),
         v.literal("sale"),
         v.literal("sale-return"),
         v.literal("adjustment"),

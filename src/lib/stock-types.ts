@@ -17,6 +17,7 @@ export type MovementSource =
 /** What moved a finished product on or off the shelf. */
 export type ProductMovementSource =
   | "production" // a run came off the line
+  | "production-reverse" // the run was reversed, so its units came back off
   | "sale" // an invoice took it
   | "sale-return" // the invoice was removed
   | "adjustment"; // an opening figure or a hand count

@@ -3,7 +3,7 @@ import { scopeUserId } from "./org";
 import { getSettings } from "./settings";
 import { flagAncestors, jobIdsOf } from "./flagCascade";
 import { stockIn, stockOut } from "./stock";
-import { produceStock } from "./productStock";
+import { produceStock, reverseProduction } from "./productStock";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -14,6 +14,33 @@ import {
   projectStatusesOrDefaults,
 } from "../lib/project-statuses";
 import { batchQty } from "../lib/product-cost";
+
+/**
+ * How many units the running production has already landed into `stock`.
+ *
+ * Read straight from the product's own stock ledger: every unit a run puts on
+ * the shelf is a `production` movement stamped at or after the moment the run
+ * started. Deriving it this way means a reverse can take back even units
+ * landed by a run that began before a stored counter existed, and it can never
+ * drift from the ledger the way a separate figure could.
+ */
+async function landedThisRun(
+  ctx: MutationCtx,
+  fg: Doc<"finishedGoods">,
+): Promise<number> {
+  if (fg.productionStartedAt === undefined) return 0;
+  const movements = await ctx.db
+    .query("productMovements")
+    .withIndex("by_product", (q) => q.eq("productId", fg._id))
+    .collect();
+  let landed = 0;
+  for (const m of movements) {
+    if (m.source !== "production" || m.direction !== "in") continue;
+    if (m.at < fg.productionStartedAt) continue;
+    landed += m.qty;
+  }
+  return Math.round(landed * 1e6) / 1e6;
+}
 
 /**
  * Re-read a product's costing sheet and move the raw-material stock to match.
@@ -34,8 +61,11 @@ export async function syncProductionConsumption(
     .withIndex("by_fg", (q) => q.eq("fgId", fg._id))
     .collect();
   // a run in progress has its own committed quantity; editing the sheet
-  // mid-run must re-price against that, not the product's default batch
-  const make = fg.productionQty ?? batchQty(fg);
+  // mid-run must re-price against that, not the product's default batch.
+  // It is what is still part-made plus what has already landed, so a sheet
+  // edit after a partial finish still prices the whole batch.
+  const make =
+    (fg.productionQty ?? 0) + (await landedThisRun(ctx, fg)) || batchQty(fg);
   const next = new Map<Id<"rawMaterials">, number>();
   for (const line of lines) {
     if (line.materialId === undefined) continue;
@@ -85,8 +115,12 @@ export async function syncProductionConsumption(
  * stock. A product leaves "Listed" for a middle status once work begins.
  */
 export const start = mutation({
-  args: { fgId: v.id("finishedGoods"), qty: v.optional(v.number()) },
-  handler: async (ctx, { fgId, qty }) => {
+  args: {
+    fgId: v.id("finishedGoods"),
+    qty: v.optional(v.number()),
+    jobId: v.optional(v.id("projectJobs")),
+  },
+  handler: async (ctx, { fgId, qty, jobId }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(fgId);
@@ -102,10 +136,17 @@ export const start = mutation({
     // product is linked to on a job, else its own default
     let make = qty;
     if (make === undefined) {
-      const link = (await ctx.db
-        .query("jobProducts")
-        .withIndex("by_fg", (q) => q.eq("fgId", fgId))
-        .first()) ?? null;
+      // the batch is per job: prefer the job the row was started from, so a
+      // product sitting on two jobs produces that job's quantity rather than
+      // whichever link happens to come back first
+      const link =
+        jobId === undefined
+          ? null
+          : ((await ctx.db
+              .query("jobProducts")
+              .withIndex("by_fg", (q) => q.eq("fgId", fgId))
+              .collect()
+            ).find((r) => r.jobId === jobId) ?? null);
       make = link?.qty ?? batchQty(fg);
     }
     if (!Number.isFinite(make) || make <= 0)
@@ -229,7 +270,11 @@ export const editConsumption = mutation({
   },
 });
 
-/** Stop a running production and return the consumed stock. */
+/**
+ * Reverse a running production: the raw materials it consumed go back into
+ * stock and any units it had already landed come back off the product shelf,
+ * so the product is left exactly as it was before the run.
+ */
 export const stop = mutation({
   args: { fgId: v.id("finishedGoods") },
   handler: async (ctx, { fgId }) => {
@@ -240,6 +285,20 @@ export const stop = mutation({
       throw new Error("That product no longer exists.");
     if (fg.productionStartedAt === undefined)
       throw new Error("Production isn't running for this product.");
+
+    // a reverse has to undo the whole run: the units this run already landed
+    // into stock come back off the shelf as well as the raw materials coming
+    // back in, so production can never leave behind stock it did not really
+    // make. The ledger says how much that is.
+    const landed = await landedThisRun(ctx, fg);
+    if (landed > 0) {
+      await reverseProduction(ctx, {
+        ownerId: userId,
+        product: fg,
+        qty: landed,
+        ref: fg.name,
+      });
+    }
 
     for (const used of fg.productionConsumed ?? []) {
       const material = await ctx.db.get(used.materialId);
@@ -353,6 +412,10 @@ export const landPending = mutation({
       projectStatus: fg.projectStatus ?? PROJECT_STATUS_FINISH,
       isCompleted: true,
       completedAt: fg.completedAt ?? Date.now(),
+      // the run is settled now, so it is closed out like any other finish
+      productionStartedAt: undefined,
+      productionConsumed: undefined,
+      productionQty: undefined,
     });
     return moved;
   },

@@ -16,6 +16,7 @@ export const MATERIAL_SOURCE_LABEL: Record<string, string> = {
 /** Finished-product movements. */
 export const PRODUCT_SOURCE_LABEL: Record<string, string> = {
   production: "Came off the line",
+  "production-reverse": "Production reversed",
   sale: "Invoiced",
   "sale-return": "Invoice removed",
   adjustment: "Stock correction",

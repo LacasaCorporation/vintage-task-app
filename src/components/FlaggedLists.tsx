@@ -481,7 +481,7 @@ export function FlaggedItemsList({
                         )
                       }
                     />
-                    <ProductionButton fg={fg} hideStatusPill />
+                    <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
                   </li>
                 ))}
               </ul>
@@ -568,7 +568,7 @@ export function FlaggedItemsList({
                   dueAt={fg.dueAt ?? parentJob?.dueAt}
                   inherited={fg.dueAt === undefined && parentJob?.dueAt !== undefined}
                 />
-                <ProductionButton fg={fg} />
+                <ProductionButton fg={fg} jobId={parentJob?._id} />
               </div>
             </li>
           );
@@ -863,7 +863,7 @@ export function FlaggedProductsList({
               )
             }
           />
-          <ProductionButton fg={fg} hideStatusPill />
+          <ProductionButton fg={fg} jobId={parentJob?._id} hideStatusPill />
         </li>
       ))}
     </ul>
@@ -879,10 +879,16 @@ export function FlaggedProductsList({
 export function ProductionButton({
   fg,
   hideStatusPill = false,
+  jobId,
 }: {
   fg: FgDoc;
   /** The row shows the status as a dropdown instead, so skip the green pill. */
   hideStatusPill?: boolean;
+  /**
+   * The job whose row this button sits on. Starting from a job-scoped row
+   * produces that job's batch, rather than whichever link comes back first.
+   */
+  jobId?: Id<"projectJobs">;
 }) {
   const startProduction = useMutation(api.production.start);
   const stopProduction = useMutation(api.production.stop);
@@ -926,7 +932,13 @@ export function ProductionButton({
       <button
         type="button"
         disabled={busy}
-        onClick={() => void run(() => startProduction({ fgId: fg._id }), "Couldn't start production.", "Production started — materials taken out of stock.")}
+        onClick={() =>
+          void run(
+            () => startProduction({ fgId: fg._id, jobId }),
+            "Couldn't start production.",
+            "Production started — materials taken out of stock.",
+          )
+        }
         title="Flag this product and take its materials out of stock"
         className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400"
       >
@@ -960,7 +972,7 @@ export function ProductionButton({
           type="button"
           disabled={busy}
           onClick={() => setConfirming(true)}
-          title="Reverse — stop production and return the consumed materials to stock"
+          title="Reverse — stop production, return the consumed materials, and take back any units it already put into stock"
           aria-label={`Reverse the production of “${fg.name}”`}
           className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:opacity-50 dark:text-amber-400"
         >
@@ -986,7 +998,7 @@ export function ProductionButton({
           void run(
             () => stopProduction({ fgId: fg._id }),
             "Couldn't reverse production.",
-            "Production reversed — the consumed stock went back.",
+            "Production reversed — materials and produced stock went back.",
           )
         }
         className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground disabled:opacity-50"

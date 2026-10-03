@@ -63,6 +63,22 @@ export async function sellStock(
   await move(ctx, { ...args, qty: -Math.abs(args.qty), source: "sale" });
 }
 
+/**
+ * A run was reversed, so the units it had already landed come back off the
+ * shelf. This is the mirror of `produceStock`: without it a reversed
+ * production would leave its finished units in stock for ever.
+ */
+export async function reverseProduction(
+  ctx: MutationCtx,
+  args: { ownerId: Id<"users">; product: Doc<"finishedGoods">; qty: number; ref?: string },
+): Promise<void> {
+  await move(ctx, {
+    ...args,
+    qty: -Math.abs(args.qty),
+    source: "production-reverse",
+  });
+}
+
 /** The invoice was deleted, so the units go back on the shelf. */
 export async function returnStock(
   ctx: MutationCtx,
@@ -82,6 +98,8 @@ function explained(movements: Doc<"productMovements">[]): {
     // only production fills the shelf and only invoicing empties it; a
     // correction adjusts the opening, so it belongs in neither column
     if (m.source === "production" && m.direction === "in") income += m.qty;
+    if (m.source === "production-reverse" && m.direction === "out")
+      income -= m.qty;
     if (m.source === "sale" && m.direction === "out") outgoing += m.qty;
     if (m.source === "sale-return" && m.direction === "in") outgoing -= m.qty;
   }
