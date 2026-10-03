@@ -291,6 +291,18 @@ export const stop = mutation({
     // back in, so production can never leave behind stock it did not really
     // make. The ledger says how much that is.
     const landed = await landedThisRun(ctx, fg);
+    // The books are kept exactly as they are, so a reverse must never invent a
+    // negative balance: if any of the units this run produced have already
+    // left the shelf — invoiced, delivered, or written off by a stock take —
+    // there is nothing left to take back. Refuse and let the run be settled by
+    // hand rather than booking stock the firm does not have.
+    const onHand = Math.round((fg.stock ?? 0) * 1e6) / 1e6;
+    if (landed > 0 && landed > onHand) {
+      const gone = Math.round((landed - onHand) * 1e6) / 1e6;
+      throw new Error(
+        `${gone} of the ${landed} units this run produced are no longer in stock, so the run can't be reversed without taking stock below zero. Undo the sales, deliveries, or stock corrections that used them first.`,
+      );
+    }
     if (landed > 0) {
       await reverseProduction(ctx, {
         ownerId: userId,
