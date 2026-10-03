@@ -17,6 +17,7 @@ import {
   middleProjectStatuses,
   PROJECT_STATUS_FINISH,
   projectStatusesOrDefaults,
+  productLockedReason,
 } from "@/lib/project-statuses";
 import {
   DueChips,
@@ -435,6 +436,8 @@ function JobRow({
                 jobId={job._id}
                 qty={fg.qty}
                 unit={fg.unit}
+                frozen={productLockedReason(fg) !== null}
+                frozenReason={productLockedReason(fg) ?? undefined}
               />
               <DueChips
                 dueAt={fg.dueAt ?? job.dueAt}

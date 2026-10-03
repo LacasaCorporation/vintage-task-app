@@ -53,6 +53,7 @@ import {
 import {
   PROJECT_STATUS_FINISH,
   projectStatusesOrDefaults,
+  productLockedReason,
 } from "@/lib/project-statuses";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { isFlaggedProjectWork } from "@/lib/project-work";
@@ -662,6 +663,17 @@ export default function ProjectsSheet({
     },
   ) => {
     const from = where.jobId !== undefined ? `job “${where.jobName}”` : `“${where.projectName}”`;
+    // the server refuses this too — say why here rather than after the click
+    const locked = productLockedReason(fg);
+    if (locked !== null) {
+      await confirm({
+        title: `“${fg.name}” can’t be moved`,
+        message: `${locked} Its cost and stock are already on the books, so it stays where it is.`,
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
     const ok = await confirm({
       title: `Remove “${fg.name}” from ${from}?`,
       message:
@@ -688,6 +700,18 @@ export default function ProjectsSheet({
 
   /** Delete the product the side panel is showing, after the usual confirm. */
   const handleDeleteProductFromPane = async (fg: FgDoc) => {
+    // finished or in-production work is part of the project's record: the
+    // server refuses the delete, so say why before the confirm
+    const locked = productLockedReason(fg);
+    if (locked !== null) {
+      await confirm({
+        title: `“${fg.name}” can’t be deleted`,
+        message: `${locked} Take it out of production first, then it can be deleted.`,
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
     const ok = await confirm({
       title: `Delete product “${fg.name}”?`,
       message:
@@ -1590,7 +1614,11 @@ export default function ProjectsSheet({
                               </div>
 
                               {/* product lines under this job */}
-                              {jobProducts.map((fg) => (
+                              {jobProducts.map((fg) => {
+                                // finished or in-production work is on the books,
+                                // so it cannot be moved out of its job
+                                const locked = productLockedReason(fg);
+                                return (
                                 <div
                                   key={fg._id}
                                   className="flex w-full items-center gap-2 rounded-lg bg-card px-2 py-1 pl-6 pr-1.5 text-xs transition-colors hover:bg-accent"
@@ -1630,6 +1658,8 @@ export default function ProjectsSheet({
                                     jobId={job._id}
                                     qty={fg.qty}
                                     unit={fg.unit}
+                                    frozen={productLockedReason(fg) !== null}
+                                    frozenReason={productLockedReason(fg) ?? undefined}
                                   />
                                   <PriorityChip priority={fg.priority} />
                                   <button
@@ -1642,11 +1672,23 @@ export default function ProjectsSheet({
                                     <Plus className="size-3" />
                                   </button>
                                   <ProductionButton fg={fg} />
+                                  {/* a finished or in-production product cannot
+                                      be moved, so the control says why instead
+                                      of failing when it is used */}
                                   <button
                                     type="button"
-                                    title="Remove from this job — the product stays in Products"
+                                    title={
+                                      locked === null
+                                        ? "Remove from this job — the product stays in Products"
+                                        : locked
+                                    }
                                     aria-label={`Remove “${fg.name}” from this job`}
-                                    className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive"
+                                    disabled={locked !== null}
+                                    className={cn(
+                                      "grid size-5 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-destructive",
+                                      locked !== null &&
+                                        "cursor-not-allowed opacity-40 hover:bg-transparent hover:text-muted-foreground/60",
+                                    )}
                                     onClick={() =>
                                       void handleRemoveProductFromProject(fg, {
                                         projectName: p.name,
@@ -1695,7 +1737,8 @@ export default function ProjectsSheet({
                                     )}
                                   </button>
                                 </div>
-                              ))}
+                              );
+                              })}
                               <button
                                 type="button"
                                 className="flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

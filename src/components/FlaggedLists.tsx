@@ -52,6 +52,7 @@ import {
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
   projectStatusesOrDefaults,
+  productLockedReason,
 } from "@/lib/project-statuses";
 
 export type JobDoc = Doc<"projectJobs">;
@@ -444,6 +445,8 @@ export function FlaggedItemsList({
                       jobId={job._id}
                       qty={fg.qty}
                       unit={fg.unit}
+                      frozen={productLockedReason(fg) !== null}
+                      frozenReason={productLockedReason(fg) ?? undefined}
                     />
                     <DueChips
                       dueAt={fg.dueAt ?? job.dueAt}

@@ -9,6 +9,31 @@ export const DEFAULT_PROJECT_STATUSES = [
 export const PROJECT_STATUS_START = "Listed";
 export const PROJECT_STATUS_FINISH = "Finish";
 
+/**
+ * Why a product's figures are frozen, or null while it can still be changed.
+ *
+ * This mirrors the server's own `lockedReason` in costing.ts: once a product
+ * is on the line or finished, its cost and stock are already on the books, so
+ * it cannot be moved or deleted. Rows read this so a frozen control explains
+ * itself instead of offering something the server will refuse.
+ */
+export function productLockedReason(
+  fg: {
+    productionStartedAt?: number;
+    inProduction?: number;
+    isCompleted?: boolean;
+    projectStatus?: string;
+  },
+): string | null {
+  if (fg.productionStartedAt !== undefined || (fg.inProduction ?? 0) > 0) {
+    return "This product is in production. Stop production before changing it.";
+  }
+  if (fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH) {
+    return "This product is finished, so its cost and stock are already on the books.";
+  }
+  return null;
+}
+
 /** What the first status used to be called, so older saved sets still work. */
 const LEGACY_PROJECT_STATUS_START = "Start";
 

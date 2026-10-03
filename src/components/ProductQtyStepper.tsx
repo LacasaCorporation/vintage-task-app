@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
-import { Loader2, Minus, Plus } from "lucide-react";
+import { Loader2, Lock, Minus, Plus } from "lucide-react";
 import type { Id } from "@/convex/_generated/dataModel";
 import { api } from "@/convex/_generated/api";
 import { toast } from "@/lib/toast";
@@ -27,6 +27,8 @@ export default function ProductQtyStepper({
   jobId,
   qty,
   unit,
+  frozen = false,
+  frozenReason,
   className,
 }: {
   fgId: Id<"finishedGoods">;
@@ -34,12 +36,18 @@ export default function ProductQtyStepper({
   jobId?: Id<"projectJobs">;
   qty: number | undefined;
   unit: string | undefined;
+  /** True once the product is finished or on the line — its figures are on
+      the books, so the quantity is shown rather than changed. */
+  frozen?: boolean;
+  /** Why it is frozen, for the tooltip. */
+  frozenReason?: string;
   className?: string;
 }) {
   const setQtyM = useMutation(api.costing.setProductQty);
   const [busy, setBusy] = useState(false);
   const current = qty !== undefined && qty > 0 ? qty : 1;
   const label = unit ?? "pcs";
+  const locked = frozen === true;
 
   const set = async (next: number) => {
     setBusy(true);
@@ -75,9 +83,20 @@ export default function ProductQtyStepper({
         "inline-flex shrink-0 items-center gap-0.5 rounded-full border bg-card py-0.5 pr-1 pl-0.5 text-[10px] font-medium text-muted-foreground tabular-nums",
         className,
       )}
-      title={`Quantity for this job — ${qtyText(current)} ${label}. − and + step it, clicking the number sets it.`}
+      title={
+        locked
+          ? (frozenReason ?? "Finished — this quantity is part of the record.")
+          : `Quantity for this job — ${qtyText(current)} ${label}. − and + step it, clicking the number sets it.`
+      }
     >
-      {busy ? (
+      {locked ? (
+        // a finished product's quantity is on the books, so it is only read
+        <>
+          <span className="px-0.5 text-center">{qtyText(current)}</span>
+          <span className="pr-0.5">{label}</span>
+          <Lock className="size-2.5 shrink-0 opacity-60" />
+        </>
+      ) : busy ? (
         <Loader2 className="size-3 shrink-0 animate-spin" />
       ) : (
         <>
