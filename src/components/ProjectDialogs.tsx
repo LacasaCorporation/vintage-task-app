@@ -447,6 +447,37 @@ export function AddProductToJobDialog({
 }
 
 /**
+ * A value the record has settled on, shown rather than offered for editing.
+ * Used for a product's project and job once it is connected, and for its code
+ * in every case: those identify the record, so they are not retyped.
+ */
+function FrozenField({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium">{label}</label>
+      <div
+        className={cn(
+          inputCls,
+          "flex items-center justify-between gap-2 bg-muted/50 text-muted-foreground",
+        )}
+        title={title ?? "Fixed — this is where the record sits."}
+      >
+        <span className="truncate">{value}</span>
+        <Lock className="size-3 shrink-0 opacity-60" />
+      </div>
+    </div>
+  );
+}
+
+/**
  * Edit a product in place: the name, code, quantity and unit shown on its row.
  * The costing sheet and everything else stays where it is.
  */
@@ -458,12 +489,35 @@ export function EditProductDialog({
   onClose: () => void;
 }) {
   const updateFg = useMutation(api.costing.updateFinishedGood);
+  const setFgJobsM = useMutation(api.costing.setFgJobs);
   const [name, setName] = useState(fg.name);
   const [qty, setQty] = useState(fg.qty === undefined ? "" : String(fg.qty));
   const [unit, setUnit] = useState(fg.unit ?? "");
-  const [project, setProject] = useState(fg.projectName ?? "");
   const [note, setNote] = useState(fg.note ?? "");
   const [saving, setSaving] = useState(false);
+
+  /**
+   * Where the product sits, and whether that can still be changed.
+   *
+   * A product on the board is reached through its project and job, and every
+   * sheet, order and total quotes it by that path — so once it is connected
+   * the two are shown frozen rather than offered for editing. Only a product
+   * with nothing attached yet gets the pickers, and the choice made here is
+   * then just as fixed.
+   */
+  const projects = useQuery(api.costing.listProjects) ?? [];
+  const allJobs = useQuery(api.jobs.listJobs) ?? [];
+  const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
+  const connectedJob = allJobs.find((j) => jobIds.includes(j._id)) ?? null;
+  // A job implies its project, so a product on a job is connected to both.
+  // One that is only grouped under a project has not been placed yet, and
+  // still gets the pickers — otherwise it could never be given a job.
+  const connected = connectedJob !== null;
+  const [project, setProject] = useState(fg.projectName ?? "");
+  const [jobId, setJobId] = useState(connectedJob?._id ?? "");
+  const projectJobs = allJobs.filter((j) =>
+    projects.some((p) => p.name === project && p._id === j.projectId),
+  );
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -472,6 +526,9 @@ export function EditProductDialog({
       toast.error("Give the product a name.");
       return;
     }
+    // A connected product keeps the project and job it is on. Only one with
+    // nothing attached yet gets to choose, and that choice is fixed on save.
+    const chosenJob = jobId === "" ? null : allJobs.find((j) => j._id === jobId) ?? null;
     setSaving(true);
     try {
       await updateFg({
@@ -481,9 +538,18 @@ export function EditProductDialog({
         code: fg.code ?? "",
         qty: qty.trim() === "" ? undefined : Number(qty),
         unit: unit.trim(),
-        projectName: project.trim() || undefined,
+        // a job carries its own project, so linking sets that itself
+        projectName:
+          connected || chosenJob !== null
+            ? fg.projectName
+            : project.trim() || undefined,
         note: note.trim() || undefined,
       });
+      // linking here is what makes the choice permanent; left unlinked, the
+      // product keeps whichever project it was grouped under
+      if (chosenJob !== null) {
+        await setFgJobsM({ id: fg._id, jobIds: [chosenJob._id] });
+      }
       toast.success(`“${clean}” updated.`);
       onClose();
     } catch (error) {
@@ -511,16 +577,61 @@ export function EditProductDialog({
         </DialogHeader>
 
         <form onSubmit={handleSave} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium">Project</label>
-              <Input
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-                placeholder="Standalone"
-                className={inputCls}
+          {/* Project / job — frozen once the product is connected, a pair of
+              pickers while it is still standalone. */}
+          {connectedJob !== null ? (
+            <div className="grid grid-cols-2 gap-3">
+              {/* a job carries its project, so both are settled together */}
+              <FrozenField label="Project" value={fg.projectName ?? "—"} />
+              <FrozenField
+                label="Job"
+                value={`${connectedJob.name}${connectedJob.code ? ` · ${connectedJob.code}` : ""}`}
               />
             </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Project</label>
+                <select
+                  value={project}
+                  onChange={(e) => {
+                    setProject(e.target.value);
+                    setJobId("");
+                  }}
+                  aria-label="Project"
+                  className={selectCls}
+                >
+                  <option value="">Standalone (no project)</option>
+                  {projects.map((p) => (
+                    <option key={p._id} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium">Job</label>
+                <select
+                  value={jobId}
+                  onChange={(e) => setJobId(e.target.value)}
+                  aria-label="Job"
+                  disabled={projectJobs.length === 0}
+                  className={cn(selectCls, "disabled:opacity-60")}
+                >
+                  <option value="">
+                    {projectJobs.length === 0 ? "No jobs in this project" : "No specific job"}
+                  </option>
+                  {projectJobs.map((j) => (
+                    <option key={j._id} value={j._id}>
+                      {j.name}
+                      {j.code ? ` · ${j.code}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium">Product name *</label>
               <Input
