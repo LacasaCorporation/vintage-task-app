@@ -37,6 +37,8 @@ type ItemPickerProps = {
   disabled?: boolean;
   size?: "sm" | "md";
   className?: string;
+  /** Extra classes for the dropdown itself — widen it for a specific screen. */
+  contentClassName?: string;
   "aria-label"?: string;
 };
 
@@ -62,6 +64,7 @@ export default function ItemPicker({
   disabled,
   size = "md",
   className,
+  contentClassName,
   "aria-label": ariaLabel,
 }: ItemPickerProps) {
   const [open, setOpen] = useState(false);
@@ -133,7 +136,16 @@ export default function ItemPicker({
 
       <PopoverContent
         align="start"
-        className="w-[var(--radix-popover-trigger-width)] min-w-56 p-0"
+        collisionPadding={8}
+        className={cn(
+          // A trigger can be a narrow table cell, so the menu is allowed to be
+          // wider than it. A row carries a name, a code, a category, the stock
+          // on hand and a price, and none of that reads in 280px: the menu
+          // takes a comfortable width, never narrower than its own trigger,
+          // and never wider than the room the viewport actually has.
+          "w-96 min-w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-content-available-width)] p-0",
+          contentClassName,
+        )}
       >
         <Command
           shouldFilter={false}
