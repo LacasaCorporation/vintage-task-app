@@ -2,6 +2,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
 import ProductQtyInline from "@/components/ProductQtyInline";
+import ProductQtyStepper from "@/components/ProductQtyStepper";
 import ProductCodeInline from "@/components/ProductCodeInline";
 import ProductTagsInline from "@/components/ProductTagsInline";
 import PriorityChip from "@/components/PriorityChip";
@@ -429,7 +430,6 @@ export function FlaggedItemsList({
                       <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
                         <span className="min-w-0 truncate">{fg.name}</span>
                         <ProductCodeInline code={fg.code} />
-                        <ProductQtyInline qty={fg.qty} unit={fg.unit} />
                         <ProductTagsInline tags={fg.tags} />
                       </span>
                       {fg.note && (
@@ -438,6 +438,13 @@ export function FlaggedItemsList({
                         </span>
                       )}
                     </button>
+                    {/* extra quantity for a product already on this job */}
+                    <ProductQtyStepper
+                      fgId={fg._id}
+                      jobId={job._id}
+                      qty={fg.qty}
+                      unit={fg.unit}
+                    />
                     <DueChips
                       dueAt={fg.dueAt ?? job.dueAt}
                       inherited={fg.dueAt === undefined && job.dueAt !== undefined}

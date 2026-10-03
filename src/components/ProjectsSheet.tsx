@@ -32,6 +32,7 @@ import ActiveToggle from "@/components/ActiveToggle";
 // the same rule the server uses to know which products sit in which job
 import { jobIdsOf } from "@/lib/project-work";
 import ProductCodeInline from "@/components/ProductCodeInline";
+import ProductQtyStepper from "@/components/ProductQtyStepper";
 import ProductTagsInline from "@/components/ProductTagsInline";
 import { batchCost, batchQty, costByProduct } from "@/lib/product-cost";
 import MoneyBracket from "@/components/MoneyBracket";
@@ -1622,6 +1623,14 @@ export default function ProjectsSheet({
                                     </span>
                                     <Sigma className="size-3 shrink-0 text-muted-foreground/40" />
                                   </button>
+                                  {/* extra quantity for a product already
+                                      attached to this job, without unlinking it */}
+                                  <ProductQtyStepper
+                                    fgId={fg._id}
+                                    jobId={job._id}
+                                    qty={fg.qty}
+                                    unit={fg.unit}
+                                  />
                                   <PriorityChip priority={fg.priority} />
                                   <button
                                     type="button"

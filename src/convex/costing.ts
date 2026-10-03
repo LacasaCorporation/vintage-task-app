@@ -1216,6 +1216,70 @@ export const attachToJob = mutation({
   },
 });
 
+/**
+ * Put a product's quantity up or down after it is already on a job.
+ *
+ * `attachToJob` asks for the batch once, at the moment of linking, and
+ * nothing since has been able to change it: a product sitting under a job had
+ * no way to be given more (or fewer) units without unlinking it and linking it
+ * again. This writes the product's own quantity — the figure every total is
+ * built from — and keeps the job's record of what it needs in step, so the two
+ * never disagree.
+ *
+ * Adding a batch the job has not recorded yet creates that record, which is
+ * what a product added straight onto a job (rather than linked to it) needs.
+ */
+async function setProductBatchQty(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+  fg: Doc<"finishedGoods">,
+  qty: number,
+  jobId?: Id<"projectJobs">,
+): Promise<void> {
+  if (!Number.isFinite(qty) || qty <= 0)
+    throw new Error("Enter how many this job needs.");
+  await ctx.db.patch(fg._id, { qty });
+  if (jobId === undefined) return;
+  const rows = await ctx.db
+    .query("jobProducts")
+    .withIndex("by_fg", (q) => q.eq("fgId", fg._id))
+    .collect();
+  const existing = rows.find((r) => r.jobId === jobId);
+  if (existing === undefined) {
+    await ctx.db.insert("jobProducts", {
+      ownerId,
+      jobId,
+      fgId: fg._id,
+      qty,
+      createdAt: Date.now(),
+    });
+  } else {
+    await ctx.db.patch(existing._id, { qty });
+  }
+}
+
+/**
+ * Set a linked product's quantity outright — the "extra quantity after it is
+ * attached to the job" control on a product row.
+ */
+export const setProductQty = mutation({
+  args: {
+    id: v.id("finishedGoods"),
+    qty: v.number(),
+    jobId: v.optional(v.id("projectJobs")),
+  },
+  handler: async (ctx, { id, qty, jobId }): Promise<void> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const fg = await ctx.db.get(id);
+    if (fg === null) throw new Error("That product no longer exists.");
+    if (fg.ownerId !== userId) throw new Error("Not your product.");
+    const locked = lockedReason(fg);
+    if (locked !== null) throw new Error(locked);
+    await setProductBatchQty(ctx, userId, fg, qty, jobId);
+  },
+});
+
 /** Detach a product from one job, keeping any other links. */
 export const detachFromJob = mutation({
   args: { fgId: v.id("finishedGoods"), jobId: v.id("projectJobs") },
