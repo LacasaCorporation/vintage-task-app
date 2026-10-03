@@ -384,26 +384,37 @@ function SalesDocEditor({
     [priceList],
   );
 
-  const pickerItems = useMemo<PickerItem[]>(() => {
-    const priced_ = new Map((priceList ?? []).map((e) => [e.productId, e]));
-    return products.map((p) => {
-      const entry = priced_.get(p._id);
-      return {
-        id: p._id as string,
-        label: p.name,
-        hint: [
-          p.code,
-          p.unit,
-          p.stock !== undefined ? `${p.stock} in stock` : undefined,
-          entry && entry.hasSheet && entry.price > 0
-            ? `${symbol}${entry.price.toFixed(2)} on the sheet`
-            : undefined,
-        ]
-          .filter(Boolean)
-          .join(" · "),
-      };
-    });
-  }, [products, priceList, symbol]);
+  /**
+   * The product's whole identity on one row, the same shape every other
+   * picker in the app uses: the name, then what it is (code · category · how
+   * many are on hand), then what it costs per unit. A sales document is
+   * priced from the product list, so the price has to be readable before the
+   * line exists — not discovered after it is added.
+   */
+  const pickerItems = useMemo<PickerItem[]>(
+    () =>
+      products.map((p) => {
+        const entry = listById.get(p._id);
+        const price =
+          entry && entry.hasSheet && entry.price > 0 ? entry.price : undefined;
+        const unit = p.unit?.trim() || "unit";
+        return {
+          id: p._id as string,
+          label: p.name,
+          sub:
+            [
+              p.code,
+              p.category,
+              `${(p.stock ?? 0).toLocaleString()} ${unit} in stock`,
+            ]
+              .filter((v) => !!v && v !== "")
+              .join(" · ") || undefined,
+          hint: price !== undefined ? `${money(price)}/${unit}` : `per ${unit}`,
+          keywords: p.subCategory ?? "",
+        };
+      }),
+    [products, listById, money],
+  );
 
   const byId = useMemo(
     () => new Map(products.map((p) => [p._id, p])),

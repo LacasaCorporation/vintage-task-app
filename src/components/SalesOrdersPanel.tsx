@@ -139,15 +139,31 @@ function SalesOrderForm({
   const discountAmount = (subtotal * num(discount)) / 100;
   const grandTotal = subtotal - discountAmount + ((subtotal - discountAmount) * num(tax)) / 100;
 
+  /**
+   * The product's whole identity on one row — name, code · category · stock
+   * on hand, and the rate per unit — so an order is priced from the product
+   * list rather than from memory. Quotations and invoices use the same shape.
+   */
   const productOptions = useMemo<PickerItem[]>(
     () =>
-      rows.map((p) => ({
-        id: p._id,
-        label: p.name,
-        sub: [p.code, p.category].filter((v) => !!v && v !== "").join(" · ") || undefined,
-        hint: `${money(priceOf.get(p._id) ?? 0)}/${p.unit ?? "unit"}`,
-        keywords: `${p.stock ?? 0} in stock`,
-      })),
+      rows.map((p) => {
+        const price = priceOf.get(p._id) ?? 0;
+        const unit = p.unit?.trim() || "unit";
+        return {
+          id: p._id,
+          label: p.name,
+          sub:
+            [
+              p.code,
+              p.category,
+              `${(p.stock ?? 0).toLocaleString()} ${unit} in stock`,
+            ]
+              .filter((v) => !!v && v !== "")
+              .join(" · ") || undefined,
+          hint: price > 0 ? `${money(price)}/${unit}` : `per ${unit}`,
+          keywords: p.subCategory ?? "",
+        };
+      }),
     [rows, money, priceOf],
   );
 
