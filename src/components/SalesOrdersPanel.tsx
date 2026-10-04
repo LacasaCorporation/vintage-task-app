@@ -94,6 +94,7 @@ function SalesOrderForm({
   const customers = useQuery(api.contacts.listCustomers);
   const products = useQuery(api.costing.listFinishedGoods);
   const priceList = useQuery(api.sales.priceList);
+  const taxDefault = useQuery(api.sales.postingDefaults);
   const { format: money } = useWorkspaceCurrency();
   const priceOf = useMemo(
     () => new Map((priceList ?? []).map((e) => [e.productId, e.price])),
@@ -117,7 +118,12 @@ function SalesOrderForm({
   const [discount, setDiscount] = useState(
     String(editing?.discountPct ?? seedQuotation?.discountPct ?? 0),
   );
-  const [tax, setTax] = useState(String(editing?.taxPct ?? seedQuotation?.taxPct ?? 0));
+  const [tax, setTax] = useState(() => {
+    const saved = editing?.taxPct ?? seedQuotation?.taxPct;
+    // a brand new order inherits the workspace rate once it arrives; until
+    // then there is nothing to show but an empty field
+    return saved !== undefined ? String(saved) : "";
+  });
   const [lines, setLines] = useState<DraftLine[]>(() => {
     const source = editing?.lines ?? seedQuotation?.lines ?? [];
     return source.length > 0
@@ -132,12 +138,19 @@ function SalesOrderForm({
   const [busy, setBusy] = useState(false);
 
   const rows = useMemo(() => products ?? [], [products]);
+  /**
+   * An empty tax field means "whatever the workspace charges", so the field
+   * shows that rate without having to write it into state. Type 0 over it to
+   * charge nothing on this one document.
+   */
+  const taxValue = tax === "" ? String(taxDefault?.taxPct ?? 0) : tax;
   const subtotal = useMemo(
     () => lines.reduce((sum, l) => sum + num(l.qty) * num(l.price), 0),
     [lines],
   );
   const discountAmount = (subtotal * num(discount)) / 100;
-  const grandTotal = subtotal - discountAmount + ((subtotal - discountAmount) * num(tax)) / 100;
+  const grandTotal =
+    subtotal - discountAmount + ((subtotal - discountAmount) * num(taxValue)) / 100;
 
   /**
    * The product's whole identity on one row — name, code · category · stock
@@ -180,7 +193,7 @@ function SalesOrderForm({
     setNote("");
     setPoRef("");
     setDiscount("0");
-    setTax("0");
+    setTax("");
     setLines([emptyLine()]);
     setSend(false);
   };
@@ -206,7 +219,7 @@ function SalesOrderForm({
         note: note.trim() || undefined,
         poRef: poRef.trim() || undefined,
         discountPct: num(discount) || undefined,
-        taxPct: num(tax) || undefined,
+        taxPct: num(taxValue) || undefined,
         lines: clean.map((l) => ({
           productId: l.productId as Id<"finishedGoods">,
           qty: num(l.qty),
@@ -487,15 +500,24 @@ function SalesOrderForm({
                 type="number"
                 min={0}
                 step="any"
-                value={tax}
+                value={taxValue}
+                placeholder="0"
                 onChange={(e) => setTax(e.target.value)}
                 aria-label="Tax percent"
                 className="h-7 w-16 rounded-md text-right text-xs tabular-nums"
               />
               %
+              {tax === "" && num(taxValue) > 0 && (
+                <span
+                  title="From Settings → Accounting"
+                  className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                >
+                  default
+                </span>
+              )}
             </span>
             <span className="tabular-nums">
-              + {money(((subtotal - discountAmount) * num(tax)) / 100)}
+              + {money(((subtotal - discountAmount) * num(taxValue)) / 100)}
             </span>
           </div>
           <div className="flex items-center justify-between gap-6 border-t border-border pt-2 text-base font-semibold">

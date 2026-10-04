@@ -88,6 +88,9 @@ const FIELDS = [
 
 type FieldKey = (typeof FIELDS)[number]["key"];
 
+/** The slabs most firms charge, offered so nobody types 18 for the nth time. */
+const TAX_PRESETS = [0, 5, 12, 18, 28] as const;
+
 const TYPE_CHIP: Record<string, string> = {
   asset: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
   liability: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
@@ -595,9 +598,9 @@ export default function AccountingSettingsPage({ canEdit }: { canEdit: boolean }
               Default tax rate
             </p>
             <p className="mt-0.5 text-[11px] text-muted-foreground/80">
-              Offered on every new bill and invoice. Each document can still be
-              set differently, and the rate it was saved with is the one that
-              posts.
+              Filled in on every new bill, invoice, quotation and sales order.
+              A document can still be changed to any other rate, and the rate
+              it is saved with is the one that posts.
             </p>
           </div>
           <div className="flex items-center gap-1.5">
@@ -606,6 +609,7 @@ export default function AccountingSettingsPage({ canEdit }: { canEdit: boolean }
               min="0"
               step="any"
               value={taxPct}
+              placeholder="0"
               disabled={!canEdit}
               onChange={(e) => {
                 setTaxPct(e.target.value);
@@ -615,6 +619,30 @@ export default function AccountingSettingsPage({ canEdit }: { canEdit: boolean }
               className="h-8 w-20 rounded-lg text-right text-xs tabular-nums"
             />
             <span className="text-xs text-muted-foreground">%</span>
+          </div>
+          {/* the slabs most firms actually charge, one tap away */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {TAX_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                disabled={!canEdit}
+                onClick={() => {
+                  setTaxPct(String(preset));
+                  setDirty(true);
+                }}
+                aria-label={`Use ${preset}% as the default tax rate`}
+                className={cn(
+                  "rounded-lg border px-2 py-1 text-[11px] font-medium tabular-nums transition-colors",
+                  "hover:border-primary/50 hover:bg-primary/10 disabled:opacity-50",
+                  Number(taxPct) === preset
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : "text-muted-foreground",
+                )}
+              >
+                {preset}%
+              </button>
+            ))}
           </div>
         </div>
       </div>

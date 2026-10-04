@@ -75,6 +75,7 @@ export default function BillsPanel({
 }) {
   const bills = useQuery(api.purchases.list);
   const lpos = useQuery(api.lpo.list);
+  const taxDefault = useQuery(api.purchases.postingDefaults);
   const { confirm } = useAppDialogs();
   const { format: money } = useWorkspaceCurrency();
   const createBill = useMutation(api.purchases.create);
@@ -108,7 +109,8 @@ export default function BillsPanel({
   const [purchasedOn, setPurchasedOn] = useState(todayInput);
   const [note, setNote] = useState(seedLpo?.note ?? "");
   const [discount, setDiscount] = useState("0");
-  const [tax, setTax] = useState("0");
+  // empty means "whatever the workspace charges", so a new bill inherits it
+  const [tax, setTax] = useState("");
   const [lines, setLines] = useState<DraftLine[]>(() =>
     seedLpo !== null && seedLpo.lines.length > 0
       ? seedLpo.lines.map((line) => ({
@@ -144,7 +146,8 @@ export default function BillsPanel({
   );
   const discountAmount = (subtotal * num(discount)) / 100;
   const taxable = subtotal - discountAmount;
-  const taxAmount = (taxable * num(tax)) / 100;
+  const taxValue = tax === "" ? String(taxDefault?.taxPct ?? 0) : tax;
+  const taxAmount = (taxable * num(taxValue)) / 100;
   const grandTotal = taxable + taxAmount;
 
   const updateLine = (index: number, patch: Partial<DraftLine>) =>
@@ -161,7 +164,7 @@ export default function BillsPanel({
     setPurchasedOn(todayInput());
     setNote("");
     setDiscount("0");
-    setTax("0");
+    setTax("");
     setLines([emptyLine()]);
   };
 
@@ -179,7 +182,8 @@ export default function BillsPanel({
     setPurchasedOn(toLocalInput(new Date(bill.purchasedAt)));
     setNote(bill.note ?? "");
     setDiscount(String(bill.discountPct ?? 0));
-    setTax(String(bill.taxPct ?? 0));
+    // a bill saved before the default existed inherits it rather than 0
+    setTax(bill.taxPct !== undefined ? String(bill.taxPct) : "");
     setLines(
       bill.lines.length > 0
         ? bill.lines.map((line) => ({
@@ -209,7 +213,7 @@ export default function BillsPanel({
         purchasedAt: purchasedOn ? new Date(purchasedOn).getTime() : undefined,
         note: note.trim() || undefined,
         discountPct: num(discount) || undefined,
-        taxPct: num(tax) || undefined,
+        taxPct: num(taxValue) || undefined,
         lpoId: fromLpoId ?? undefined,
         lines: valid.map((l) => ({
           materialId: l.materialId as Id<"rawMaterials">,
@@ -533,13 +537,22 @@ export default function BillsPanel({
                   type="number"
                   min={0}
                   step="any"
-                  value={tax}
+                  value={taxValue}
+                  placeholder="0"
                   disabled={!canCreate}
                   onChange={(e) => setTax(e.target.value)}
                   aria-label="Tax percent"
                   className="h-7 w-16 rounded-md text-right text-xs tabular-nums"
                 />
                 %
+                {tax === "" && num(taxValue) > 0 && (
+                  <span
+                    title="From Settings → Accounting"
+                    className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                  >
+                    default
+                  </span>
+                )}
               </span>
               <span className="tabular-nums">+ {money(taxAmount)}</span>
             </div>

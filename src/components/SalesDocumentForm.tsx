@@ -307,9 +307,11 @@ function SalesDocEditor({
       : "0",
   );
   const [tax, setTax] = useState(() =>
+    // a document with no saved rate inherits the workspace default rather
+    // than starting from a hard zero
     seed && "taxPct" in seed && seed.taxPct !== undefined
       ? String(seed.taxPct)
-      : "0",
+      : "",
   );
   const [lines, setLines] = useState<DraftLine[]>(() =>
     seed && "lines" in seed && seed.lines.length > 0
