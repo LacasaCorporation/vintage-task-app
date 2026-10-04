@@ -1025,6 +1025,13 @@ const schema = defineSchema(
       /** Finished units on hand, ready to sell. */
       stock: v.optional(v.number()),
       /**
+       * Stock control, exactly as a raw material carries it: `minStock` is the
+       * floor below which the product counts as short, `reorderLevel` is the
+       * quantity worth making again. Advisory — neither blocks a sale.
+       */
+      minStock: v.optional(v.number()),
+      reorderLevel: v.optional(v.number()),
+      /**
        * Units already on hand before any production or invoice was recorded —
        * set from the Opening balance tab and kept as the authoritative figure.
        */

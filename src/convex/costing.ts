@@ -924,6 +924,21 @@ export const listFinishedGoods = query({
 
 /** Create an FG product. projectName is optional — standalone products have
  *  no project; jobs can be attached later. */
+/**
+ * One product, for the form that creates and edits it on a page of its own.
+ * Scoped like every other read, so another workspace's id does not resolve.
+ */
+export const getFinishedGood = query({
+  args: { id: v.id("finishedGoods") },
+  handler: async (ctx, { id }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return null;
+    const fg = await ctx.db.get(id);
+    if (fg === null || fg.ownerId !== userId) return null;
+    return fg;
+  },
+});
+
 export const addFinishedGood = mutation({
   args: {
     projectName: v.optional(v.string()),
@@ -938,6 +953,10 @@ export const addFinishedGood = mutation({
     note: v.optional(v.string()),
     currency: v.optional(v.string()),
     markupPct: v.optional(v.number()),
+    /** Standard master fields, the same a raw material carries. */
+    salesTaxPct: v.optional(v.number()),
+    minStock: v.optional(v.number()),
+    reorderLevel: v.optional(v.number()),
   },
   handler: async (ctx, opts) => {
     const userId = await scopeUserId(ctx);
@@ -1007,6 +1026,10 @@ export const addFinishedGood = mutation({
         opts.currency?.trim().slice(0, 4) ||
         currencySymbol((await getSettings(ctx, userId))?.currency),
       markupPct: opts.markupPct ?? 0,
+      // validated the same way a material's are, so a bad figure never lands
+      salesTaxPct: ratePct(opts.salesTaxPct),
+      minStock: nonNegative(opts.minStock),
+      reorderLevel: nonNegative(opts.reorderLevel),
     });
   },
 });
@@ -1028,6 +1051,9 @@ export const updateFinishedGood = mutation({
     note: v.optional(v.string()),
     currency: v.optional(v.string()),
     markupPct: v.optional(v.number()),
+    salesTaxPct: v.optional(v.number()),
+    minStock: v.optional(v.number()),
+    reorderLevel: v.optional(v.number()),
     dueAt: v.optional(v.number()), // per-product due date (flagged board)
     priority: v.optional(
       v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
@@ -1104,6 +1130,11 @@ export const updateFinishedGood = mutation({
     if (patch.note !== undefined) patch.note = patch.note.trim() || undefined;
     if (patch.markupPct !== undefined && patch.markupPct < 0)
       throw new Error("Markup can't be negative.");
+    if (patch.salesTaxPct !== undefined)
+      patch.salesTaxPct = ratePct(patch.salesTaxPct);
+    if (patch.minStock !== undefined) patch.minStock = nonNegative(patch.minStock);
+    if (patch.reorderLevel !== undefined)
+      patch.reorderLevel = nonNegative(patch.reorderLevel);
     if (patch.currency !== undefined)
       patch.currency =
         patch.currency.trim().slice(0, 4) ||

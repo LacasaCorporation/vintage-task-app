@@ -486,6 +486,7 @@ export default function Dashboard() {
     const asked = new URLSearchParams(window.location.search).get("view");
     if (asked === "sales") return { kind: "sales", tab: "dashboard" };
     if (asked === "materials") return { kind: "materials" };
+    if (asked === "products") return { kind: "products" };
     return { kind: "projects" };
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

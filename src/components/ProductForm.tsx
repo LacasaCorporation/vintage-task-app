@@ -1,16 +1,6 @@
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   ChevronDown,
   Download,
@@ -23,7 +13,7 @@ import {
   Sigma,
   Trash2,
 } from "lucide-react";
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState } from "react";
 import StockMovementList from "@/components/StockMovementList";
 import ProductLedgerDialog from "@/components/ProductLedgerDialog";
 import ActiveToggle from "@/components/ActiveToggle";
@@ -53,6 +43,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useNavigate } from "react-router";
 
 type FgDoc = Doc<"finishedGoods">;
 
@@ -100,53 +91,6 @@ function keepsProduction(fg: FgDoc, filter: ProductionFilter): boolean {
   }
 }
 
-const inputCls =
-  "h-9 w-full rounded-lg border bg-card px-2.5 text-sm outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30";
-
-const selectCls =
-  "h-9 w-full rounded-lg border bg-card px-2 text-sm outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50";
-
-/** Sentinel option value meaning “create a project while adding this product”. */
-const NEW_PROJECT = "__new_project__";
-
-/** Label + control + optional hint, used by the new-product popup. */
-function Field({
-  label,
-  hint,
-  required,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  required?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <label className="block space-y-1.5">
-      <span className="flex items-center gap-1 text-xs font-medium text-foreground">
-        {label}
-        {required && <span className="text-destructive">*</span>}
-      </span>
-      {children}
-      {hint && (
-        <span className="block text-[10px] text-muted-foreground/70">{hint}</span>
-      )}
-    </label>
-  );
-}
-
-/** Section heading inside the popup. */
-function Group({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-2.5">
-      <h3 className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-        {title}
-      </h3>
-      {children}
-    </section>
-  );
-}
-
 /** Products page: add-product form + Excel-style listing of FG products with costs. */
 export default function ProductForm({
   finishedGoods,
@@ -162,6 +106,7 @@ export default function ProductForm({
   activeFgId: Id<"finishedGoods"> | null;
   initialProject?: string | null;
 }) {
+  const navigate = useNavigate();
   const removeFg = useMutation(api.costing.removeFinishedGood);
   const { confirm } = useAppDialogs();
   const canDoItem = useItemPermission();
@@ -188,39 +133,14 @@ export default function ProductForm({
       );
     }
   };
-  const addFg = useMutation(api.costing.addFinishedGood);
-  const addProjectM = useMutation(api.costing.addProject);
-  const { format: money, code: currencyCode, symbol } = useWorkspaceCurrency();
+  const { format: money, code: currencyCode } = useWorkspaceCurrency();
 
   // managed master data for dropdowns
-  const masterUnits = useQuery(api.costing.listUnits);
-  const masterCategories = useQuery(api.costing.listCategories);
-  const projectDocs = useQuery(api.costing.listProjects);
-  const units = masterUnits ?? [];
-  const parentCategories = (masterCategories ?? []).filter((c) => c.parentId === undefined);
-  const allCategories = masterCategories ?? [];
-  const subsOf = (name: string) => {
-    const parent = parentCategories.find((c) => c.name === name);
-    if (!parent) return [];
-    return allCategories.filter((c) => c.parentId === parent._id);
-  };
   const [project, setProject] = useState("");
-  const [jobId, setJobId] = useState<string>("");
-  const [newProjectName, setNewProjectName] = useState("");
-  const [name, setName] = useState("");
-  const [code, setCode] = useState("");
-  const [unit, setUnit] = useState("");
-  const [qty, setQty] = useState("");
-  const [category, setCategory] = useState("");
-  const [subCategory, setSubCategory] = useState("");
-  const [note, setNote] = useState("");
-  const [markup, setMarkup] = useState("0");
-  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [productionFilter, setProductionFilter] = useState<ProductionFilter>("all");
   /** Reveal the products whose Active mark has been taken off. */
   const [showInactive, setShowInactive] = useState(false);
-  const [showForm, setShowForm] = useState(false);
   /** The product whose transactions are open, if any. */
   const [openStock, setOpenStock] = useState<Id<"finishedGoods"> | null>(null);
   /** The product whose full ledger is open over the list, if any. */
@@ -251,20 +171,10 @@ export default function ProductForm({
     [allItems],
   );
 
-  // every project that exists as a record, plus names still only on products
-  const projects = useMemo(() => {
-    const names = new Set<string>();
-    for (const p of projectDocs ?? []) names.add(p.name);
-    for (const f of finishedGoods) {
-      if (f.projectName !== undefined) names.add(f.projectName);
-    }
-    return Array.from(names).sort((a, b) => a.localeCompare(b));
-  }, [projectDocs, finishedGoods]);
-
-  // jobs under the currently selected project (for the job dropdown)
-  const allJobs = useQuery(api.jobs.listJobs);
   /** What still depends on each product — recipes, invoices, jobs and stock. */
   const usageData = useQuery(api.usage.masterUsage);
+  /** Every job, for the connect-to-a-job dialog. */
+  const allJobs = useQuery(api.jobs.listJobs);
   const productUsage = useMemo(
     () => new Map((usageData?.products ?? []).map((u) => [u.id, u] as const)),
     [usageData],
@@ -274,17 +184,6 @@ export default function ProductForm({
   const [linkTarget, setLinkTarget] = useState<FgDoc | null>(null);
   /** The product whose details dialog is open, if any. */
   const [editTarget, setEditTarget] = useState<FgDoc | null>(null);
-  const selectedProjectId = useMemo(
-    () => (projectDocs ?? []).find((p) => p.name === project)?._id,
-    [projectDocs, project],
-  );
-  const projectJobs = useMemo(
-    () =>
-      selectedProjectId === undefined
-        ? []
-        : (allJobs ?? []).filter((j) => j.projectId === selectedProjectId),
-    [allJobs, selectedProjectId],
-  );
 
   const inactiveCount = useMemo(
     () => finishedGoods.filter((f) => f.isActive !== true).length,
@@ -310,66 +209,6 @@ export default function ProductForm({
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [finishedGoods, search, productionFilter, showInactive]);
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const isNewProject = project === NEW_PROJECT;
-    const cleanProject = (isNewProject ? newProjectName : project).trim();
-    const cleanName = name.trim();
-    if (isNewProject && !cleanProject) {
-      toast.error("Name the new project.");
-      return;
-    }
-    if (!cleanName) {
-      toast.error("Give the product a name.");
-      return;
-    }
-    const markupNum = Number(markup) || 0;
-    if (markupNum < 0) {
-      toast.error("Markup can't be negative.");
-      return;
-    }
-    setSaving(true);
-    try {
-      if (isNewProject) {
-        // keep the Projects tab in sync — best effort, the product matters more
-        try {
-          await addProjectM({ name: cleanProject });
-        } catch {
-          /* ignore: the product can still be created under this project name */
-        }
-      }
-      const id = await addFg({
-        projectName: cleanProject || undefined,
-        jobId: jobId !== "" ? (jobId as Id<"projectJobs">) : undefined,
-        name: cleanName,
-        code: code.trim() || undefined,
-        qty: Number.isFinite(Number(qty)) && Number(qty) > 0 ? Number(qty) : undefined,
-        unit: unit.trim() || undefined,
-        category: category.trim() || undefined,
-        subCategory: subCategory.trim() || undefined,
-        note: note.trim() || undefined,
-        currency: symbol,
-        markupPct: markupNum,
-      });
-      toast.success(`“${cleanName}” created — open it to add materials.`);
-      onSelectFg(id);
-      setName("");
-      setCode("");
-      setCategory("");
-      setSubCategory("");
-      setNote("");
-      setMarkup("0");
-      setProject(cleanProject);
-      setJobId("");
-      setNewProjectName("");
-      setShowForm(false);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't create the product.");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleDelete = async (fg: FgDoc) => {
     // production holds raw materials out of stock, so it must be stopped
@@ -474,274 +313,6 @@ export default function ProductForm({
   return (
     <div>
 
-      {/* new-product popup — the master-data manager lives INSIDE it, never
-          nested in a <form> (nested forms are invalid HTML and would make its
-          Add buttons submit the product form instead) */}
-      <Dialog open={showForm} onOpenChange={(open) => !open && setShowForm(false)}>
-        <DialogContent className="max-h-[92vh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
-          <DialogHeader className="border-b border-border/60 px-5 py-4">
-            <DialogTitle className="flex items-center gap-2.5 text-base">
-              <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                <Package className="size-4" />
-              </span>
-              New product (FG)
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Products are standalone — no project or job needed to start. Code
-              is auto-assigned; cost and sales price come from the BOM sheet.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
-            <form id="new-product-form" onSubmit={handleCreate} className="space-y-5">
-                <Group title="Product">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field
-                      label="Project"
-                      hint="Optional — leave empty for a standalone product; attach to a project later"
-                    >
-                      <select
-                        value={project}
-                        onChange={(e) => {
-                          setProject(e.target.value);
-                          setJobId(""); // job list depends on the project
-                          if (e.target.value !== NEW_PROJECT) setNewProjectName("");
-                        }}
-                        aria-label="Project"
-                        className={selectCls}
-                      >
-                        <option value="">Standalone (no project)</option>
-                        {projects.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                        <option value={NEW_PROJECT}>＋ New project…</option>
-                      </select>
-                    </Field>
-                    <Field
-                      label="Job / task"
-                      hint="Optional — pick a project first to choose a job"
-                    >
-                      <select
-                        value={jobId}
-                        onChange={(e) => setJobId(e.target.value)}
-                        aria-label="Job"
-                        disabled={
-                          project === "" ||
-                          project === NEW_PROJECT ||
-                          projectJobs.length === 0
-                        }
-                        className={selectCls}
-                      >
-                        <option value="">No specific job</option>
-                        {projectJobs.map((j) => (
-                          <option key={j._id} value={j._id}>
-                            {j.name}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Product name" required>
-                      <Input
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="e.g. Wooden chair"
-                        aria-label="Product name"
-                        className={inputCls}
-                      />
-                    </Field>
-                    <Field label="Product code" hint="Leave blank to auto-assign FG0001, FG0002…">
-                      <Input
-                        value={code}
-                        onChange={(e) => setCode(e.target.value)}
-                        placeholder="Auto (FG0001)"
-                        aria-label="Product code"
-                        className={inputCls}
-                      />
-                    </Field>
-                    <Field label="Sold per (unit)" hint="Used on quotes and costing sheets">
-                      <select
-                        value={unit}
-                        onChange={(e) => setUnit(e.target.value)}
-                        aria-label="Sold per unit"
-                        className={selectCls}
-                      >
-                        <option value="">Not set</option>
-                        {units.map((u) => (
-                          <option key={u._id} value={u.name}>
-                            {u.name}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field label="Qty" hint="Shown next to the name in every product row">
-                      <Input
-                        type="number"
-                        min={0}
-                        step="any"
-                        value={qty}
-                        onChange={(e) => setQty(e.target.value)}
-                        placeholder="e.g. 12"
-                        aria-label="Product quantity"
-                        className={inputCls}
-                      />
-                    </Field>
-                  </div>
-                  {project === NEW_PROJECT && (
-                    <div className="sm:col-span-2">
-                      <Field
-                        label="New project name"
-                        required
-                        hint="A project record is created with its own PR code, and this product goes inside it."
-                      >
-                        <Input
-                          autoFocus
-                          value={newProjectName}
-                          onChange={(e) => setNewProjectName(e.target.value)}
-                          placeholder="e.g. Office renovation"
-                          aria-label="New project name"
-                          className={inputCls}
-                        />
-                      </Field>
-                    </div>
-                  )}
-                </Group>
-
-                <Group title="Classification">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Category">
-                      <select
-                        value={category}
-                        onChange={(e) => {
-                          setCategory(e.target.value);
-                          setSubCategory("");
-                        }}
-                        aria-label="Category"
-                        className={selectCls}
-                      >
-                        <option value="">Not set</option>
-                        {parentCategories.map((c) => (
-                          <option key={c._id} value={c.name}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Field
-                      label="Sub-category"
-                      hint={
-                        !category
-                          ? "Pick a category first"
-                          : subsOf(category).length === 0
-                            ? "No sub-categories for this category yet"
-                            : undefined
-                      }
-                    >
-                      <select
-                        value={subCategory}
-                        onChange={(e) => setSubCategory(e.target.value)}
-                        aria-label="Sub-category"
-                        disabled={!category || subsOf(category).length === 0}
-                        className={selectCls}
-                      >
-                        <option value="">Not set</option>
-                        {subsOf(category).map((c) => (
-                          <option key={c._id} value={c.name}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  </div>
-                </Group>
-
-                <Group title="Pricing">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Currency" hint="From Settings → Organisation">
-                      <p className="flex h-9 items-center gap-2 rounded-md border border-dashed bg-muted/30 px-2.5 text-sm">
-                        <span className="font-medium">{currencyCode}</span>
-                        <span className="text-muted-foreground">{symbol}</span>
-                      </p>
-                    </Field>
-                    <Field
-                      label="Margin %"
-                      hint="Sales price = Cost × (1 + Margin %)"
-                    >
-                      <Input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={markup}
-                        onChange={(e) => setMarkup(e.target.value)}
-                        placeholder="0"
-                        aria-label="Margin percent"
-                        className={inputCls}
-                      />
-                    </Field>
-                  </div>
-                  <div className="grid gap-3 rounded-xl border border-dashed bg-muted/30 p-3 sm:grid-cols-2">
-                    <div>
-                      <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
-                        Cost — calculated
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Total of the product's costing lines. Edit them on the
-                        product's costing sheet.
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
-                        Sales price — calculated
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Cost plus the margin above. Both stay in sync with the
-                        costing sheet.
-                      </p>
-                    </div>
-                  </div>
-                </Group>
-
-                <Group title="Notes">
-                  <Textarea
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    rows={2}
-                    placeholder="Finish, dimensions, anything the costing sheet should mention…"
-                    aria-label="Product note"
-                    className="min-h-16 resize-y rounded-lg text-sm"
-                  />
-                </Group>
-            </form>
-          </div>
-
-          <DialogFooter className="border-t border-border/60 px-5 py-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="rounded-lg"
-              onClick={() => setShowForm(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              form="new-product-form"
-              size="sm"
-              className="rounded-lg"
-              disabled={saving}
-            >
-              {saving ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Plus className="size-3.5" />
-              )}
-              Create product
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* listing sheet — matches the raw-materials sheet */}
       <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
@@ -751,8 +322,14 @@ export default function ProductForm({
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => setShowForm(true)}
-              title="New product — name, code, unit, margin. Project is optional."
+              onClick={() =>
+                navigate(
+                  project.trim() === ""
+                    ? "/products/new"
+                    : `/products/new?project=${encodeURIComponent(project.trim())}`,
+                )
+              }
+              title="New product — identity, classification, batch, margin, stock levels and tax"
               className="h-7 shrink-0 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs font-medium text-primary transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-primary"
             >
               <Plus className="size-3.5" />

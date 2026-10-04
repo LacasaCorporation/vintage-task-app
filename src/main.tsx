@@ -49,6 +49,7 @@ const SalesDocumentPage = lazyRoute(
   () => import("./pages/SalesDocumentPage.tsx"),
 );
 const MaterialPage = lazyRoute(() => import("./pages/MaterialPage.tsx"));
+const ProductPage = lazyRoute(() => import("./pages/ProductPage.tsx"));
 const NotFound = lazyRoute(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -190,6 +191,14 @@ createRoot(document.getElementById("root")!).render(
                   element={
                     <RequireAuth>
                       <SalesDocumentPage />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/products/:id?"
+                  element={
+                    <RequireAuth>
+                      <ProductPage />
                     </RequireAuth>
                   }
                 />
