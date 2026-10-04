@@ -67,6 +67,8 @@ export type BillSeed =
       address?: string;
     }
   | { mode: "fromLpo"; lpo: LpoDoc }
+  /** Raised from a delivery, whose goods are already in stock. */
+  | { mode: "fromGrv"; grv: Doc<"grvs"> }
   | { mode: "view"; billId: Id<"purchases"> };
 
 /**
@@ -112,8 +114,15 @@ export default function BillsPanel({
     seed !== null && seed.mode === "fromLpo" ? seed.lpo._id : null,
   );
   const seedLpo = seed !== null && seed.mode === "fromLpo" ? seed.lpo : null;
-  /** A voucher the bill is being raised from, when it came from one. */
-  const [fromGrvId, setFromGrvId] = useState<Id<"grvs"> | null>(null);
+  const seedGrv = seed !== null && seed.mode === "fromGrv" ? seed.grv : null;
+  /**
+   * A voucher the bill is being raised from, when it came from one. A seed
+   * that names a voucher opens with it already chosen, so the form starts
+   * filled in rather than being filled in after the fact.
+   */
+  const [fromGrvId, setFromGrvId] = useState<Id<"grvs"> | null>(
+    seedGrv !== null ? seedGrv._id : null,
+  );
 
   const materialOf = (id: Id<"rawMaterials"> | "") => materials.find((m) => m._id === id);
 
@@ -205,34 +214,44 @@ export default function BillsPanel({
   };
 
   const [supplierId, setSupplierId] = useState<Id<"vendors"> | undefined>(
-    seed !== null && seed.mode === "new" ? seed.supplierId : undefined,
+    seed !== null && seed.mode === "new"
+      ? seed.supplierId
+      : (seedLpo?.vendorId ?? seedGrv?.vendorId),
   );
   const [supplier, setSupplier] = useState(
-    seed === null || seed.mode !== "new" ? (seedLpo?.vendor ?? "") : (seed.supplier ?? ""),
+    seed === null || seed.mode !== "new"
+      ? (seedLpo?.vendor ?? seedGrv?.vendor ?? "")
+      : (seed.supplier ?? ""),
   );
   const [supplierAddress, setSupplierAddress] = useState(
-    seed !== null && seed.mode === "new" ? (seed.address ?? "") : "",
+    seed !== null && seed.mode === "new"
+      ? (seed.address ?? "")
+      : (seedLpo?.supplierAddress ?? seedGrv?.supplierAddress ?? ""),
   );
   const [purchasedOn, setPurchasedOn] = useState(todayInput);
-  const [note, setNote] = useState(seedLpo?.note ?? "");
-  const [discount, setDiscount] = useState("0");
+  const [note, setNote] = useState(seedLpo?.note ?? seedGrv?.note ?? "");
+  const [discount, setDiscount] = useState(
+    String(seedLpo?.discountPct ?? seedGrv?.discountPct ?? 0),
+  );
   /**
    * The rate the bill being edited was raised at. Its lines that carry no
    * rate of their own fall back to this rather than to today's workspace
    * default — otherwise opening an old bill would silently re-tax it.
    */
   const [editFallbackRate, setEditFallbackRate] = useState<number | null>(null);
-  const [lines, setLines] = useState<DraftLine[]>(() =>
-    seedLpo !== null && seedLpo.lines.length > 0
-      ? seedLpo.lines.map((line) => ({
+  const [lines, setLines] = useState<DraftLine[]>(() => {
+    // an order and a voucher both carry a rate on each line, so whichever
+    // seeded this arrives with the rates it was raised at
+    const from = seedLpo?.lines ?? seedGrv?.lines ?? null;
+    return from !== null && from.length > 0
+      ? from.map((line) => ({
           materialId: line.materialId,
           qty: String(line.qty),
           rate: String(line.unitCost),
-          // an order carries no rate of its own; the material's is offered
-          tax: "",
+          tax: line.taxPct !== undefined ? String(line.taxPct) : "",
         }))
-      : [emptyLine()],
-  );
+      : [emptyLine()];
+  });
   const [busy, setBusy] = useState(false);
   const [repairingBills, setRepairingBills] = useState(false);
 
@@ -283,31 +302,35 @@ export default function BillsPanel({
    * bill would leave it. The server refuses the same thing, so this only
    * decides whether to ask first or to send the override.
    */
-  const credit = useMemo(() => {
-    if (supplierId === undefined) return null;
-    const vendor = (vendors ?? []).find((v) => v._id === supplierId);
-    if (vendor === undefined || vendor.creditLimit === undefined) return null;
-    const owed = (bills ?? [])
-      .filter((b) => b.supplierId === supplierId && b.isPaid !== true)
-      .reduce((sum, b) => sum + b.total, 0);
-    const editingBill =
-      editingId !== null ? (bills ?? []).find((b) => b._id === editingId) : undefined;
-    return {
-      vendor,
-      owed,
-      limit: vendor.creditLimit,
-      // editing a bill already counted in `owed` must not count it twice
-      projected:
-        owed -
-        (editingBill !== undefined &&
-        editingBill.isPaid !== true &&
-        editingBill.supplierId === supplierId
-          ? editingBill.total
-          : 0) +
-        grandTotal,
-    };
-  }, [supplierId, vendors, bills, grandTotal, editingId]);
-
+  const creditVendor =
+    supplierId === undefined
+      ? undefined
+      : (vendors ?? []).find((v) => v._id === supplierId);
+  const creditOwed =
+    creditVendor?.creditLimit === undefined
+      ? 0
+      : (bills ?? [])
+          .filter((b) => b.supplierId === supplierId && b.isPaid !== true)
+          .reduce((sum, b) => sum + b.total, 0);
+  const creditEditingBill =
+    editingId !== null ? (bills ?? []).find((b) => b._id === editingId) : undefined;
+  const credit =
+    creditVendor?.creditLimit === undefined || creditVendor === undefined
+      ? null
+      : {
+          vendor: creditVendor,
+          owed: creditOwed,
+          limit: creditVendor.creditLimit,
+          // editing a bill already counted in `owed` must not count it twice
+          projected:
+            creditOwed -
+            (creditEditingBill !== undefined &&
+            creditEditingBill.isPaid !== true &&
+            creditEditingBill.supplierId === supplierId
+              ? creditEditingBill.total
+              : 0) +
+            grandTotal,
+        };
   const updateLine = (index: number, patch: Partial<DraftLine>) =>
     setLines((current) =>
       current.map((line, i) => (i === index ? { ...line, ...patch } : line)),
@@ -1177,7 +1200,10 @@ export default function BillsPanel({
                     <td className="px-3 py-2.5 text-right font-medium tabular-nums">
                       {money(bill.total)}
                     </td>
-                    <td className="px-3 py-2.5 text-center">
+                    <td
+                      className="px-3 py-2.5 text-center"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <Checkbox
                         checked={bill.isPaid ?? false}
                         disabled={!canEdit}

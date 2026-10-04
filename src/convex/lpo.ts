@@ -4,7 +4,8 @@ import { stockIn } from "./stock";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { cleanRate, priceTaxedLines } from "../lib/line-tax";
+import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
+import { nextGrvNumber } from "./grv";
 
 /**
  * A discount percentage, clamped the way the pricing helper clamps it, so what
@@ -108,6 +109,7 @@ export const create = mutation({
     orderedAt: v.optional(v.number()),
     expectedAt: v.optional(v.number()),
     status: v.optional(v.union(v.literal("draft"), v.literal("ordered"))),
+    supplierAddress: v.optional(v.string()),
     note: v.optional(v.string()),
     discountPct: v.optional(v.number()),
     lines: lineValidator,
@@ -124,12 +126,21 @@ export const create = mutation({
       number: await nextNumber(ctx, userId),
       vendorId: args.vendorId,
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
-      orderedAt: args.orderedAt ?? Date.now(),
+      // a blank date box must not store NaN, which the register would show as
+// "Invalid Date"
+      orderedAt:
+        args.orderedAt !== undefined && Number.isFinite(args.orderedAt)
+          ? args.orderedAt
+          : Date.now(),
       expectedAt: args.expectedAt,
       status: args.status ?? "draft",
+      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
       discountPct: cleanDiscount(args.discountPct) || undefined,
       lines,
+      // the blended rate is stored beside the money so the ledger never has to
+      // re-derive it from a single percentage the lines do not agree on
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
       total: priced.grand,
       taxAmount: priced.tax,
     });
@@ -144,6 +155,7 @@ export const update = mutation({
     vendor: v.optional(v.string()),
     orderedAt: v.optional(v.number()),
     expectedAt: v.optional(v.number()),
+    supplierAddress: v.optional(v.string()),
     note: v.optional(v.string()),
     discountPct: v.optional(v.number()),
     lines: lineValidator,
@@ -163,11 +175,16 @@ export const update = mutation({
     await ctx.db.patch(args.id, {
       vendorId: args.vendorId,
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
-      orderedAt: args.orderedAt ?? lpo.orderedAt,
+      orderedAt:
+        args.orderedAt !== undefined && Number.isFinite(args.orderedAt)
+          ? args.orderedAt
+          : lpo.orderedAt,
       expectedAt: args.expectedAt,
+      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
       discountPct: cleanDiscount(args.discountPct) || undefined,
       lines,
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
       total: priced.grand,
       taxAmount: priced.tax,
     });
@@ -206,8 +223,9 @@ export const setStatus = mutation({
 });
 
 /**
- * The goods arrived: every line goes into stock as a purchase movement, so
- * the raw-material ledger shows the delivery and the balance follows. The
+ * The goods arrived without a bill yet. Receiving writes a goods-received
+ * voucher for the order's own lines and counts that voucher into stock, so the
+ * delivery is on the paperwork and in the ledger from one action — and the
  * order cannot be received twice.
  */
 export const receive = mutation({
@@ -229,7 +247,32 @@ export const receive = mutation({
     if (lpo.billId !== undefined) {
       throw new Error("This order has already been billed — its stock is in.");
     }
+    // a voucher was already raised for it, so the goods are in; never stock the
+    // same order in twice
+    if (lpo.grvId !== undefined) {
+      throw new Error("A goods-received voucher already covers this order.");
+    }
     const at = Date.now();
+    // the voucher is written first and owns the movement, exactly as if it had
+    // been entered by hand and counted in
+    const number = await nextGrvNumber(ctx, userId);
+    const grvId = await ctx.db.insert("grvs", {
+      ownerId: userId,
+      number,
+      vendorId: lpo.vendorId,
+      vendor: lpo.vendor,
+      supplierAddress: lpo.supplierAddress,
+      receivedAt: at,
+      lpoId: id,
+      note: lpo.note,
+      discountPct: lpo.discountPct,
+      lines: lpo.lines,
+      taxPct: lpo.taxPct,
+      total: lpo.total,
+      taxAmount: lpo.taxAmount,
+      status: "received",
+      receivedInto: at,
+    });
     for (const line of lpo.lines) {
       const material = await ctx.db.get(line.materialId);
       if (material === null || material.ownerId !== userId) continue;
@@ -237,12 +280,16 @@ export const receive = mutation({
         ownerId: userId,
         material,
         qty: line.qty,
-        source: "lpo",
-        ref: lpo.number,
+        source: "grv",
+        ref: number,
         at,
       });
     }
-    await ctx.db.patch(id, { status: "received", receivedAt: at });
+    await ctx.db.patch(id, {
+      status: "received",
+      receivedAt: at,
+      grvId,
+    });
   },
 });
 

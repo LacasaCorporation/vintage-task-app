@@ -5,7 +5,7 @@ import { stockIn, stockOut } from "./stock";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
-import { cleanRate, priceTaxedLines } from "../lib/line-tax";
+import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -14,7 +14,7 @@ const cleanDiscount = (value: number | undefined): number =>
   Math.min(100, Math.max(0, value ?? 0));
 
 /** Next sequential voucher number: GRV0001, GRV0002, … */
-async function nextGrvNumber(
+export async function nextGrvNumber(
   ctx: MutationCtx,
   ownerId: Id<"users">,
 ): Promise<string> {
@@ -77,11 +77,13 @@ export const options = query({
         .map((l) => ({
           id: l._id,
           number: l.number,
+          vendorId: l.vendorId,
           vendor: l.vendor,
           lines: l.lines.map((line) => ({
             materialId: line.materialId,
             qty: line.qty,
             unitCost: line.unitCost,
+            taxPct: line.taxPct,
           })),
         })),
     };
@@ -120,6 +122,55 @@ async function countIn(
   }
 }
 
+/** The typed lines of a voucher, shared by create and update. */
+const lineValidator = v.array(
+  v.object({
+    materialId: v.id("rawMaterials"),
+    qty: v.number(),
+    unitCost: v.number(),
+    taxPct: v.optional(v.number()),
+  }),
+);
+
+/** Resolves the typed lines, naming each material the way it is stored. */
+async function resolveLines(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+  lines: readonly {
+    materialId: Id<"rawMaterials">;
+    qty: number;
+    unitCost: number;
+    taxPct?: number | undefined;
+  }[],
+) {
+  if (lines.length === 0) {
+    throw new Error("Add at least one material to the voucher.");
+  }
+  const resolved = [];
+  for (const line of lines) {
+    const material = await ctx.db.get(line.materialId);
+    if (material === null) {
+      throw new Error("A material on this voucher no longer exists.");
+    }
+    if (material.ownerId !== ownerId) {
+      throw new Error("That material belongs to another workspace.");
+    }
+    if (line.qty <= 0) {
+      throw new Error(`Quantity for “${material.name}” must be more than zero.`);
+    }
+    if (line.unitCost < 0) throw new Error("Unit cost can't be negative.");
+    resolved.push({
+      materialId: material._id,
+      name: material.name,
+      unit: material.unit,
+      qty: line.qty,
+      unitCost: line.unitCost,
+      taxPct: line.taxPct === undefined ? undefined : cleanRate(line.taxPct),
+    });
+  }
+  return resolved;
+}
+
 /**
  * Record goods that have arrived. Saved as a draft it changes nothing; marked
  * received — either here or later — its quantities go into raw-material stock.
@@ -131,47 +182,18 @@ export const create = mutation({
     receivedAt: v.optional(v.number()),
     lpoId: v.optional(v.id("lpos")),
     reference: v.optional(v.string()),
+    supplierAddress: v.optional(v.string()),
     note: v.optional(v.string()),
     discountPct: v.optional(v.number()),
     status: v.optional(v.union(v.literal("draft"), v.literal("received"))),
-    lines: v.array(
-      v.object({
-        materialId: v.id("rawMaterials"),
-        qty: v.number(),
-        unitCost: v.number(),
-        taxPct: v.optional(v.number()),
-      }),
-    ),
+    lines: lineValidator,
   },
   handler: async (ctx, args): Promise<Id<"grvs">> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     await requireItem(ctx, userId, "purchases", "create");
-    if (args.lines.length === 0) {
-      throw new Error("Add at least one material to the voucher.");
-    }
-
     const at = args.receivedAt ?? Date.now();
-    const resolved = [];
-    for (const line of args.lines) {
-      const material = await ctx.db.get(line.materialId);
-      if (material === null) throw new Error("A material on this voucher no longer exists.");
-      if (material.ownerId !== userId) {
-        throw new Error("That material belongs to another workspace.");
-      }
-      if (line.qty <= 0) {
-        throw new Error(`Quantity for “${material.name}” must be more than zero.`);
-      }
-      if (line.unitCost < 0) throw new Error("Unit cost can't be negative.");
-      resolved.push({
-        materialId: material._id,
-        name: material.name,
-        unit: material.unit,
-        qty: line.qty,
-        unitCost: line.unitCost,
-        taxPct: line.taxPct === undefined ? undefined : cleanRate(line.taxPct),
-      });
-    }
+    const resolved = await resolveLines(ctx, userId, args.lines);
     const priced = priceTaxedLines(resolved, args.discountPct);
 
     let vendor = (args.vendor ?? "").trim().slice(0, MAX_NAME_LENGTH);
@@ -199,9 +221,11 @@ export const create = mutation({
       receivedAt: at,
       lpoId: args.lpoId,
       reference: args.reference?.trim().slice(0, 60) || undefined,
+      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
       discountPct: cleanDiscount(args.discountPct) || undefined,
       lines: resolved,
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
       total: priced.grand,
       taxAmount: priced.tax,
       status,
@@ -211,6 +235,62 @@ export const create = mutation({
       if (created !== null) await countIn(ctx, userId, created);
     }
     return id;
+  },
+});
+
+/**
+ * Edit a draft voucher. A voucher whose goods are already counted in cannot be
+ * changed, because the stock it wrote would no longer match the paperwork.
+ */
+export const update = mutation({
+  args: {
+    id: v.id("grvs"),
+    vendorId: v.optional(v.id("vendors")),
+    vendor: v.optional(v.string()),
+    receivedAt: v.optional(v.number()),
+    reference: v.optional(v.string()),
+    supplierAddress: v.optional(v.string()),
+    note: v.optional(v.string()),
+    discountPct: v.optional(v.number()),
+    lines: lineValidator,
+  },
+  handler: async (ctx, args): Promise<void> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    await requireItem(ctx, userId, "purchases", "edit");
+    const grv = await ctx.db.get(args.id);
+    if (grv === null || grv.ownerId !== userId) {
+      throw new Error("That voucher no longer exists.");
+    }
+    if (grv.status === "received") {
+      throw new Error(
+        `${grv.number} is already counted in — its stock cannot be edited.`,
+      );
+    }
+    const resolved = await resolveLines(ctx, userId, args.lines);
+    const priced = priceTaxedLines(resolved, args.discountPct);
+
+    let vendor = (args.vendor ?? "").trim().slice(0, MAX_NAME_LENGTH);
+    if (args.vendorId !== undefined) {
+      const vendorDoc = await ctx.db.get(args.vendorId);
+      if (vendorDoc === null || vendorDoc.ownerId !== userId) {
+        throw new Error("That supplier no longer exists.");
+      }
+      if (vendor === "") vendor = vendorDoc.name;
+    }
+    await ctx.db.patch(args.id, {
+      vendorId: args.vendorId ?? grv.vendorId,
+      vendor: vendor || undefined,
+      receivedAt: args.receivedAt ?? grv.receivedAt,
+      reference: args.reference?.trim().slice(0, 60) || undefined,
+      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
+      note: args.note?.trim().slice(0, 500) || undefined,
+      discountPct: cleanDiscount(args.discountPct) || undefined,
+      lines: resolved,
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
+      total: priced.grand,
+      taxAmount: priced.tax,
+    });
   },
 });
 
@@ -251,6 +331,21 @@ export const remove = mutation({
           source: "adjustment",
           ref: `${grv.number} (deleted)`,
           at: grv.receivedAt,
+        });
+      }
+    }
+    // an order that was received through this voucher is no longer covered by
+    // it: the link is cleared and the order goes back to being outstanding,
+    // so a bill raised from it can bring the goods in instead. Without this
+    // the stock would be out and the order stuck as received — receivable by
+    // nobody.
+    if (grv.lpoId !== undefined) {
+      const lpo = await ctx.db.get(grv.lpoId);
+      if (lpo !== null && lpo.ownerId === userId && lpo.grvId === id) {
+        await ctx.db.patch(grv.lpoId, {
+          grvId: undefined,
+          status: lpo.status === "received" ? "ordered" : lpo.status,
+          receivedAt: undefined,
         });
       }
     }

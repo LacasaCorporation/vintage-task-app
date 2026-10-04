@@ -634,9 +634,12 @@ const schema = defineSchema(
         v.literal("received"),
         v.literal("cancelled"),
       ),
+      supplierAddress: v.optional(v.string()),
       note: v.optional(v.string()),
-      /** A discount taken off the whole order, as a percentage. */
+      /** Discount off the whole order, before tax is charged. */
       discountPct: v.optional(v.number()),
+      /** The blended rate this order's tax works out at, for the ledger. */
+      taxPct: v.optional(v.number()),
       lines: v.array(
         v.object({
           materialId: v.id("rawMaterials"),
@@ -644,12 +647,15 @@ const schema = defineSchema(
           unit: v.string(),
           qty: v.number(),
           unitCost: v.number(),
-          /** This line's own tax rate; absent means no tax on it. */
+          /** This line's own rate; absent means no tax on it. */
           taxPct: v.optional(v.number()),
         }),
       ),
       total: v.number(),
-      /** The tax actually charged, summed from the lines. */
+      /**
+       * The tax actually charged, summed from the lines — kept beside `total`
+       * so it never has to be re-derived from one blended percentage.
+       */
       taxAmount: v.optional(v.number()),
       receivedAt: v.optional(v.number()),
       /**
@@ -658,6 +664,12 @@ const schema = defineSchema(
        * either the receipt or the bill, never both.
        */
       billId: v.optional(v.id("purchases")),
+      /**
+       * The goods-received voucher raised when this order was received without
+       * a bill. It owns the stock movement, so the paperwork and the ledger can
+       * never disagree — and deleting the voucher takes the stock back out.
+       */
+      grvId: v.optional(v.id("grvs")),
     })
       .index("by_owner", ["ownerId"])
       .index("by_status", ["status"]),
@@ -675,10 +687,13 @@ const schema = defineSchema(
       receivedAt: v.number(), // ms
       /** The order this delivery answers, when there is one. */
       lpoId: v.optional(v.id("lpos")),
+      supplierAddress: v.optional(v.string()),
       note: v.optional(v.string()),
       reference: v.optional(v.string()), // supplier's delivery note number
-      /** A discount taken off the whole voucher, as a percentage. */
+      /** Discount agreed with the supplier, before tax is charged. */
       discountPct: v.optional(v.number()),
+      /** The blended rate this voucher's tax works out at, for the ledger. */
+      taxPct: v.optional(v.number()),
       lines: v.array(
         v.object({
           materialId: v.id("rawMaterials"),
@@ -686,7 +701,7 @@ const schema = defineSchema(
           unit: v.string(),
           qty: v.number(),
           unitCost: v.number(),
-          /** This line's own tax rate; absent means no tax on it. */
+          /** This line's own rate; absent means no tax on it. */
           taxPct: v.optional(v.number()),
         }),
       ),
@@ -1283,6 +1298,12 @@ const schema = defineSchema(
       qty: v.number(),
       unitPrice: v.number(), // copied from material but editable
       unit: v.optional(v.string()),
+      /**
+       * Tax for this line. Left off, a material line takes its own purchase rate
+       * and a custom line takes none — the sheet never guesses a rate the user
+       * did not ask for.
+       */
+      taxPct: v.optional(v.number()),
     })
       .index("by_sheet", ["sheetId"])
       .index("by_fg", ["fgId"])

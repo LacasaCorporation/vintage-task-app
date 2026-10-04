@@ -5,12 +5,13 @@ import PurchaseDashboard from "@/components/PurchaseDashboard";
 import ExpensesPanel from "@/components/ExpensesPanel";
 import BillsPanel, { type BillSeed } from "@/components/BillsPanel";
 import PaymentsPanel, { type PaymentSeed } from "@/components/PaymentsPanel";
-import GrvPanel from "@/components/GrvPanel";
+import GrvPanel, { type GrvSeed } from "@/components/GrvPanel";
 import VendorsPanel from "@/components/VendorsPanel";
 import type { PurchaseTab } from "@/lib/purchase-tabs";
 
 type MaterialDoc = Doc<"rawMaterials">;
 type LpoDoc = Doc<"lpos">;
+type GrvDoc = Doc<"grvs">;
 type VendorDoc = Doc<"vendors">;
 
 /**
@@ -46,6 +47,10 @@ export default function PurchasePanel({
   const [billKey, setBillKey] = useState(0);
   const [paymentSeed, setPaymentSeed] = useState<PaymentSeed>(null);
   const [paymentKey, setPaymentKey] = useState(0);
+  // A voucher being started from an order. Same one-shot arrangement as the
+  // bill: the panel is remounted so its form opens from the seed.
+  const [grvSeed, setGrvSeed] = useState<GrvSeed | null>(null);
+  const [grvKey, setGrvKey] = useState(0);
 
   /**
    * A cross-link — raising a bill from an order, paying a vendor — is consumed
@@ -59,12 +64,27 @@ export default function PurchasePanel({
     setLastTab(tab);
     if (tab !== "bills" && billSeed !== null) setBillSeed(null);
     if (tab !== "payments" && paymentSeed !== null) setPaymentSeed(null);
+    if (tab !== "grv" && grvSeed !== null) setGrvSeed(null);
   }
 
   const startBillFromLpo = (lpo: LpoDoc) => {
     setBillSeed({ mode: "fromLpo", lpo });
     setBillKey((k) => k + 1);
     onTabChange("bills");
+  };
+
+  /** The same, from a delivery rather than an order. */
+  const startBillFromGrv = (grv: GrvDoc) => {
+    setBillSeed({ mode: "fromGrv", grv });
+    setBillKey((k) => k + 1);
+    onTabChange("bills");
+  };
+
+  /** Record what arrived against an order. */
+  const startGrvFromLpo = (lpo: LpoDoc) => {
+    setGrvSeed({ mode: "new", lpoId: lpo._id });
+    setGrvKey((k) => k + 1);
+    onTabChange("grv");
   };
 
   const startBillForVendor = (vendor: VendorDoc) => {
@@ -102,6 +122,7 @@ export default function PurchasePanel({
         canEdit={canEdit}
         canDelete={canDelete}
         onCreateBill={startBillFromLpo}
+        onCreateGrv={startGrvFromLpo}
       />
     );
   }
@@ -109,10 +130,13 @@ export default function PurchasePanel({
   if (tab === "grv") {
     return (
       <GrvPanel
+        key={grvKey}
         materials={materials}
         canCreate={canCreate}
         canEdit={canEdit}
         canDelete={canDelete}
+        seed={grvSeed}
+        onCreateBill={startBillFromGrv}
       />
     );
   }
