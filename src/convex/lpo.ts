@@ -4,8 +4,14 @@ import { stockIn } from "./stock";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { cleanRate, priceTaxedLines } from "../lib/line-tax";
 
-const round = (n: number) => Math.round(n * 100) / 100;
+/**
+ * A discount percentage, clamped the way the pricing helper clamps it, so what
+ * is stored is what the form showed.
+ */
+const cleanDiscount = (value: number | undefined): number =>
+  Math.min(100, Math.max(0, value ?? 0));
 
 /** LPO0001, LPO0002, … */
 async function nextNumber(
@@ -29,6 +35,7 @@ const lineValidator = v.array(
     materialId: v.id("rawMaterials"),
     qty: v.number(),
     unitCost: v.number(),
+    taxPct: v.optional(v.number()),
   }),
 );
 
@@ -40,6 +47,7 @@ async function resolveLines(
     materialId: Id<"rawMaterials">;
     qty: number;
     unitCost: number;
+    taxPct?: number | undefined;
   }[],
 ): Promise<
   {
@@ -48,6 +56,7 @@ async function resolveLines(
     unit: string;
     qty: number;
     unitCost: number;
+    taxPct?: number;
   }[]
 > {
   if (lines.length === 0) {
@@ -69,6 +78,9 @@ async function resolveLines(
       unit: material.unit,
       qty: line.qty,
       unitCost: line.unitCost,
+      // a line with no rate of its own carries none, rather than a zero that
+      // would claim it was taxed at nothing
+      taxPct: line.taxPct === undefined ? undefined : cleanRate(line.taxPct),
     });
   }
   return resolved;
@@ -97,13 +109,16 @@ export const create = mutation({
     expectedAt: v.optional(v.number()),
     status: v.optional(v.union(v.literal("draft"), v.literal("ordered"))),
     note: v.optional(v.string()),
+    discountPct: v.optional(v.number()),
     lines: lineValidator,
   },
   handler: async (ctx, args): Promise<Id<"lpos">> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const lines = await resolveLines(ctx, userId, args.lines);
-    const total = round(lines.reduce((sum, l) => sum + l.qty * l.unitCost, 0));
+    // discount comes off the lines in proportion, then each line is taxed at
+    // its own rate — the same arithmetic the form shows
+    const priced = priceTaxedLines(lines, args.discountPct);
     return ctx.db.insert("lpos", {
       ownerId: userId,
       number: await nextNumber(ctx, userId),
@@ -113,8 +128,10 @@ export const create = mutation({
       expectedAt: args.expectedAt,
       status: args.status ?? "draft",
       note: args.note?.trim().slice(0, 500) || undefined,
+      discountPct: cleanDiscount(args.discountPct) || undefined,
       lines,
-      total,
+      total: priced.grand,
+      taxAmount: priced.tax,
     });
   },
 });
@@ -128,6 +145,7 @@ export const update = mutation({
     orderedAt: v.optional(v.number()),
     expectedAt: v.optional(v.number()),
     note: v.optional(v.string()),
+    discountPct: v.optional(v.number()),
     lines: lineValidator,
   },
   handler: async (ctx, args): Promise<void> => {
@@ -141,14 +159,17 @@ export const update = mutation({
       throw new Error("This order is already received — the stock is in.");
     }
     const lines = await resolveLines(ctx, userId, args.lines);
+    const priced = priceTaxedLines(lines, args.discountPct);
     await ctx.db.patch(args.id, {
       vendorId: args.vendorId,
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
       orderedAt: args.orderedAt ?? lpo.orderedAt,
       expectedAt: args.expectedAt,
       note: args.note?.trim().slice(0, 500) || undefined,
+      discountPct: cleanDiscount(args.discountPct) || undefined,
       lines,
-      total: round(lines.reduce((sum, l) => sum + l.qty * l.unitCost, 0)),
+      total: priced.grand,
+      taxAmount: priced.tax,
     });
   },
 });

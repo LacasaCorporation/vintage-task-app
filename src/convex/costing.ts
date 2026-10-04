@@ -130,23 +130,54 @@ export const listUnits = query({
   },
 });
 
-/** Create a unit. */
+/** Create a unit, or a derived unit when parentId is given. */
 export const addUnit = mutation({
-  args: { name: v.string() },
-  handler: async (ctx, { name }) => {
+  args: {
+    name: v.string(),
+    parentId: v.optional(v.id("costUnits")),
+    factor: v.optional(v.number()),
+    /** Short label shown in document dropdowns, e.g. `Kg` for `Kilogram`. */
+    abbreviation: v.optional(v.string()),
+  },
+  handler: async (ctx, { name, parentId, factor, abbreviation }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const clean = name.trim();
     if (clean.length === 0) throw new Error("Give the unit a name.");
     if (clean.length > 20) throw new Error("Unit names are 20 characters max.");
-    return await ctx.db.insert("costUnits", { ownerId: userId, name: clean });
+    const short = abbreviation?.trim();
+    if (short !== undefined && short.length > 20) {
+      throw new Error("Unit abbreviations are 20 characters max.");
+    }
+    let nextFactor: number | undefined;
+    if (parentId !== undefined) {
+      const parent = await ctx.db.get(parentId);
+      if (parent === null || parent.ownerId !== userId)
+        throw new Error("That parent unit no longer exists.");
+      nextFactor = factor ?? 1;
+      if (!Number.isFinite(nextFactor) || nextFactor <= 0)
+        throw new Error("The conversion factor must be greater than zero.");
+    }
+    return await ctx.db.insert("costUnits", {
+      ownerId: userId,
+      name: clean,
+      parentId,
+      factor: nextFactor,
+      // stored only when typed; without one the dropdowns show the name
+      ...(short !== undefined && short !== "" ? { abbreviation: short } : {}),
+    });
   },
 });
 
 /** Rename a unit. */
 export const renameUnit = mutation({
-  args: { id: v.id("costUnits"), name: v.string() },
-  handler: async (ctx, { id, name }) => {
+  args: {
+    id: v.id("costUnits"),
+    name: v.string(),
+    /** Pass the abbreviation to set it; an empty string clears it. */
+    abbreviation: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, name, abbreviation }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const unit = await ctx.db.get(id);
@@ -155,11 +186,72 @@ export const renameUnit = mutation({
     const clean = name.trim();
     if (clean.length === 0) throw new Error("Give the unit a name.");
     if (clean.length > 20) throw new Error("Unit names are 20 characters max.");
-    await ctx.db.patch(id, { name: clean });
+    const patch: { name: string; abbreviation?: string } = { name: clean };
+    if (abbreviation !== undefined) {
+      const short = abbreviation.trim();
+      if (short.length > 20)
+        throw new Error("Unit abbreviations are 20 characters max.");
+      // an empty box means "no abbreviation" — dropdowns then show the name
+      patch.abbreviation = short === "" ? undefined : short;
+    }
+    await ctx.db.patch(id, patch);
   },
 });
 
-/** Delete a unit (materials keep their copied value). */
+/**
+ * Point a unit at the unit it converts to (: null to make it a base unit
+ * again). `1 <unit> = factor × <parent>`. Rejects self-links and cycles.
+ */
+export const setUnitConversion = mutation({
+  args: {
+    id: v.id("costUnits"),
+    parentId: v.union(v.id("costUnits"), v.null()),
+    factor: v.optional(v.number()),
+  },
+  handler: async (ctx, { id, parentId, factor }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const unit = await ctx.db.get(id);
+    if (unit === null) throw new Error("That unit no longer exists.");
+    if (unit.ownerId !== userId) throw new Error("Not your unit.");
+
+    if (parentId === null) {
+      await ctx.db.patch(id, { parentId: undefined, factor: undefined });
+      return;
+    }
+    if (parentId === id) throw new Error("A unit can't convert to itself.");
+    const parent = await ctx.db.get(parentId);
+    if (parent === null || parent.ownerId !== userId)
+      throw new Error("That parent unit no longer exists.");
+    const clean = factor ?? 1;
+    if (!Number.isFinite(clean) || clean <= 0)
+      throw new Error("The conversion factor must be greater than zero.");
+
+    // Walk up from the proposed parent: if it leads back to this unit the
+    // conversion would loop, so reject it before writing.
+    const all = await ctx.db
+      .query("costUnits")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const byId = new Map(all.map((u) => [u._id, u] as const));
+    let cursor: Id<"costUnits"> | undefined = parentId;
+    const seen = new Set<string>();
+    while (cursor !== undefined && !seen.has(cursor)) {
+      if (cursor === id)
+        throw new Error("That would create a circular conversion.");
+      seen.add(cursor);
+      cursor = byId.get(cursor)?.parentId;
+    }
+
+    await ctx.db.patch(id, { parentId, factor: clean });
+  },
+});
+
+/**
+ * Delete a unit (materials keep their copied value). Children are re-measured
+ * against the deleted unit's parent with the factors multiplied, so their
+ * meaning is preserved rather than silently changed.
+ */
 export const removeUnit = mutation({
   args: { id: v.id("costUnits") },
   handler: async (ctx, { id }) => {
@@ -168,6 +260,18 @@ export const removeUnit = mutation({
     const unit = await ctx.db.get(id);
     if (unit === null) throw new Error("That unit no longer exists.");
     if (unit.ownerId !== userId) throw new Error("Not your unit.");
+    const all = await ctx.db
+      .query("costUnits")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    for (const child of all) {
+      if (child.parentId !== id) continue;
+      const factor = (child.factor ?? 1) * (unit.factor ?? 1);
+      await ctx.db.patch(child._id, {
+        parentId: unit.parentId,
+        factor: unit.parentId === undefined ? undefined : factor,
+      });
+    }
     await ctx.db.delete(id);
   },
 });

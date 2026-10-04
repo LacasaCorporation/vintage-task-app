@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import UnitDetails from "@/components/UnitDetails";
 
 type MaterialDoc = Doc<"rawMaterials">;
 
@@ -393,10 +394,11 @@ export default function MaterialFormPage({
                   <option value="">Not set</option>
                   {(units ?? []).map((u) => (
                     <option key={u._id} value={u.name}>
-                      {u.name}
+                      {u.abbreviation?.trim() || u.name}
                     </option>
                   ))}
                 </select>
+                <UnitDetails unit={unit} units={units ?? []} />
               </Field>
               <div className="sm:col-span-2">
                 <Field

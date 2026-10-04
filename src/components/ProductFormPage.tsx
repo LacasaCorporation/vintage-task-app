@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
+import UnitDetails from "@/components/UnitDetails";
 
 type FgDoc = Doc<"finishedGoods">;
 
@@ -561,10 +562,11 @@ export default function ProductFormPage({
                   <option value="">Not set</option>
                   {(units ?? []).map((u) => (
                     <option key={u._id} value={u.name}>
-                      {u.name}
+                      {u.abbreviation?.trim() || u.name}
                     </option>
                   ))}
                 </select>
+                <UnitDetails unit={unit} units={units ?? []} />
               </Field>
               <Field
                 label="Batch qty"

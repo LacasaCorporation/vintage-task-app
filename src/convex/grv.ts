@@ -5,8 +5,13 @@ import { stockIn, stockOut } from "./stock";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { cleanRate, priceTaxedLines } from "../lib/line-tax";
 
 const MAX_NAME_LENGTH = 120;
+
+/** A discount percentage, clamped the way the pricing helper clamps it. */
+const cleanDiscount = (value: number | undefined): number =>
+  Math.min(100, Math.max(0, value ?? 0));
 
 /** Next sequential voucher number: GRV0001, GRV0002, … */
 async function nextGrvNumber(
@@ -127,12 +132,14 @@ export const create = mutation({
     lpoId: v.optional(v.id("lpos")),
     reference: v.optional(v.string()),
     note: v.optional(v.string()),
+    discountPct: v.optional(v.number()),
     status: v.optional(v.union(v.literal("draft"), v.literal("received"))),
     lines: v.array(
       v.object({
         materialId: v.id("rawMaterials"),
         qty: v.number(),
         unitCost: v.number(),
+        taxPct: v.optional(v.number()),
       }),
     ),
   },
@@ -146,7 +153,6 @@ export const create = mutation({
 
     const at = args.receivedAt ?? Date.now();
     const resolved = [];
-    let total = 0;
     for (const line of args.lines) {
       const material = await ctx.db.get(line.materialId);
       if (material === null) throw new Error("A material on this voucher no longer exists.");
@@ -163,9 +169,10 @@ export const create = mutation({
         unit: material.unit,
         qty: line.qty,
         unitCost: line.unitCost,
+        taxPct: line.taxPct === undefined ? undefined : cleanRate(line.taxPct),
       });
-      total += line.qty * line.unitCost;
     }
+    const priced = priceTaxedLines(resolved, args.discountPct);
 
     let vendor = (args.vendor ?? "").trim().slice(0, MAX_NAME_LENGTH);
     if (args.vendorId !== undefined) {
@@ -193,8 +200,10 @@ export const create = mutation({
       lpoId: args.lpoId,
       reference: args.reference?.trim().slice(0, 60) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
+      discountPct: cleanDiscount(args.discountPct) || undefined,
       lines: resolved,
-      total: Math.round(total * 100) / 100,
+      total: priced.grand,
+      taxAmount: priced.tax,
       status,
     });
     if (status === "received") {
