@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { toLocalInput } from "@/lib/task-utils";
+
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
@@ -46,16 +46,37 @@ const STATUS_LABEL: Record<Status, string> = {
   cancelled: "Cancelled",
 };
 
-const day = (ms: number) =>
+const day = (ms: number) => {
   // a date that never made it through the form reads as blank rather than as
-  // "Invalid Date" in the register
-  Number.isFinite(ms)
-    ? new Date(ms).toLocaleDateString(undefined, {
+  // "Invalid Date" in the register; `Number.isFinite` alone is not enough
+  // because a finite-but-out-of-range value still formats as "Invalid Date"
+  const d = new Date(ms);
+  return Number.isFinite(ms) && !Number.isNaN(d.getTime())
+    ? d.toLocaleDateString(undefined, {
         day: "2-digit",
         month: "short",
         year: "numeric",
       })
     : "—";
+};
+
+/**
+ * `YYYY-MM-DD`, the only shape `<input type="date">` accepts. `toLocalInput`
+ * returns a datetime-local string with a time on the end, which a date input
+ * rejects — leaving the box empty and the saved timestamp as NaN.
+ */
+const toDateInput = (ms: number) => {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+/** `YYYY-MM-DD` from a date input to a local-noon timestamp, or undefined if unusable. */
+const stamp = (value: string) => {
+  const ms = new Date(`${value}T12:00:00`).getTime();
+  return Number.isNaN(ms) ? undefined : ms;
+};
 
 /** One line being typed on the order form. */
 type DraftLine = {
@@ -108,10 +129,10 @@ function LpoForm({
   const [address, setAddress] = useState(editing?.supplierAddress ?? "");
   const [discount, setDiscount] = useState(String(editing?.discountPct ?? 0));
   const [orderedOn, setOrderedOn] = useState(() =>
-    toLocalInput(new Date(editing?.orderedAt ?? Date.now())),
+    toDateInput(editing?.orderedAt ?? Date.now()),
   );
   const [expectedOn, setExpectedOn] = useState(() =>
-    editing?.expectedAt !== undefined ? toLocalInput(new Date(editing.expectedAt)) : "",
+    editing?.expectedAt !== undefined ? toDateInput(editing.expectedAt) : "",
   );
   const [note, setNote] = useState(editing?.note ?? "");
   const [lines, setLines] = useState<DraftLine[]>(
@@ -173,7 +194,7 @@ function LpoForm({
     setVendorId(undefined);
     setAddress("");
     setDiscount("0");
-    setOrderedOn(toLocalInput(new Date()));
+    setOrderedOn(toDateInput(Date.now()));
     setExpectedOn("");
     setNote("");
     setLines([emptyLine()]);
@@ -195,8 +216,10 @@ function LpoForm({
       vendor: vendor.trim() || undefined,
       vendorId,
       supplierAddress: address.trim() || undefined,
-      orderedAt: new Date(`${orderedOn}T12:00:00`).getTime(),
-      expectedAt: expectedOn ? new Date(`${expectedOn}T12:00:00`).getTime() : undefined,
+      // a blank ordered date still needs a real timestamp, otherwise the
+      // register has nothing to print and the row reads as "Invalid Date"
+      orderedAt: stamp(orderedOn) ?? Date.now(),
+      expectedAt: expectedOn ? stamp(expectedOn) : undefined,
       note: note.trim() || undefined,
       discountPct: num(discount) || undefined,
       lines: clean.map((l) => ({

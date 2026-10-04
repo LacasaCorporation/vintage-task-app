@@ -87,6 +87,14 @@ async function resolveLines(
   return resolved;
 }
 
+/**
+ * A timestamp the register can actually print. `Number.isFinite` alone is not
+ * enough: a finite but out-of-range value (a stray `1e15`) still formats as
+ * "Invalid Date", so the Date has to be checked as well.
+ */
+const usableDate = (ms: number | undefined) =>
+  ms === undefined || Number.isNaN(new Date(ms).getTime()) ? undefined : ms;
+
 /** Every purchase order, newest first. */
 export const list = query({
   args: {},
@@ -97,7 +105,9 @@ export const list = query({
       .query("lpos")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
-    return rows.sort((a, b) => b.orderedAt - a.orderedAt);
+    return rows.sort(
+      (a, b) => (usableDate(b.orderedAt) ?? 0) - (usableDate(a.orderedAt) ?? 0),
+    );
   },
 });
 
@@ -127,12 +137,9 @@ export const create = mutation({
       vendorId: args.vendorId,
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
       // a blank date box must not store NaN, which the register would show as
-// "Invalid Date"
-      orderedAt:
-        args.orderedAt !== undefined && Number.isFinite(args.orderedAt)
-          ? args.orderedAt
-          : Date.now(),
-      expectedAt: args.expectedAt,
+      // "Invalid Date"
+      orderedAt: usableDate(args.orderedAt) ?? Date.now(),
+      expectedAt: usableDate(args.expectedAt),
       status: args.status ?? "draft",
       supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
@@ -175,11 +182,8 @@ export const update = mutation({
     await ctx.db.patch(args.id, {
       vendorId: args.vendorId,
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
-      orderedAt:
-        args.orderedAt !== undefined && Number.isFinite(args.orderedAt)
-          ? args.orderedAt
-          : lpo.orderedAt,
-      expectedAt: args.expectedAt,
+      orderedAt: usableDate(args.orderedAt) ?? lpo.orderedAt ?? Date.now(),
+      expectedAt: usableDate(args.expectedAt),
       supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
       discountPct: cleanDiscount(args.discountPct) || undefined,
