@@ -6,7 +6,14 @@ import { scopeUserId } from "./org";
 import { postSale } from "./ledger";
 import { getSettings } from "./settings";
 import { currencySymbol } from "../lib/currency";
-import { nextNumber, priceLines, sellStock, salesLineValidator } from "./sales";
+import {
+  lineRate,
+  nextNumber,
+  priceLines,
+  sellStock,
+  salesLineValidator,
+} from "./sales";
+import { blendedRate } from "../lib/line-tax";
 
 /**
  * Sales orders: what the customer has confirmed they will take.
@@ -104,11 +111,13 @@ export const create = mutation({
         unit: product.unit,
         qty: line.qty,
         unitPrice: line.unitPrice,
+        // fixed onto the line, so a product's rate changing later cannot
+        // rewrite an order that has already been confirmed
+        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
       });
     }
-    const { grand } = priceLines(lines, args.discountPct, args.taxPct);
+    const priced = priceLines(lines, args.discountPct, args.taxPct);
     const discount = Math.min(100, Math.max(0, args.discountPct ?? 0));
-    const tax = Math.max(0, args.taxPct ?? 0);
 
     // the order remembers where it came from, so the quotation is not
     // confirmed twice
@@ -136,9 +145,12 @@ export const create = mutation({
         (await getSettings(ctx, userId))?.currency?.trim().slice(0, 8) ||
         currencySymbol((await getSettings(ctx, userId))?.currency),
       discountPct: discount || undefined,
-      taxPct: tax || undefined,
+      taxPct:
+        blendedRate(priced.grand - priced.taxAmount, priced.taxAmount) ||
+        undefined,
       lines,
-      total: grand,
+      total: priced.grand,
+      taxAmount: priced.taxAmount || undefined,
       status: args.status ?? "draft",
       quotationId,
     });
@@ -190,11 +202,13 @@ export const update = mutation({
         unit: product.unit,
         qty: line.qty,
         unitPrice: line.unitPrice,
+        // fixed onto the line, so a product's rate changing later cannot
+        // rewrite an order that has already been confirmed
+        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
       });
     }
     const discount = Math.min(100, Math.max(0, args.discountPct ?? 0));
-    const tax = Math.max(0, args.taxPct ?? 0);
-    const { grand } = priceLines(lines, discount, tax);
+    const priced = priceLines(lines, discount, args.taxPct);
 
     await ctx.db.patch(args.id, {
       customerId: args.customerId,
@@ -206,9 +220,12 @@ export const update = mutation({
       poRef: args.poRef?.trim().slice(0, 60) || undefined,
       terms: args.terms?.trim().slice(0, 500) || undefined,
       discountPct: discount || undefined,
-      taxPct: tax || undefined,
+      taxPct:
+        blendedRate(priced.grand - priced.taxAmount, priced.taxAmount) ||
+        undefined,
       lines,
-      total: grand,
+      total: priced.grand,
+      taxAmount: priced.taxAmount || undefined,
     });
     return args.id;
   },

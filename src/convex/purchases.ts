@@ -7,6 +7,7 @@ import { setStockTo, stockIn, stockOut } from "./stock";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -74,6 +75,8 @@ export const create = mutation({    args: {
         materialId: v.id("rawMaterials"),
         qty: v.number(),
         unitCost: v.number(),
+        /** This line's own rate; absent falls back to the material's. */
+        taxPct: v.optional(v.number()),
       }),
     ),
   },
@@ -106,21 +109,25 @@ export const create = mutation({    args: {
     const number = await nextPurchaseNumber(ctx, userId);
     const at = purchasedAt ?? Date.now();
     const resolved = [];
-    let total = 0;
     for (const line of lines) {
       const material = await ctx.db.get(line.materialId);
       if (material === null) throw new Error("A material on this bill no longer exists.");
       if (material.ownerId !== userId) throw new Error("That material belongs to another workspace.");
       if (line.qty <= 0) throw new Error(`Quantity for “${material.name}” must be more than zero.`);
       if (line.unitCost < 0) throw new Error("Unit cost can't be negative.");
+      // the rate is fixed onto the line here, so it never moves afterwards —
+      // what the supplier charged is what the bill and the ledger record
+      const rate = cleanRate(
+        line.taxPct ?? material.purchaseTaxPct ?? taxPct ?? 0,
+      );
       resolved.push({
         materialId: material._id,
         name: material.name,
         unit: material.unit,
         qty: line.qty,
         unitCost: line.unitCost,
+        taxPct: rate || undefined,
       });
-      total += line.qty * line.unitCost;
       // stock in, logged as income against this bill
       await stockIn(ctx, {
         ownerId: userId,
@@ -134,8 +141,8 @@ export const create = mutation({    args: {
 
     const cleanSupplier = (supplier ?? "").trim().slice(0, MAX_NAME_LENGTH);
     const discount = Math.min(100, Math.max(0, discountPct ?? 0));
-    const tax = Math.max(0, taxPct ?? 0);
-    const grand = total - (total * discount) / 100 + ((total * (100 - discount)) / 100) * (tax / 100);
+    // priced from the lines, each at its own rate, by the same code the form runs
+    const priced = priceTaxedLines(resolved, discount);
     const purchaseId = await ctx.db.insert("purchases", {
       ownerId: userId,
       number,
@@ -147,9 +154,10 @@ export const create = mutation({    args: {
       note: (note ?? "").trim().slice(0, 500) || undefined,
       currency: (currency ?? "").trim().slice(0, 8) || undefined,
       discountPct: discount || undefined,
-      taxPct: tax || undefined,
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
       lines: resolved,
-      total: Math.round(grand * 100) / 100,
+      total: priced.grand,
+      taxAmount: priced.tax || undefined,
       isPaid: undefined,
       lpoId: args.lpoId,
     });
@@ -207,6 +215,8 @@ export const update = mutation({
         materialId: v.id("rawMaterials"),
         qty: v.number(),
         unitCost: v.number(),
+        /** This line's own rate; absent falls back to the material's. */
+        taxPct: v.optional(v.number()),
       }),
     ),
   },
@@ -240,7 +250,6 @@ export const update = mutation({
     }
 
     const resolved = [];
-    let total = 0;
     for (const line of args.lines) {
       const material = await ctx.db.get(line.materialId);
       if (material === null) throw new Error("A material on this bill no longer exists.");
@@ -255,9 +264,13 @@ export const update = mutation({
         unit: material.unit,
         qty: line.qty,
         unitCost: line.unitCost,
+        // an edited line keeps the rate it was billed at unless the bill says
+        // otherwise; the material's current rate is the fallback
+        taxPct: cleanRate(
+          line.taxPct ?? material.purchaseTaxPct ?? args.taxPct ?? 0,
+        ) || undefined,
       };
       resolved.push(stored);
-      total += line.qty * line.unitCost;
       await ctx.db.insert("purchaseLines", { ownerId: userId, purchaseId: id, ...stored });
       await stockIn(ctx, {
         ownerId: userId,
@@ -271,8 +284,7 @@ export const update = mutation({
 
     const supplier = (args.supplier ?? "").trim().slice(0, MAX_NAME_LENGTH);
     const discount = Math.min(100, Math.max(0, args.discountPct ?? 0));
-    const tax = Math.max(0, args.taxPct ?? 0);
-    const grand = total - (total * discount) / 100 + ((total * (100 - discount)) / 100) * (tax / 100);
+    const priced = priceTaxedLines(resolved, discount);
     await ctx.db.patch(id, {
       supplier: supplier || undefined,
       supplierId: args.supplierId,
@@ -282,9 +294,10 @@ export const update = mutation({
       note: (args.note ?? "").trim().slice(0, 500) || undefined,
       currency: (args.currency ?? "").trim().slice(0, 8) || undefined,
       discountPct: discount || undefined,
-      taxPct: tax || undefined,
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
       lines: resolved,
-      total: Math.round(grand * 100) / 100,
+      total: priced.grand,
+      taxAmount: priced.tax || undefined,
     });
     // the old entries described a bill that no longer exists, so they are
     // reversed and the corrected bill posted in their place

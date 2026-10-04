@@ -578,7 +578,25 @@ export default function MaterialsSheet({
                 <th className="px-3 py-2 font-semibold">Name</th>
                 <th className="w-28 px-3 py-2 font-semibold">Category</th>
                 <th className="w-16 px-3 py-2 font-semibold">Unit</th>
-                <th className="w-28 px-3 py-2 text-right font-semibold">Unit price</th>
+                <th className="w-24 px-3 py-2 text-right font-semibold">Unit price</th>
+                <th
+                  className="w-20 px-3 py-2 text-right font-semibold"
+                  title="Default tax when this material is bought"
+                >
+                  Buy %
+                </th>
+                <th
+                  className="w-20 px-3 py-2 text-right font-semibold"
+                  title="Default tax when this material is sold"
+                >
+                  Sell %
+                </th>
+                <th
+                  className="w-20 px-3 py-2 text-right font-semibold"
+                  title="Below this the material counts as short"
+                >
+                  Min
+                </th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">In</th>
                 <th className="w-24 px-3 py-2 text-right font-semibold">Out</th>
                 <th className="w-28 px-3 py-2 text-right font-semibold">Balance</th>
@@ -588,14 +606,14 @@ export default function MaterialsSheet({
             <tbody className="divide-y divide-border/60">
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">
                     <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                     Loading materials…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">
                     {search || categoryFilter !== "all" || usageFilter !== "all"
                       ? "Nothing matches the current search/filter."
                       : "No raw materials yet — add your first one above."}
@@ -686,6 +704,34 @@ export default function MaterialsSheet({
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.category ?? "—"}</td>
                     <td className="px-3 py-2 text-sm text-muted-foreground">{m.unit}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{money(m.pricePerUnit)}</td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                      {m.purchaseTaxPct !== undefined ? `${m.purchaseTaxPct}%` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                      {m.salesTaxPct !== undefined ? `${m.salesTaxPct}%` : "—"}
+                    </td>
+                    <td
+                      className="px-3 py-2 text-right text-xs tabular-nums"
+                      title={
+                        m.minStock !== undefined && (m.stock ?? 0) < m.minStock
+                          ? "On hand is below the minimum"
+                          : "The floor below which this counts as short"
+                      }
+                    >
+                      {m.minStock !== undefined ? (
+                        <span
+                          className={
+                            (m.stock ?? 0) < m.minStock
+                              ? "font-medium text-amber-700 dark:text-amber-400"
+                              : "text-muted-foreground"
+                          }
+                        >
+                          {m.minStock.toLocaleString()}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td
                       className="px-3 py-2 text-right text-xs tabular-nums text-emerald-600 dark:text-emerald-400"
                       title="Stock received — purchases, returns and the opening figure"
@@ -750,7 +796,7 @@ export default function MaterialsSheet({
                   </tr>
                   {open && (
                     <tr>
-                      <td colSpan={12} className="p-0">
+                      <td colSpan={14} className="p-0">
                         <StockMovementList row={movementRow} />
                       </td>
                     </tr>

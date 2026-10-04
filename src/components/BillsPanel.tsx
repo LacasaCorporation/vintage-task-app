@@ -28,15 +28,27 @@ import VendorField from "@/components/VendorField";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { priceTaxedLines } from "@/lib/line-tax";
 
 type MaterialDoc = Doc<"rawMaterials">;
 type PurchaseDoc = Doc<"purchases">;
 type LpoDoc = Doc<"lpos">;
 
 /** One line being typed on the bill. */
-type DraftLine = { materialId: Id<"rawMaterials"> | ""; qty: string; rate: string };
+type DraftLine = {
+  materialId: Id<"rawMaterials"> | "";
+  qty: string;
+  rate: string;
+  /** This line's own tax rate. Empty means "use the material's". */
+  tax: string;
+};
 
-const emptyLine = (): DraftLine => ({ materialId: "", qty: "1", rate: "" });
+const emptyLine = (): DraftLine => ({
+  materialId: "",
+  qty: "1",
+  rate: "",
+  tax: "",
+});
 const todayInput = () => toLocalInput(new Date());
 const num = (value: string) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
@@ -117,6 +129,8 @@ export default function BillsPanel({
           materialId: line.materialId,
           qty: String(line.qty),
           rate: String(line.unitCost),
+          // an order carries no rate of its own; the material's is offered
+          tax: "",
         }))
       : [emptyLine()],
   );
@@ -144,11 +158,37 @@ export default function BillsPanel({
     () => lines.reduce((sum, l) => sum + num(l.qty) * num(l.rate), 0),
     [lines],
   );
-  const discountAmount = (subtotal * num(discount)) / 100;
-  const taxable = subtotal - discountAmount;
+  // the document rate is what a line with no rate of its own falls back to
   const taxValue = tax === "" ? String(taxDefault?.taxPct ?? 0) : tax;
-  const taxAmount = (taxable * num(taxValue)) / 100;
-  const grandTotal = taxable + taxAmount;
+  const fallbackRate = num(taxValue);
+  /**
+   * The same arithmetic the server runs, so what this screen shows is what
+   * gets saved — including tax summed across lines at their own rates.
+   */
+  const priced = priceTaxedLines(
+    lines.map((l) => {
+      const material = materialOf(l.materialId);
+      return {
+        qty: num(l.qty),
+        unitCost: num(l.rate),
+        taxPct: l.tax.trim() === ""
+          ? (material?.purchaseTaxPct ?? fallbackRate)
+          : num(l.tax),
+      };
+    }),
+    num(discount),
+  );
+  const taxAmount = priced.tax;
+  const grandTotal = priced.grand;
+  /** What one line owes in total, its own rate and the discount included. */
+  const lineTotal = (line: DraftLine) => priced.lineGrand({
+    qty: num(line.qty),
+    unitCost: num(line.rate),
+    taxPct:
+      line.tax.trim() === ""
+        ? (materialOf(line.materialId)?.purchaseTaxPct ?? fallbackRate)
+        : num(line.tax),
+  });
 
   const updateLine = (index: number, patch: Partial<DraftLine>) =>
     setLines((current) =>
@@ -190,6 +230,8 @@ export default function BillsPanel({
             materialId: line.materialId,
             qty: String(line.qty),
             rate: String(line.unitCost),
+            // a saved line keeps the rate it was billed at
+            tax: line.taxPct !== undefined ? String(line.taxPct) : "",
           }))
         : [emptyLine()],
     );
@@ -219,6 +261,12 @@ export default function BillsPanel({
           materialId: l.materialId as Id<"rawMaterials">,
           qty: num(l.qty),
           unitCost: num(l.rate) || materialOf(l.materialId)?.pricePerUnit || 0,
+          // a line with no rate of its own takes the material's, which the
+          // server also knows how to do
+          taxPct:
+            l.tax.trim() === ""
+              ? undefined
+              : Math.min(100, Math.max(0, num(l.tax))),
         })),
       };
       if (editingId !== null) {
@@ -386,10 +434,11 @@ export default function BillsPanel({
               <tr className="border-b border-border text-[11px] tracking-wide text-muted-foreground uppercase">
                 <th className="w-8 py-1.5 text-left font-medium">#</th>
                 <th className="py-1.5 text-left font-medium">Material</th>
-                <th className="w-24 py-1.5 text-right font-medium">Qty</th>
+                <th className="w-20 py-1.5 text-right font-medium">Qty</th>
                 <th className="w-20 py-1.5 text-right font-medium">Unit</th>
-                <th className="w-32 py-1.5 text-right font-medium">Rate</th>
-                <th className="w-32 py-1.5 text-right font-medium">Amount</th>
+                <th className="w-24 py-1.5 text-right font-medium">Rate</th>
+                <th className="w-20 py-1.5 text-right font-medium">Tax %</th>
+                <th className="w-28 py-1.5 text-right font-medium">Amount</th>
                 <th className="w-8" />
               </tr>
             </thead>
@@ -398,22 +447,26 @@ export default function BillsPanel({
                 const material = materialOf(line.materialId);
                 return (
                   <tr key={index} className="border-b border-border/50">
-                    <td className="py-2 text-xs text-muted-foreground tabular-nums">
+                    <td className="py-1 text-xs text-muted-foreground tabular-nums">
                       {index + 1}
                     </td>
-                    <td className="py-2 pr-2">
+                    <td className="py-1 pr-1.5">
                       <ItemPicker
                         items={materialOptions}
                         value={line.materialId}
                         disabled={!canCreate}
                         onChange={(id) => {
+                          const picked = materialOf(id as Id<"rawMaterials">);
                           updateLine(index, {
                             materialId: id as Id<"rawMaterials"> | "",
-                            rate:
-                              line.rate ||
-                              String(
-                                materialOf(id as Id<"rawMaterials">)?.pricePerUnit ?? "",
-                              ),
+                            rate: line.rate || String(picked?.pricePerUnit ?? ""),
+                            // the material's own rate is offered, not imposed:
+                            // the field fills in, and stays editable
+                            tax:
+                              line.tax ||
+                              (picked?.purchaseTaxPct !== undefined
+                                ? String(picked.purchaseTaxPct)
+                                : ""),
                           });
                         }}
                         placeholder="Choose or search material…"
@@ -422,7 +475,7 @@ export default function BillsPanel({
                         aria-label="Material"
                       />
                     </td>
-                    <td className="py-2 pr-2">
+                    <td className="py-1 pr-1.5">
                       <Input
                         type="number"
                         min={0}
@@ -431,13 +484,13 @@ export default function BillsPanel({
                         disabled={!canCreate}
                         onChange={(e) => updateLine(index, { qty: e.target.value })}
                         aria-label="Quantity"
-                        className="h-9 rounded-lg text-right text-sm tabular-nums"
+                        className="h-8 rounded-md text-right text-sm tabular-nums"
                       />
                     </td>
-                    <td className="py-2 pr-2 text-right text-xs text-muted-foreground">
+                    <td className="py-1 pr-1.5 text-right text-xs text-muted-foreground">
                       {material?.unit ?? "—"}
                     </td>
-                    <td className="py-2 pr-2">
+                    <td className="py-1 pr-1.5">
                       <Input
                         type="number"
                         min={0}
@@ -447,13 +500,31 @@ export default function BillsPanel({
                         disabled={!canCreate}
                         onChange={(e) => updateLine(index, { rate: e.target.value })}
                         aria-label="Rate"
-                        className="h-9 rounded-lg text-right text-sm tabular-nums"
+                        className="h-8 rounded-md text-right text-sm tabular-nums"
                       />
                     </td>
-                    <td className="py-2 text-right tabular-nums">
-                      {money(num(line.qty) * num(line.rate))}
+                    <td className="py-1 pr-1.5">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="any"
+                        value={line.tax}
+                        placeholder={
+                          material?.purchaseTaxPct !== undefined
+                            ? String(material.purchaseTaxPct)
+                            : String(fallbackRate || 0)
+                        }
+                        disabled={!canCreate}
+                        onChange={(e) => updateLine(index, { tax: e.target.value })}
+                        aria-label="Line tax percent"
+                        className="h-8 rounded-md text-right text-sm tabular-nums"
+                      />
                     </td>
-                    <td className="py-2 text-right">
+                    <td className="py-1 text-right tabular-nums">
+                      {money(lineTotal(line))}
+                    </td>
+                    <td className="py-1 text-right">
                       {lines.length > 1 && (
                         <button
                           type="button"
@@ -528,20 +599,23 @@ export default function BillsPanel({
                 />
                 %
               </span>
-              <span className="tabular-nums">− {money(discountAmount)}</span>
+              <span className="tabular-nums">− {money(priced.discount)}</span>
             </div>
             <div className="flex items-center justify-between gap-2 text-muted-foreground">
               <span className="flex items-center gap-2">
-                Tax
+                <span title="Used by any line that has no rate of its own">
+                  Default tax
+                </span>
                 <Input
                   type="number"
                   min={0}
+                  max={100}
                   step="any"
                   value={taxValue}
                   placeholder="0"
                   disabled={!canCreate}
                   onChange={(e) => setTax(e.target.value)}
-                  aria-label="Tax percent"
+                  aria-label="Default tax percent"
                   className="h-7 w-16 rounded-md text-right text-xs tabular-nums"
                 />
                 %
@@ -659,14 +733,14 @@ export default function BillsPanel({
             <tbody>
               {viewed.lines.map((line, index) => (
                 <tr key={`${line.materialId}-${index}`} className="border-b border-border/50">
-                  <td className="py-2 text-xs text-muted-foreground tabular-nums">
+                  <td className="py-1 text-xs text-muted-foreground tabular-nums">
                     {index + 1}
                   </td>
                   <td className="py-2">{line.name}</td>
-                  <td className="py-2 text-right tabular-nums">
+                  <td className="py-1 text-right tabular-nums">
                     {line.qty} {line.unit}
                   </td>
-                  <td className="py-2 text-right tabular-nums">{money(line.unitCost)}</td>
+                  <td className="py-1 text-right tabular-nums">{money(line.unitCost)}</td>
                   <td className="py-2 text-right font-medium tabular-nums">
                     {money(line.qty * line.unitCost)}
                   </td>

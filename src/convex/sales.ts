@@ -3,6 +3,7 @@ import { requireItem } from "./authorize";
 import { scopeUserId } from "./org";
 import { postSale, postSaleReceipt, reverseEntry } from "./ledger";
 import { defaultTaxPct } from "./accountingDefaults";
+import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
 import { getSettings } from "./settings";
 import { currencySymbol } from "../lib/currency";
 import { costByProduct } from "../lib/product-cost";
@@ -55,6 +56,8 @@ const lineValidator = v.array(
     productId: v.id("finishedGoods"),
     qty: v.number(),
     unitPrice: v.number(),
+    /** This line's own rate; absent falls back to the product's. */
+    taxPct: v.optional(v.number()),
   }),
 );
 
@@ -62,21 +65,42 @@ const lineValidator = v.array(
 export const salesLineValidator = lineValidator;
 
 /**
- * Price a document the same way a purchase bill is priced: line totals, less a
- * percentage discount, plus tax on what is left.
+ * Price a document: line totals, less a percentage discount, plus tax on what
+ * is left.
+ *
+ * Each line carries its own rate. A line without one falls back to the
+ * document's rate, so a document raised with a single tax percentage priced
+ * exactly as it always did — the arithmetic in `line-tax` reduces to the old
+ * formula when every line agrees.
  */
 export function priceLines(
-  lines: { qty: number; unitPrice: number }[],
+  lines: { qty: number; unitPrice: number; taxPct?: number | undefined }[],
   discountPct: number | undefined,
   taxPct: number | undefined,
-): { total: number; grand: number } {
-  let total = 0;
-  for (const line of lines) total += line.qty * line.unitPrice;
-  const discount = Math.min(100, Math.max(0, discountPct ?? 0));
-  const tax = Math.max(0, taxPct ?? 0);
-  const grand =
-    total - (total * discount) / 100 + ((total * (100 - discount)) / 100) * (tax / 100);
-  return { total, grand: Math.round(grand * 100) / 100 };
+): { total: number; grand: number; taxAmount: number } {
+  const fallback = cleanRate(taxPct);
+  const priced = priceTaxedLines(
+    lines.map((line) => ({
+      qty: line.qty,
+      unitPrice: line.unitPrice,
+      taxPct: line.taxPct ?? fallback,
+    })),
+    discountPct,
+  );
+  return { total: priced.subtotal, grand: priced.grand, taxAmount: priced.tax };
+}
+
+/**
+ * The rate fixed onto one line: what was sent for it, else the product's own
+ * rate, else the document's. Fixed at the moment the line is written, so a
+ * product's rate changing later never rewrites a document already raised.
+ */
+export function lineRate(
+  sent: number | undefined,
+  productRate: number | undefined,
+  documentRate: number | undefined,
+): number {
+  return cleanRate(sent ?? productRate ?? documentRate ?? 0);
 }
 
 /** Every quotation, newest first. */
@@ -152,9 +176,12 @@ export const createQuotation = mutation({
         unit: product.unit,
         qty: line.qty,
         unitPrice: line.unitPrice,
+          // fixed onto the line now: a product whose rate changes
+          // later must never rewrite a document already raised
+        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
       });
     }
-    const { grand } = priceLines(resolved, args.discountPct, args.taxPct);
+    const priced = priceLines(resolved, args.discountPct, args.taxPct);
     return await ctx.db.insert("quotations", {
       ownerId: userId,
       number: await nextNumber(ctx, "quotations", userId, "QT"),
@@ -168,9 +195,13 @@ export const createQuotation = mutation({
         args.currency?.trim().slice(0, 8) ||
         currencySymbol((await getSettings(ctx, userId))?.currency),
       discountPct: Math.min(100, Math.max(0, args.discountPct ?? 0)) || undefined,
-      taxPct: Math.max(0, args.taxPct ?? 0) || undefined,
+      taxPct: blendedRate(
+        priced.grand - priced.taxAmount,
+        priced.taxAmount,
+      ) || undefined,
       lines: resolved,
-      total: grand,
+      total: priced.grand,
+      taxAmount: priced.taxAmount || undefined,
       status: "draft",
     });
   },
@@ -230,15 +261,22 @@ export const updateQuotation = mutation({
           unit: product.unit,
           qty: line.qty,
           unitPrice: line.unitPrice,
+          // fixed onto the line now: a product whose rate changes
+          // later must never rewrite a document already raised
+          taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
         });
       }
-      const { grand } = priceLines(
+      const priced = priceLines(
         resolved,
         patch.discountPct as number | undefined,
         patch.taxPct as number | undefined,
       );
       patch.lines = resolved;
-      patch.total = grand;
+      patch.total = priced.grand;
+      patch.taxAmount = priced.taxAmount || undefined;
+      patch.taxPct =
+        blendedRate(priced.grand - priced.taxAmount, priced.taxAmount) ||
+        undefined;
     }
     await ctx.db.patch(id, patch);
     return id;
@@ -257,7 +295,7 @@ export const convertToSale = mutation({
     if (quote.invoicedAs !== undefined)
       throw new Error("This quotation has already been turned into a sales bill.");
 
-    const { total } = priceLines(quote.lines, quote.discountPct, quote.taxPct);
+    const priced = priceLines(quote.lines, quote.discountPct, quote.taxPct);
     const saleId = await ctx.db.insert("sales", {
       ownerId: userId,
       number: await nextNumber(ctx, "sales", userId, "SAL"),
@@ -270,7 +308,9 @@ export const convertToSale = mutation({
       discountPct: quote.discountPct,
       taxPct: quote.taxPct,
       lines: quote.lines,
-      total,
+      total: priced.grand,
+      // the quotation's own tax carries across rather than being recalculated
+      taxAmount: (quote.taxAmount ?? priced.taxAmount) || undefined,
       quotationId: quote._id,
     });
     await sellStock(ctx, userId, quote.lines, String(saleId));
@@ -340,9 +380,12 @@ export const createSale = mutation({
         unit: product.unit,
         qty: line.qty,
         unitPrice: line.unitPrice,
+          // fixed onto the line now: a product whose rate changes
+          // later must never rewrite a document already raised
+        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
       });
     }
-    const { grand } = priceLines(resolved, args.discountPct, args.taxPct);
+    const priced = priceLines(resolved, args.discountPct, args.taxPct);
     const saleId = await ctx.db.insert("sales", {
       ownerId: userId,
       number: await nextNumber(ctx, "sales", userId, "SAL"),
@@ -358,9 +401,12 @@ export const createSale = mutation({
         args.currency?.trim().slice(0, 8) ||
         currencySymbol((await getSettings(ctx, userId))?.currency),
       discountPct: Math.min(100, Math.max(0, args.discountPct ?? 0)) || undefined,
-      taxPct: Math.max(0, args.taxPct ?? 0) || undefined,
+      taxPct:
+        blendedRate(priced.grand - priced.taxAmount, priced.taxAmount) ||
+        undefined,
       lines: resolved,
-      total: grand,
+      total: priced.grand,
+      taxAmount: priced.taxAmount || undefined,
     });
     await sellStock(ctx, userId, resolved, String(saleId));
     // the invoice reaches the ledger in the same call, so the sales list and
@@ -550,6 +596,9 @@ export const updateSale = mutation({
         unit: product.unit,
         qty: line.qty,
         unitPrice: line.unitPrice,
+          // fixed onto the line now: a product whose rate changes
+          // later must never rewrite a document already raised
+        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
       });
     }
 
@@ -568,7 +617,7 @@ export const updateSale = mutation({
     }
 
     // … then do it again with the new one
-    const { total } = priceLines(resolved, args.discountPct, args.taxPct);
+    const priced = priceLines(resolved, args.discountPct, args.taxPct);
     const fields = {
       customerId: args.customerId,
       customerName: args.customerName?.trim() || undefined,
@@ -579,9 +628,12 @@ export const updateSale = mutation({
       poRef: args.poRef?.trim().slice(0, 60) || undefined,
       terms: args.terms?.trim().slice(0, 500) || undefined,
       discountPct: args.discountPct,
-      taxPct: args.taxPct,
+      taxPct:
+        blendedRate(priced.grand - priced.taxAmount, priced.taxAmount) ||
+        undefined,
       lines: resolved,
-      total,
+      total: priced.grand,
+      taxAmount: priced.taxAmount || undefined,
       entryId: undefined,
     };
     await ctx.db.patch(args.id, fields);
@@ -638,9 +690,12 @@ export const updateQuotationLines = mutation({
         unit: product.unit,
         qty: line.qty,
         unitPrice: line.unitPrice,
+          // fixed onto the line now: a product whose rate changes
+          // later must never rewrite a document already raised
+        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
       });
     }
-    const { total } = priceLines(resolved, args.discountPct, args.taxPct);
+    const priced = priceLines(resolved, args.discountPct, args.taxPct);
     await ctx.db.patch(args.id, {
       customerId: args.customerId,
       customerName: args.customerName?.trim() || undefined,
@@ -651,9 +706,12 @@ export const updateQuotationLines = mutation({
       poRef: args.poRef?.trim().slice(0, 60) || undefined,
       terms: args.terms?.trim().slice(0, 500) || undefined,
       discountPct: args.discountPct,
-      taxPct: args.taxPct,
+      taxPct:
+        blendedRate(priced.grand - priced.taxAmount, priced.taxAmount) ||
+        undefined,
       lines: resolved,
-      total,
+      total: priced.grand,
+      taxAmount: priced.taxAmount || undefined,
     });
     return args.id;
   },
@@ -776,11 +834,15 @@ export const createDeliveryNote = mutation({
         unit: line.unit,
         qty,
         unitPrice: line.unitPrice,
+        // a delivery note carries the invoice's line exactly as billed
+        taxPct: line.taxPct,
       });
     }
     if (lines.length === 0)
       throw new Error("Nothing left to deliver on this invoice.");
 
+    // a delivery note is not a tax document — it mirrors the invoice's value
+    // so the two always agree — so it keeps the invoice's net, not a new total
     const total = Math.round(
       lines.reduce((s, l) => s + l.qty * l.unitPrice, 0) * 100,
     ) / 100;

@@ -1,7 +1,7 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { postEntry } from "./accounting";
-import { resolveDefaults, round2, splitTax } from "./accountingDefaults";
+import { resolveDefaults, round2, settledTax } from "./accountingDefaults";
 
 /**
  * Turning documents into journal entries.
@@ -67,7 +67,9 @@ export async function postBill(
   bill: Doc<"purchases">,
 ): Promise<Id<"journalEntries">> {
   const d = await resolveDefaults(ctx, ownerId);
-  const { net, tax } = splitTax(bill.total, bill.taxPct);
+  // `taxAmount` is what the lines actually added up to; only an older
+  // document without it falls back to deriving tax from a single rate
+  const { net, tax } = settledTax(bill.total, bill.taxPct, bill.taxAmount);
   const lines: {
     accountId: Id<"accounts">;
     debit: number;
@@ -203,7 +205,7 @@ export async function postSale(
   sale: Doc<"sales">,
 ): Promise<Id<"journalEntries">> {
   const d = await resolveDefaults(ctx, ownerId);
-  const { net, tax } = splitTax(sale.total, sale.taxPct);
+  const { net, tax } = settledTax(sale.total, sale.taxPct, sale.taxAmount);
   const lines: {
     accountId: Id<"accounts">;
     debit: number;

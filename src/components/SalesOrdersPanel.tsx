@@ -26,6 +26,7 @@ import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import { useAppDialogs } from "@/components/AppDialogs";
 import SalesPageHeading from "@/components/SalesPageHeading";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { priceTaxedLines } from "@/lib/line-tax";
 
 type OrderDoc = Doc<"salesOrders">;
 type Status = OrderDoc["status"];
@@ -53,9 +54,20 @@ const day = (ms: number) =>
 
 const num = (value: string) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
-type DraftLine = { productId: Id<"finishedGoods"> | ""; qty: string; price: string };
+type DraftLine = {
+  productId: Id<"finishedGoods"> | "";
+  qty: string;
+  price: string;
+  /** This line's own tax rate. Empty means "use the product's". */
+  tax: string;
+};
 
-const emptyLine = (): DraftLine => ({ productId: "", qty: "1", price: "" });
+const emptyLine = (): DraftLine => ({
+  productId: "",
+  qty: "1",
+  price: "",
+  tax: "",
+});
 
 const FIELD =
   "text-[11px] font-semibold tracking-widest text-muted-foreground uppercase";
@@ -131,6 +143,8 @@ function SalesOrderForm({
           productId: l.productId,
           qty: String(l.qty),
           price: String(l.unitPrice),
+          // a saved line keeps the rate the order was raised at
+          tax: l.taxPct !== undefined ? String(l.taxPct) : "",
         }))
       : [emptyLine()];
   });
@@ -148,9 +162,25 @@ function SalesOrderForm({
     () => lines.reduce((sum, l) => sum + num(l.qty) * num(l.price), 0),
     [lines],
   );
-  const discountAmount = (subtotal * num(discount)) / 100;
-  const grandTotal =
-    subtotal - discountAmount + ((subtotal - discountAmount) * num(taxValue)) / 100;
+  // the same arithmetic the server runs: tax summed across the lines, each at
+  // its own rate, with the discount shared in proportion
+  const priced = priceTaxedLines(
+    lines.map((l) => {
+      const product = l.productId === "" ? undefined : rows.find((p) => p._id === l.productId);
+      return {
+        qty: num(l.qty),
+        unitPrice: num(l.price),
+        taxPct:
+          l.tax.trim() === ""
+            ? (product?.salesTaxPct ?? Math.max(0, num(taxValue)))
+            : Math.min(100, Math.max(0, num(l.tax))),
+      };
+    }),
+    num(discount),
+  );
+  const discountAmount = priced.discount;
+  const grandTotal = priced.grand;
+  const taxAmount = priced.tax;
 
   /**
    * The product's whole identity on one row — name, code · category · stock
@@ -220,11 +250,18 @@ function SalesOrderForm({
         poRef: poRef.trim() || undefined,
         discountPct: num(discount) || undefined,
         taxPct: num(taxValue) || undefined,
-        lines: clean.map((l) => ({
-          productId: l.productId as Id<"finishedGoods">,
-          qty: num(l.qty),
-          unitPrice: num(l.price),
-        })),
+        lines: clean.map((l) => {
+          const product = rows.find((p) => p._id === l.productId);
+          return {
+            productId: l.productId as Id<"finishedGoods">,
+            qty: num(l.qty),
+            unitPrice: num(l.price),
+            taxPct:
+              l.tax.trim() === ""
+                ? product?.salesTaxPct
+                : Math.min(100, Math.max(0, num(l.tax))),
+          };
+        }),
       };
       if (editing) {
         await updateOrder({ id: editing._id, ...payload });
@@ -357,19 +394,20 @@ function SalesOrderForm({
             <tr className="border-b border-border text-[11px] tracking-wide text-muted-foreground uppercase">
               <th className="w-8 py-1.5 text-left font-medium">#</th>
               <th className="py-1.5 text-left font-medium">Product</th>
-              <th className="w-24 py-1.5 text-right font-medium">Qty</th>
-              <th className="w-32 py-1.5 text-right font-medium">Price</th>
-              <th className="w-32 py-1.5 text-right font-medium">Amount</th>
+              <th className="w-20 py-1.5 text-right font-medium">Qty</th>
+              <th className="w-24 py-1.5 text-right font-medium">Price</th>
+              <th className="w-20 py-1.5 text-right font-medium">Tax %</th>
+              <th className="w-28 py-1.5 text-right font-medium">Amount</th>
               <th className="w-8" />
             </tr>
           </thead>
           <tbody>
             {lines.map((line, index) => (
               <tr key={index} className="border-b border-border/50">
-                <td className="py-2 text-xs text-muted-foreground tabular-nums">
+                <td className="py-1 text-xs text-muted-foreground tabular-nums">
                   {index + 1}
                 </td>
-                <td className="py-2 pr-2">
+                <td className="py-1 pr-1.5">
                   <ItemPicker
                     className="w-full"
                     items={productOptions}
@@ -383,6 +421,12 @@ function SalesOrderForm({
                           product && line.price === ""
                             ? String(priceOf.get(product._id) ?? 0)
                             : line.price,
+                        // the product's own rate is offered, not imposed
+                        tax:
+                          line.tax ||
+                          (product?.salesTaxPct !== undefined
+                            ? String(product.salesTaxPct)
+                            : ""),
                       });
                     }}
                     placeholder="Choose or search product…"
@@ -391,7 +435,7 @@ function SalesOrderForm({
                     aria-label="Product"
                   />
                 </td>
-                <td className="py-2">
+                <td className="py-1">
                   <Input
                     type="number"
                     min="0"
@@ -400,10 +444,10 @@ function SalesOrderForm({
                     onChange={(e) => updateLine(index, { qty: e.target.value })}
                     aria-label="Quantity"
                     placeholder="Qty"
-                    className="ml-auto block h-9 w-24 rounded-lg text-right text-sm"
+                    className="ml-auto block h-8 w-20 rounded-md text-right text-sm"
                   />
                 </td>
-                <td className="py-2">
+                <td className="py-1">
                   <Input
                     type="number"
                     min="0"
@@ -412,13 +456,39 @@ function SalesOrderForm({
                     onChange={(e) => updateLine(index, { price: e.target.value })}
                     aria-label="Price"
                     placeholder="Price"
-                    className="ml-auto block h-9 w-28 rounded-lg text-right text-sm"
+                    className="ml-auto block h-8 w-24 rounded-md text-right text-sm"
                   />
                 </td>
-                <td className="py-2 text-right font-medium tabular-nums">
-                  {money(num(line.qty) * num(line.price))}
+                <td>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="any"
+                    value={line.tax}
+                    placeholder={String(
+                      rows.find((p) => p._id === line.productId)?.salesTaxPct ??
+                        Math.max(0, num(taxValue)),
+                    )}
+                    onChange={(e) => updateLine(index, { tax: e.target.value })}
+                    aria-label="Line tax percent"
+                    className="ml-auto block h-8 w-20 rounded-md text-right text-sm"
+                  />
                 </td>
-                <td className="py-2 pl-2">
+                <td className="py-1 text-right font-medium tabular-nums">
+                  {money(
+                    priced.lineGrand({
+                      qty: num(line.qty),
+                      unitPrice: num(line.price),
+                      taxPct:
+                        line.tax.trim() === ""
+                          ? (rows.find((p) => p._id === line.productId)
+                              ?.salesTaxPct ?? Math.max(0, num(taxValue)))
+                          : num(line.tax),
+                    }),
+                  )}
+                </td>
+                <td className="py-1 pl-1.5">
                   <button
                     type="button"
                     aria-label="Remove line"
@@ -495,7 +565,9 @@ function SalesOrderForm({
           </div>
           <div className="flex items-center justify-between gap-2 text-muted-foreground">
             <span className="flex items-center gap-2">
-              Tax
+              <span title="Used by any line with no rate of its own">
+                Default tax
+              </span>
               <Input
                 type="number"
                 min={0}
@@ -503,7 +575,7 @@ function SalesOrderForm({
                 value={taxValue}
                 placeholder="0"
                 onChange={(e) => setTax(e.target.value)}
-                aria-label="Tax percent"
+                aria-label="Default tax percent"
                 className="h-7 w-16 rounded-md text-right text-xs tabular-nums"
               />
               %
@@ -517,7 +589,7 @@ function SalesOrderForm({
               )}
             </span>
             <span className="tabular-nums">
-              + {money(((subtotal - discountAmount) * num(taxValue)) / 100)}
+              + {money(taxAmount)}
             </span>
           </div>
           <div className="flex items-center justify-between gap-6 border-t border-border pt-2 text-base font-semibold">
@@ -812,17 +884,17 @@ export default function SalesOrdersPanel({
                     key={`${line.productId}-${index}`}
                     className="border-b border-border/50"
                   >
-                    <td className="py-2 text-xs text-muted-foreground tabular-nums">
+                    <td className="py-1 text-xs text-muted-foreground tabular-nums">
                       {index + 1}
                     </td>
-                    <td className="py-2">{line.name}</td>
+                    <td className="py-1">{line.name}</td>
                     <td className="py-2 text-right tabular-nums">
                       {line.qty} {line.unit}
                     </td>
                     <td className="py-2 text-right tabular-nums">
                       {money(line.unitPrice)}
                     </td>
-                    <td className="py-2 text-right font-medium tabular-nums">
+                    <td className="py-1 text-right font-medium tabular-nums">
                       {money(line.qty * line.unitPrice)}
                     </td>
                   </tr>

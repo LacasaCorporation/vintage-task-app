@@ -161,3 +161,21 @@ export function splitTax(
   const net = round2(gross / (1 + pct / 100));
   return { net, tax: round2(gross - net) };
 }
+
+/**
+ * The tax a document actually carries, for posting.
+ *
+ * A document whose lines each had their own rate has already calculated its
+ * tax — `taxAmount` is that figure, and it is what posts. Anything without it
+ * is an older document with a single rate, and the tax is derived from that.
+ */
+export function settledTax(
+  total: number,
+  taxPct: number | undefined,
+  taxAmount: number | undefined,
+): { net: number; tax: number } {
+  if (taxAmount !== undefined && taxAmount > 0) {
+    return { net: round2(total - taxAmount), tax: round2(taxAmount) };
+  }
+  return splitTax(total, taxPct);
+}

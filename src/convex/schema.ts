@@ -512,9 +512,17 @@ const schema = defineSchema(
           unit: v.string(),
           qty: v.number(),
           unitCost: v.number(),
+          /** This line's own rate; absent means no tax on it. */
+          taxPct: v.optional(v.number()),
         }),
       ),
       total: v.number(),
+      /**
+       * The tax actually charged, summed from the lines. Kept beside `total`
+       * so the ledger posts the figure that was calculated rather than
+       * re-deriving one from a single blended percentage.
+       */
+      taxAmount: v.optional(v.number()),
       isPaid: v.optional(v.boolean()),
       /**
        * The journal entry this bill posted. Absent means it never reached the
@@ -543,6 +551,7 @@ const schema = defineSchema(
       unit: v.string(),
       qty: v.number(),
       unitCost: v.number(),
+      taxPct: v.optional(v.number()),
     })
       .index("by_owner", ["ownerId"])
       .index("by_purchase", ["purchaseId"]),
@@ -775,9 +784,13 @@ const schema = defineSchema(
           unit: v.optional(v.string()),
           qty: v.number(),
           unitPrice: v.number(),
+          /** This line's own rate; absent means no tax on it. */
+          taxPct: v.optional(v.number()),
         }),
       ),
       total: v.number(),
+      /** Tax summed from the lines, posted to the ledger verbatim. */
+      taxAmount: v.optional(v.number()),
       status: v.optional(
         v.union(
           v.literal("draft"),
@@ -817,9 +830,13 @@ const schema = defineSchema(
           unit: v.optional(v.string()),
           qty: v.number(),
           unitPrice: v.number(),
+          /** This line's own rate; absent means no tax on it. */
+          taxPct: v.optional(v.number()),
         }),
       ),
       total: v.number(),
+      /** Tax summed from the lines, posted to the ledger verbatim. */
+      taxAmount: v.optional(v.number()),
       isPaid: v.optional(v.boolean()),
       paidAt: v.optional(v.number()),
       /** The journal entry this invoice posted. */
@@ -868,9 +885,13 @@ const schema = defineSchema(
           unit: v.optional(v.string()),
           qty: v.number(),
           unitPrice: v.number(),
+          /** This line's own rate; absent means no tax on it. */
+          taxPct: v.optional(v.number()),
         }),
       ),
       total: v.number(),
+      /** Tax summed from the lines, posted to the ledger verbatim. */
+      taxAmount: v.optional(v.number()),
       /** `pending` until someone signs for it; `delivered` once they have. */
       status: v.optional(
         v.union(v.literal("pending"), v.literal("delivered")),
@@ -913,9 +934,13 @@ const schema = defineSchema(
           unit: v.optional(v.string()),
           qty: v.number(),
           unitPrice: v.number(),
+          /** This line's own rate; absent means no tax on it. */
+          taxPct: v.optional(v.number()),
         }),
       ),
       total: v.number(),
+      /** Tax summed from the lines, posted to the ledger verbatim. */
+      taxAmount: v.optional(v.number()),
       status: v.union(
         v.literal("draft"),
         v.literal("ordered"),
@@ -997,6 +1022,8 @@ const schema = defineSchema(
       unit: v.optional(v.string()), // sold per: pcs, box, set…
       category: v.optional(v.string()), // managed master value
       subCategory: v.optional(v.string()), // managed master value
+      /** The rate this product usually sells at; fixed into each new line. */
+      salesTaxPct: v.optional(v.number()),
       note: v.optional(v.string()), // short product description
       imageUrl: v.optional(v.string()), // data URL of the product photo
       imageAlt: v.optional(v.string()), // original file name

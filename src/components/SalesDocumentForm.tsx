@@ -15,6 +15,7 @@ import {
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { toast } from "@/lib/toast";
+import { priceTaxedLines } from "@/lib/line-tax";
 import { cn } from "@/lib/utils";
 import {
   DOC_TONE,
@@ -36,7 +37,6 @@ const toInput = (ms: number) => {
 };
 const fromInput = (value: string) => Date.parse(`${value}T12:00:00`);
 const num = (v: string) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const HEAD =
   "border-b border-border/60 bg-muted/40 text-left text-[11px] font-semibold tracking-widest text-muted-foreground uppercase";
@@ -49,9 +49,16 @@ type DraftLine = {
   productId: Id<"finishedGoods"> | "";
   qty: string;
   price: string;
+  /** This line's own tax rate. Empty means "use the product's". */
+  tax: string;
 };
 
-const blankLine = (): DraftLine => ({ productId: "", qty: "1", price: "" });
+const blankLine = (): DraftLine => ({
+  productId: "",
+  qty: "1",
+  price: "",
+  tax: "",
+});
 
 /** What the form is being used for right now. */
 export type SalesDocTarget =
@@ -319,6 +326,8 @@ function SalesDocEditor({
           productId: l.productId,
           qty: String(l.qty),
           price: String(l.unitPrice),
+          // a saved line keeps the rate it was raised at
+          tax: l.taxPct !== undefined ? String(l.taxPct) : "",
         }))
       : [blankLine()],
   );
@@ -434,23 +443,28 @@ function SalesDocEditor({
           unit: product?.unit ?? "pcs",
           qty: num(l.qty),
           price: num(l.price),
+          // a line with no rate of its own takes the product's, falling back
+          // to the document default — the same order the server applies
+          taxPct:
+            l.tax.trim() === ""
+              ? (product?.salesTaxPct ?? Math.max(0, num(taxValue)))
+              : Math.min(100, Math.max(0, num(l.tax))),
         };
       }),
-    [lines, byId],
+    [lines, byId, taxValue],
   );
 
   const totals = useMemo(() => {
-    const net = priced.reduce((s, l) => s + l.qty * l.price, 0);
-    const d = Math.min(100, Math.max(0, num(discount)));
-    const t = Math.max(0, num(taxValue));
-    const after = net - (net * d) / 100;
+    // the same arithmetic the server runs, so what is shown is what is saved
+    const p = priceTaxedLines(priced, num(discount));
     return {
-      net: round2(net),
-      discount: round2((net * d) / 100),
-      tax: round2((after * t) / 100),
-      grand: round2(after + (after * t) / 100),
+      net: p.net,
+      discount: p.discount,
+      tax: p.tax,
+      grand: p.grand,
+      lineGrand: p.lineGrand,
     };
-  }, [priced, discount, taxValue]);
+  }, [priced, discount]);
 
   const realLines = priced.filter((l) => l.productId !== "" && l.qty > 0);
   const problem =
@@ -477,10 +491,15 @@ function SalesDocEditor({
     // an empty or untouched rate takes the sheet's price; a rate someone has
     // deliberately typed is left exactly as it is
     const keepTyped = current.price !== "" && current.price !== "0";
+    const product = byId.get(id as Id<"finishedGoods">);
     setLine(i, {
       productId: id as Id<"finishedGoods">,
       price:
         keepTyped || !entry || entry.price <= 0 ? current.price : String(entry.price),
+      // offered, not imposed — the field fills in and stays editable
+      tax:
+        current.tax ||
+        (product?.salesTaxPct !== undefined ? String(product.salesTaxPct) : ""),
     });
   };
 
@@ -509,10 +528,13 @@ function SalesDocEditor({
         discountPct: num(discount),
         taxPct: num(taxValue),
       };
+      // `realLines` already resolved each line's rate (its own, else the
+      // product's, else the document default) — that is what gets saved
       const payload = realLines.map((l) => ({
         productId: l.productId as Id<"finishedGoods">,
         qty: l.qty,
         unitPrice: l.price,
+        taxPct: l.taxPct || undefined,
       }));
 
       if (kind === "quotation") {
@@ -903,8 +925,9 @@ function SalesDocEditor({
                       <th className="px-2 py-2 text-left">Item</th>
                       <th className="w-24 px-2 py-2 text-right">Qty</th>
                       <th className="w-20 px-2 py-2 text-left">Unit</th>
-                      <th className="w-32 px-2 py-2 text-right">Rate</th>
-                      <th className="w-36 px-2 py-2 text-right">Amount</th>
+                      <th className="w-24 px-2 py-2 text-right">Rate</th>
+                      <th className="w-20 px-2 py-2 text-right">Tax %</th>
+                      <th className="w-32 px-2 py-2 text-right">Amount</th>
                       <th className="w-10" />
                     </tr>
                   </thead>
@@ -977,8 +1000,33 @@ function SalesDocEditor({
                               className={cn(FIELD, "h-8 w-full py-1 text-right text-xs")}
                             />
                           </td>
+                          <td className="px-2 py-1.5">
+                            <Input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="any"
+                              value={l.tax}
+                              placeholder={String(
+                                p?.taxPct ?? Math.max(0, num(taxValue)),
+                              )}
+                              onChange={(e) =>
+                                setLine(i, { tax: e.target.value })
+                              }
+                              aria-label="Line tax percent"
+                              className={cn(FIELD, "h-8 w-full py-1 text-right text-xs")}
+                            />
+                          </td>
                           <td className="px-2 py-1.5 text-right text-xs font-medium tabular-nums">
-                            {money((p?.qty ?? 0) * (p?.price ?? 0))}
+                            {money(
+                              p === undefined
+                                ? 0
+                                : totals.lineGrand({
+                                    qty: p.qty,
+                                    unitPrice: p.price,
+                                    taxPct: p.taxPct,
+                                  }),
+                            )}
                           </td>
                           <td className="px-2 py-1.5 text-right">
                             <button
@@ -1099,7 +1147,7 @@ function SalesDocEditor({
                       min="0"
                       value={taxValue}
                       onChange={(e) => setTax(e.target.value)}
-                      aria-label="Tax percent"
+                      aria-label="Default tax percent"
                       className={cn(FIELD, "ml-2 h-7 w-14 py-0.5 text-right text-xs")}
                     />
                     %
@@ -1287,6 +1335,7 @@ function SalesDocEditor({
           unit: l.unit,
           qty: l.qty,
           unitPrice: l.price,
+          taxPct: l.taxPct || undefined,
         })),
       discountPct: num(discount),
       taxPct: num(taxValue),
