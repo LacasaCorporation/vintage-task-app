@@ -1901,8 +1901,14 @@ export const addFgItem = mutation({
     label: v.optional(v.string()),
     qty: v.number(),
     unitPrice: v.optional(v.number()),
+    /**
+     * Tax for this line. Left off, a material line takes its own purchase rate
+     * and a custom line takes none — the sheet never guesses a rate the user
+     * did not ask for.
+     */
+    taxPct: v.optional(v.number()),
   },
-  handler: async (ctx, { fgId, materialId, label, qty, unitPrice }) => {
+  handler: async (ctx, { fgId, materialId, label, qty, unitPrice, taxPct }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(fgId);
@@ -1920,11 +1926,13 @@ export const addFgItem = mutation({
         .query("costingItems")
         .withIndex("by_fg", (q) => q.eq("fgId", fgId))
         .collect();
+      const lineTax = ratePct(taxPct) ?? ratePct(material.purchaseTaxPct) ?? 0;
       const twin = existing.find(
         (it) =>
           it.materialId === materialId &&
           it.unitPrice === material.pricePerUnit &&
-          it.label === material.name,
+          it.label === material.name &&
+          (it.taxPct ?? 0) === lineTax,
       );
       if (twin) {
         await ctx.db.patch(twin._id, { qty: twin.qty + qty });
@@ -1939,6 +1947,7 @@ export const addFgItem = mutation({
         qty,
         unitPrice: material.pricePerUnit,
         unit: material.unit,
+        taxPct: lineTax,
       });
       await syncProductionConsumption(ctx, fg);
       return newId;
@@ -1952,6 +1961,7 @@ export const addFgItem = mutation({
       label: clean.slice(0, MAX_NAME_LENGTH),
       qty,
       unitPrice: unitPrice ?? 0,
+      taxPct: ratePct(taxPct) ?? 0,
     });
   },
 });
@@ -1963,6 +1973,8 @@ export const updateItem = mutation({
     label: v.optional(v.string()),
     qty: v.optional(v.number()),
     unitPrice: v.optional(v.number()),
+    /** Tax on this line alone; 0 stores as 0, so "exempt" stays explicit. */
+    taxPct: v.optional(v.number()),
   },
   handler: async (ctx, { id, ...patch }) => {
     const userId = await scopeUserId(ctx);
@@ -1973,6 +1985,7 @@ export const updateItem = mutation({
     if (patch.qty !== undefined && patch.qty < 0) throw new Error("Qty can't be negative.");
     if (patch.unitPrice !== undefined && patch.unitPrice < 0)
       throw new Error("Price can't be negative.");
+    if (patch.taxPct !== undefined) patch.taxPct = ratePct(patch.taxPct) ?? 0;
     if (patch.label !== undefined) {
       const clean = patch.label.trim();
       if (clean.length === 0) throw new Error("Give the line a description.");
@@ -2027,7 +2040,7 @@ export const mergeFgDuplicateItems = mutation({
       .collect();
     const groups = new Map<string, typeof items>();
     for (const it of items) {
-      const key = `${it.label}::${it.unitPrice}::${it.unit ?? ""}`;
+      const key = `${it.label}::${it.unitPrice}::${it.unit ?? ""}::${it.taxPct ?? 0}`;
       const list = groups.get(key) ?? [];
       list.push(it);
       groups.set(key, list);

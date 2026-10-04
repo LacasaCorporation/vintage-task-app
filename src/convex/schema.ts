@@ -1219,6 +1219,12 @@ const schema = defineSchema(
       qty: v.number(),
       unitPrice: v.number(), // copied from material but editable
       unit: v.optional(v.string()),
+      /**
+       * Tax on this line alone, as a percentage. A recipe buys things at
+       * different rates — glue at 12%, a board at 18% — so the tax is priced
+       * per line instead of one percentage over the whole sheet.
+       */
+      taxPct: v.optional(v.number()),
     })
       .index("by_sheet", ["sheetId"])
       .index("by_fg", ["fgId"])
