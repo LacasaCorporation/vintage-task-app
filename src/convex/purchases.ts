@@ -5,7 +5,7 @@ import { postBill, postBillPayment, reverseEntry } from "./ledger";
 import { defaultTaxPct } from "./accountingDefaults";
 import { setStockTo, stockIn, stockOut } from "./stock";
 import type { MutationCtx } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
 import { creditRefusalMessage, creditState } from "../lib/credit";
