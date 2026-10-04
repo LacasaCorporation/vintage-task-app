@@ -43,6 +43,7 @@ export default function VendorLedgerDialog({
           dueAt: b.dueAt,
           total: b.total,
           isPaid: b.isPaid === true,
+          amountPaid: b.amountPaid,
           note: b.note,
         }),
       )}

@@ -28,9 +28,9 @@ const FIELD =
 export type PaymentSeed = { vendorId?: Id<"vendors">; vendor?: string } | null;
 
 /**
- * Payments: money paid out to suppliers. Each one is its own document — it can
- * settle a bill or simply record an outflow against the payable — and it posts
- * to the ledger as it is saved, so the register and the accounts agree.
+ * Payments: money paid out to suppliers. Supports partial payments — a single
+ * bill can be settled across multiple payments. Each payment accumulates into
+ * the bill's `amountPaid`; the bill is only marked paid when fully covered.
  */
 export default function PaymentsPanel({
   canCreate,
@@ -77,13 +77,14 @@ export default function PaymentsPanel({
     setBillId("");
   };
 
-  /** Choosing a bill fills in the vendor and the amount it is owed. */
+  /** Choosing a bill fills in the vendor and the outstanding balance. */
   const pickBill = (id: string) => {
     setBillId(id as Id<"purchases"> | "");
     if (id === "") return;
     const bill = unpaidBills.find((b) => b.id === id);
     if (bill === undefined) return;
-    setAmount(String(bill.total));
+    // Pre-fill with the outstanding balance, not the full total
+    setAmount(String(bill.balance));
     const match = (vendors ?? []).find((v) => v.name === (bill.supplier ?? ""));
     setVendorId(match?._id ?? "");
   };
@@ -109,7 +110,17 @@ export default function PaymentsPanel({
         note: note.trim() || undefined,
         billId: billId === "" ? undefined : billId,
       });
-      toast.success("Payment recorded and posted to the ledger.");
+
+      // Check if bill is now fully settled
+      const bill = billId !== "" ? unpaidBills.find((b) => b.id === billId) : undefined;
+      const remaining = bill ? Math.max(0, bill.balance - num(amount)) : 0;
+      if (bill && remaining < 0.01) {
+        toast.success("Payment recorded — bill is now fully settled.");
+      } else if (bill) {
+        toast.success(`Partial payment recorded. ${money(remaining)} still outstanding.`);
+      } else {
+        toast.success("Payment recorded and posted to the ledger.");
+      }
       resetForm();
       setFormOpen(false);
     } catch (error) {
@@ -125,7 +136,7 @@ export default function PaymentsPanel({
     const ok = await confirm({
       title: `Delete ${payment.number}?`,
       message:
-        "The payment's ledger entry is reversed. If it settled a bill, that bill is marked unpaid again.",
+        "The payment's ledger entry is reversed and the bill's paid amount is reduced.",
       confirmLabel: "Delete payment",
       danger: true,
     });
@@ -140,11 +151,15 @@ export default function PaymentsPanel({
     }
   };
 
-  const billNumberOf = (id: Id<"purchases">) =>
-    unpaidBills.find((b) => b.id === id)?.number;
+  const billInfoOf = (id: Id<"purchases">) => {
+    const b = unpaidBills.find((b) => b.id === id);
+    return b ? `${b.number}` : undefined;
+  };
 
   /* ── the payment form, full-screen ────────────────────────────── */
   if (formOpen) {
+    const chosenBill = billId !== "" ? unpaidBills.find((b) => b.id === billId) : undefined;
+
     return (
       <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/30 px-4 py-3">
@@ -205,17 +220,50 @@ export default function PaymentsPanel({
               <option value="">Not against a bill</option>
               {unpaidBills.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.number} · {b.supplier || "No supplier"} · {money(b.total)}
+                  {b.number} · {b.supplier || "No supplier"} ·{" "}
+                  {b.amountPaid > 0
+                    ? `${money(b.balance)} due (${money(b.amountPaid)} paid of ${money(b.total)})`
+                    : money(b.total)}
                 </option>
               ))}
             </select>
           </label>
+
+          {/* Balance indicator for chosen bill */}
+          {chosenBill && (
+            <div className="sm:col-span-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10 px-3 py-2 text-xs">
+              <div className="flex flex-wrap gap-4 tabular-nums">
+                <span>
+                  <span className="font-medium">Bill total:</span>{" "}
+                  <span>{money(chosenBill.total)}</span>
+                </span>
+                <span>
+                  <span className="font-medium">Already paid:</span>{" "}
+                  <span className="text-emerald-600 dark:text-emerald-400">
+                    {money(chosenBill.amountPaid)}
+                  </span>
+                </span>
+                <span>
+                  <span className="font-medium text-amber-700 dark:text-amber-400">
+                    Outstanding balance:
+                  </span>{" "}
+                  <span className="font-semibold text-amber-700 dark:text-amber-400">
+                    {money(chosenBill.balance)}
+                  </span>
+                </span>
+              </div>
+            </div>
+          )}
+
           <label className="space-y-1 text-xs font-medium">
-            <span className="text-muted-foreground">Amount</span>
+            <span className="text-muted-foreground">
+              Amount{chosenBill ? ` (max ${money(chosenBill.balance)})` : ""}
+            </span>
             <Input
               type="number"
               min="0"
               step="any"
+              max={chosenBill ? chosenBill.balance : undefined}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
@@ -267,8 +315,8 @@ export default function PaymentsPanel({
         </div>
 
         <p className="border-t border-border/60 px-5 py-3 text-xs text-muted-foreground">
-          Saving posts this as a debit to accounts payable and a credit to the
-          account the money left, so the payment register and the books agree.
+          Partial payments are supported — the bill stays open until it is fully
+          covered. Each payment posts to the ledger immediately.
         </p>
       </div>
     );
@@ -310,8 +358,8 @@ export default function PaymentsPanel({
             <HandCoins className="mx-auto size-7 text-muted-foreground/40" />
             <p className="mt-2 text-sm font-medium">No payments yet</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Record what leaves the till to a supplier — settling a bill can be
-              done in the same step.
+              Record what leaves the till to a supplier — partial and full
+              payments are both supported.
             </p>
           </div>
         ) : (
@@ -343,7 +391,7 @@ export default function PaymentsPanel({
                       {p.billId !== undefined ? (
                         <span className="inline-flex items-center gap-1 text-muted-foreground">
                           <Link2 className="size-2.5" />
-                          {billNumberOf(p.billId) ?? "a bill"}
+                          {billInfoOf(p.billId) ?? "a bill"}
                         </span>
                       ) : (
                         <span className="text-muted-foreground">—</span>

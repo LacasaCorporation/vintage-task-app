@@ -83,13 +83,14 @@ function ReceiptForm({
   const invoices = options?.invoices ?? [];
   const chosen = invoices.find((i) => i.id === invoiceId);
 
-  /** Pick the invoice being settled — it decides the customer and the debt. */
+  /** Pick the invoice being settled — it decides the customer and the outstanding balance. */
   const pickInvoice = (id: Id<"sales"> | "") => {
     setInvoiceId(id);
     const invoice = invoices.find((i) => i.id === id);
     if (!invoice) return;
     setCustomerName(invoice.customer ?? "");
-    setAmount(String(invoice.total));
+    // Pre-fill with the outstanding balance, not the full total
+    setAmount(String(invoice.balance));
     const sale = sales?.find((s) => s._id === id);
     if (sale?.customerId !== undefined) setCustomerId(sale.customerId);
   };
@@ -200,7 +201,10 @@ function ReceiptForm({
             <option value="">Not against an invoice</option>
             {invoices.map((i) => (
               <option key={i.id} value={i.id}>
-                {i.number} · {i.customer ?? "Walk-in"} · {money(i.total)}
+                {i.number} · {i.customer ?? "Walk-in"} ·{" "}
+                {(i as { amountPaid?: number }).amountPaid
+                  ? `${money((i as { balance: number }).balance)} due (${money((i as { amountPaid: number }).amountPaid)} paid of ${money(i.total)})`
+                  : money(i.total)}
               </option>
             ))}
           </select>
@@ -215,11 +219,14 @@ function ReceiptForm({
           />
         </label>
         <label className="block">
-          <span className={FIELD}>Amount</span>
+          <span className={FIELD}>
+            Amount{chosen ? ` (max ${money((chosen as { balance?: number }).balance ?? chosen.total)})` : ""}
+          </span>
           <Input
             type="number"
             min="0"
             step="any"
+            max={chosen ? (chosen as { balance?: number }).balance ?? chosen.total : undefined}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0.00"
@@ -284,6 +291,16 @@ function ReceiptForm({
           />
         </label>
         <div className="space-y-1.5 text-sm">
+          {/* Balance summary for chosen invoice */}
+          {chosen && (chosen as { amountPaid?: number }).amountPaid !== undefined && (chosen as { amountPaid: number }).amountPaid > 0 && (
+            <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10 px-3 py-2 text-xs">
+              <div className="flex flex-wrap gap-3 tabular-nums">
+                <span><span className="font-medium">Total:</span> {money(chosen.total)}</span>
+                <span><span className="font-medium">Paid:</span> <span className="text-emerald-600 dark:text-emerald-400">{money((chosen as { amountPaid: number }).amountPaid)}</span></span>
+                <span><span className="font-medium text-amber-700 dark:text-amber-400">Due:</span> <span className="font-semibold text-amber-700 dark:text-amber-400">{money((chosen as { balance: number }).balance)}</span></span>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-6 text-muted-foreground">
             <span>Received from</span>
             <span>{customerName.trim() || "—"}</span>

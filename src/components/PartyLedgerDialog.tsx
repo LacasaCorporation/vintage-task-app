@@ -46,6 +46,8 @@ export type PartyDocument<TId extends string = string> = {
   dueAt?: number;
   total: number;
   isPaid: boolean;
+  /** Running total already received / paid. Used to show partial-payment balance. */
+  amountPaid?: number;
   note?: string;
 };
 
@@ -259,11 +261,15 @@ export default function PartyLedgerDialog<TId extends string>({
   const all = documents
     .map((doc) => ({
       doc,
-      // A document is worth its total the moment it is raised. Settling it
-      // adds a matching figure on the other side, so a fully paid document
-      // leaves a balance of zero rather than counting backwards.
+      // A document is worth its total the moment it is raised.
+      // If amountPaid is tracked (partial payments), use it for settled;
+      // otherwise fall back to isPaid ? total : 0 (backward-compatible).
       charged: doc.total,
-      settled: doc.isPaid ? doc.total : 0,
+      settled: doc.amountPaid !== undefined
+        ? round2(doc.amountPaid)
+        : doc.isPaid
+          ? doc.total
+          : 0,
     }))
     .sort((a, b) => a.doc.at - b.doc.at || a.doc.number.localeCompare(b.doc.number));
 
@@ -642,9 +648,11 @@ export default function PartyLedgerDialog<TId extends string>({
                             {doc.note ? `${doc.note} · ` : ""}
                             {doc.isPaid
                               ? role.doneLabel
-                              : doc.dueAt !== undefined
-                                ? `${role.openLabel} · due ${day(doc.dueAt)}`
-                                : role.openLabel}
+                              : doc.amountPaid !== undefined && doc.amountPaid > 0
+                                ? `Partial · ${money(doc.amountPaid)} paid· ${money(doc.total - doc.amountPaid)} due`
+                                : doc.dueAt !== undefined
+                                  ? `${role.openLabel} · due ${day(doc.dueAt)}`
+                                  : role.openLabel}
                           </span>
                         </span>
                       </div>

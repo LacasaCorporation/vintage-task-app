@@ -64,7 +64,8 @@ export const list = query({
 
 /**
  * What the payment form needs to offer: the accounts money can leave, and the
- * bills that are still open, so a payment can settle one at a time.
+ * bills that are still open (with their outstanding balance shown), so a
+ * partial or full payment can be made against any open bill.
  */
 export const options = query({
   args: {},
@@ -92,23 +93,29 @@ export const options = query({
       bills: bills
         .filter((b) => b.isPaid !== true)
         .sort((a, b) => b.purchasedAt - a.purchasedAt)
-        .map((b) => ({
-          id: b._id,
-          number: b.number,
-          supplier: b.supplier,
-          total: b.total,
-        })),
+        .map((b) => {
+          const paid = round(b.amountPaid ?? 0);
+          const balance = round(b.total - paid);
+          return {
+            id: b._id,
+            number: b.number,
+            supplier: b.supplier,
+            total: b.total,
+            amountPaid: paid,
+            balance,
+          };
+        }),
     };
   },
 });
 
 /**
- * Record money paid to a supplier.
+ * Record money paid to a supplier — partial or full.
  *
- * The out-flow is written to the ledger in the same call — debit payable,
- * credit the account it left — so the register and the accounts can never
- * drift. When the payment is settling a bill, that bill is marked paid with
- * this same entry, so one outflow is one entry rather than two.
+ * Each payment accumulates into `amountPaid` on the bill. The bill is only
+ * marked `isPaid` when the running total reaches (or exceeds) the bill total.
+ * The out-flow is posted to the ledger as it is saved, so the register and
+ * the accounts can never drift.
  */
 export const create = mutation({
   args: {
@@ -139,7 +146,15 @@ export const create = mutation({
         throw new Error("That bill no longer exists.");
       }
       if (bill.isPaid === true) {
-        throw new Error(`${bill.number} is already paid.`);
+        throw new Error(`${bill.number} is already fully paid.`);
+      }
+      const currentPaid = round(bill.amountPaid ?? 0);
+      const balance = round(bill.total - currentPaid);
+      if (amount > balance + 0.001) {
+        throw new Error(
+          `Payment of ${amount} exceeds the outstanding balance of ${balance}. ` +
+            `Record a payment of ${balance} or less.`,
+        );
       }
       billNumber = bill.number;
       if (vendor === "") vendor = (bill.supplier ?? "").trim();
@@ -183,20 +198,33 @@ export const create = mutation({
       amount,
       at,
       vendor,
-      memo: billNumber !== undefined ? `Paid bill ${billNumber}` : "Supplier payment",
+      memo:
+        billNumber !== undefined
+          ? `Paid bill ${billNumber}`
+          : "Supplier payment",
       fromAccountId: paidFrom,
     });
     await ctx.db.patch(paymentId, { entryId });
 
-    // settling a bill with this payment: one outflow, one entry
+    // Update the bill's running paid total
     if (args.billId !== undefined) {
-      await ctx.db.patch(args.billId, { isPaid: true, paymentEntryId: entryId });
+      const bill = await ctx.db.get(args.billId);
+      if (bill !== null && bill.ownerId === userId) {
+        const newAmountPaid = round((bill.amountPaid ?? 0) + amount);
+        const fullyPaid = newAmountPaid >= bill.total - 0.001;
+        await ctx.db.patch(args.billId, {
+          amountPaid: newAmountPaid,
+          ...(fullyPaid
+            ? { isPaid: true, paymentEntryId: entryId }
+            : { isPaid: undefined, paymentEntryId: undefined }),
+        });
+      }
     }
     return paymentId;
   },
 });
 
-/** Remove a payment, its ledger entry, and the paid mark it put on a bill. */
+/** Remove a payment, its ledger entry, and reverse the paid amount on the bill. */
 export const remove = mutation({
   args: { id: v.id("payments") },
   handler: async (ctx, { id }): Promise<void> => {
@@ -205,16 +233,19 @@ export const remove = mutation({
     await requireItem(ctx, userId, "purchases", "delete");
     const payment = await ctx.db.get(id);
     if (payment === null || payment.ownerId !== userId) return;
+
+    // Reverse this payment's contribution to the bill's amountPaid
     if (payment.billId !== undefined) {
       const bill = await ctx.db.get(payment.billId);
-      if (
-        bill !== null &&
-        bill.ownerId === userId &&
-        bill.paymentEntryId === payment.entryId
-      ) {
+      if (bill !== null && bill.ownerId === userId) {
+        const newAmountPaid = round(Math.max(0, (bill.amountPaid ?? 0) - payment.amount));
         await ctx.db.patch(payment.billId, {
-          isPaid: undefined,
-          paymentEntryId: undefined,
+          amountPaid: newAmountPaid > 0 ? newAmountPaid : undefined,
+          isPaid: newAmountPaid >= bill.total - 0.001 ? true : undefined,
+          paymentEntryId:
+            newAmountPaid >= bill.total - 0.001
+              ? bill.paymentEntryId
+              : undefined,
         });
       }
     }

@@ -10,9 +10,10 @@ import { resolveDefaults } from "./accountingDefaults";
 /**
  * Receipts: money received from customers.
  *
- * The counterpart to supplier payments. A receipt is one event, so it is one
- * journal entry — naming the invoice it settles clears that invoice, and a
- * part payment simply leaves the rest of the debt standing.
+ * Supports partial payments — each receipt accumulates into `amountPaid` on
+ * the invoice. The invoice is only marked `isPaid: true` when the running total
+ * reaches (or exceeds) the invoice total. Deleting a receipt reverses the
+ * contribution and the ledger entry.
  */
 
 const MAX_NAME_LENGTH = 120;
@@ -74,7 +75,7 @@ export const list = query({
 
 /**
  * What the receipt form needs: the accounts money can land in, and the invoices
- * still open, so a receipt can settle one at a time.
+ * still open, with their outstanding balance so a partial receipt can be entered.
  */
 export const options = query({
   args: {},
@@ -97,13 +98,19 @@ export const options = query({
       accounts,
       invoices: sales
         .filter((s) => s.isPaid !== true)
-        .map((s) => ({
-          id: s._id,
-          number: s.number,
-          customer: s.customerName ?? undefined,
-          total: s.total,
-          soldAt: s.soldAt,
-        })),
+        .map((s) => {
+          const paid = round(s.amountPaid ?? 0);
+          const balance = round(s.total - paid);
+          return {
+            id: s._id,
+            number: s.number,
+            customer: s.customerName ?? undefined,
+            total: s.total,
+            amountPaid: paid,
+            balance,
+            soldAt: s.soldAt,
+          };
+        }),
     };
   },
 });
@@ -136,7 +143,16 @@ export const create = mutation({
       // the invoice decides who was paid, so the form cannot misdirect it
       customerId = sale.customerId ?? customerId;
       customerName = sale.customerName ?? customerName;
-      if (sale.isPaid === true) throw new Error(`${sale.number} is already paid.`);
+      if (sale.isPaid === true) throw new Error(`${sale.number} is already fully paid.`);
+      // Guard against over-payment
+      const currentPaid = round(sale.amountPaid ?? 0);
+      const balance = round(sale.total - currentPaid);
+      if (amount > balance + 0.001) {
+        throw new Error(
+          `Receipt of ${amount} exceeds the outstanding balance of ${balance}. ` +
+            `Record a receipt of ${balance} or less.`,
+        );
+      }
     }
     if (!customerName) throw new Error("Say who paid — pick an invoice or a customer.");
 
@@ -167,13 +183,15 @@ export const create = mutation({
       entryId,
     });
 
-    // settling an invoice in full clears it, and the invoice's own entry is
-    // never touched — the receipt is the entry that closes the debt
-    if (sale !== null && sale !== undefined && amount >= sale.total) {
+    // Update the invoice's running received total
+    if (sale !== null && sale !== undefined) {
+      const newAmountPaid = round((sale.amountPaid ?? 0) + amount);
+      const fullyPaid = newAmountPaid >= sale.total - 0.001;
       await ctx.db.patch(sale._id, {
-        isPaid: true,
-        paidAt: at,
-        paymentEntryId: entryId,
+        amountPaid: newAmountPaid,
+        ...(fullyPaid
+          ? { isPaid: true, paidAt: at, paymentEntryId: entryId }
+          : { isPaid: undefined, paidAt: undefined, paymentEntryId: undefined }),
       });
     }
     return id;
@@ -191,12 +209,17 @@ export const remove = mutation({
     if (receipt === null || receipt.ownerId !== userId) throw new Error("Not your receipt.");
     await reverseEntry(ctx, userId, receipt.entryId);
     if (receipt.invoiceId !== undefined) {
-      // the invoice this settled is open again
-      await ctx.db.patch(receipt.invoiceId, {
-        isPaid: undefined,
-        paidAt: undefined,
-        paymentEntryId: undefined,
-      });
+      const sale = await ctx.db.get(receipt.invoiceId);
+      if (sale !== null && sale.ownerId === userId) {
+        const newAmountPaid = round(Math.max(0, (sale.amountPaid ?? 0) - receipt.amount));
+        await ctx.db.patch(receipt.invoiceId, {
+          amountPaid: newAmountPaid > 0 ? newAmountPaid : undefined,
+          isPaid: newAmountPaid >= sale.total - 0.001 ? true : undefined,
+          paidAt: newAmountPaid >= sale.total - 0.001 ? sale.paidAt : undefined,
+          paymentEntryId:
+            newAmountPaid >= sale.total - 0.001 ? sale.paymentEntryId : undefined,
+        });
+      }
     }
     await ctx.db.delete(args.id);
   },

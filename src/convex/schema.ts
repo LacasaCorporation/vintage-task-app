@@ -525,6 +525,12 @@ const schema = defineSchema(
       taxAmount: v.optional(v.number()),
       isPaid: v.optional(v.boolean()),
       /**
+       * Running total of all payments made against this bill.
+       * Outstanding balance = total − amountPaid.
+       * When amountPaid >= total the bill is also marked isPaid: true.
+       */
+      amountPaid: v.optional(v.number()),
+      /**
        * The journal entry this bill posted. Absent means it never reached the
        * ledger — the register offers to repair it rather than hiding that.
        */
@@ -934,6 +940,12 @@ const schema = defineSchema(
       taxAmount: v.optional(v.number()),
       isPaid: v.optional(v.boolean()),
       paidAt: v.optional(v.number()),
+      /**
+       * Running total of all receipts posted against this invoice.
+       * Outstanding balance = total − amountPaid.
+       * When amountPaid >= total the invoice is also marked isPaid: true.
+       */
+      amountPaid: v.optional(v.number()),
       /** The journal entry this invoice posted. */
       entryId: v.optional(v.id("journalEntries")),
       /** The entry that settled this invoice, when the customer has paid. */

@@ -43,6 +43,7 @@ export default function CustomerLedgerDialog({
           dueAt: s.dueAt,
           total: s.total,
           isPaid: s.isPaid === true,
+          amountPaid: s.amountPaid,
           note: s.note,
         }),
       )}
