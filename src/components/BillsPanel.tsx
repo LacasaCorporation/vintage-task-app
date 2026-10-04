@@ -210,8 +210,12 @@ export default function BillsPanel({
   const [purchasedOn, setPurchasedOn] = useState(todayInput);
   const [note, setNote] = useState(seedLpo?.note ?? "");
   const [discount, setDiscount] = useState("0");
-  // empty means "whatever the workspace charges", so a new bill inherits it
-  const [tax, setTax] = useState("");
+  /**
+   * The rate the bill being edited was raised at. Its lines that carry no
+   * rate of their own fall back to this rather than to today's workspace
+   * default — otherwise opening an old bill would silently re-tax it.
+   */
+  const [editFallbackRate, setEditFallbackRate] = useState<number | null>(null);
   const [lines, setLines] = useState<DraftLine[]>(() =>
     seedLpo !== null && seedLpo.lines.length > 0
       ? seedLpo.lines.map((line) => ({
@@ -246,9 +250,13 @@ export default function BillsPanel({
     () => lines.reduce((sum, l) => sum + num(l.qty) * num(l.rate), 0),
     [lines],
   );
-  // the document rate is what a line with no rate of its own falls back to
-  const taxValue = tax === "" ? String(taxDefault?.taxPct ?? 0) : tax;
-  const fallbackRate = num(taxValue);
+  /**
+   * The workspace default, which is what a line with no rate of its own falls
+   * back to. Reported in the summary for awareness; each line's own rate is
+   * what is actually charged.
+   */
+  const fallbackRate =
+    editFallbackRate ?? Math.max(0, taxDefault?.taxPct ?? 0);
   /**
    * The same arithmetic the server runs, so what this screen shows is what
    * gets saved — including tax summed across lines at their own rates.
@@ -278,7 +286,7 @@ export default function BillsPanel({
     setPurchasedOn(todayInput());
     setNote("");
     setDiscount("0");
-    setTax("");
+    setEditFallbackRate(null);
     setLines([emptyLine()]);
   };
 
@@ -296,8 +304,7 @@ export default function BillsPanel({
     setPurchasedOn(toLocalInput(new Date(bill.purchasedAt)));
     setNote(bill.note ?? "");
     setDiscount(String(bill.discountPct ?? 0));
-    // a bill saved before the default existed inherits it rather than 0
-    setTax(bill.taxPct !== undefined ? String(bill.taxPct) : "");
+    setEditFallbackRate(bill.taxPct ?? null);
     setLines(
       bill.lines.length > 0
         ? bill.lines.map((line) => ({
@@ -329,7 +336,7 @@ export default function BillsPanel({
         purchasedAt: purchasedOn ? new Date(purchasedOn).getTime() : undefined,
         note: note.trim() || undefined,
         discountPct: num(discount) || undefined,
-        taxPct: num(taxValue) || undefined,
+        taxPct: fallbackRate || undefined,
         lpoId: fromLpoId ?? undefined,
         grvId: fromGrvId ?? undefined,
         lines: valid.map((l) => ({
@@ -754,34 +761,20 @@ export default function BillsPanel({
               </span>
               <span className="tabular-nums">− {money(priced.discount)}</span>
             </div>
-            <div className="flex items-center justify-between gap-2 text-muted-foreground">
-              <span className="flex items-center gap-2">
-                <span title="Used by any line that has no rate of its own">
-                  Default tax
-                </span>
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="any"
-                  value={taxValue}
-                  placeholder="0"
-                  disabled={!canCreate}
-                  onChange={(e) => setTax(e.target.value)}
-                  aria-label="Default tax percent"
-                  className="h-7 w-16 rounded-md text-right text-xs tabular-nums"
-                />
-                %
-                {tax === "" && num(taxValue) > 0 && (
-                  <span
-                    title="From Settings → Accounting"
-                    className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
-                  >
-                    default
-                  </span>
-                )}
-              </span>
-              <span className="tabular-nums">+ {money(taxAmount)}</span>
+            {/* The tax on this bill is whatever the lines add up to, so the
+                summary reports that figure rather than offering a rate to
+                edit here — a rate would imply one tax for the whole bill.
+                The default is named underneath, for awareness only. */}
+            <div className="text-muted-foreground">
+              <div className="flex items-baseline justify-between gap-2">
+                <span>Tax amount</span>
+                <span className="tabular-nums">+ {money(taxAmount)}</span>
+              </div>
+              <p className="mt-0.5 text-right text-[11px] text-muted-foreground/80">
+                Default tax {fallbackRate}%
+                {lines.some((l) => num(l.tax) > 0) ? " · lines may differ" : ""}
+                {editingId !== null ? " · from this bill" : ""}
+              </p>
             </div>
             <div className="mt-2 flex items-center justify-between border-t border-border pt-2 text-base font-semibold">
               <span>Total</span>

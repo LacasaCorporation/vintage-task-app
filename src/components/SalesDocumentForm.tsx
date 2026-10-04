@@ -313,13 +313,16 @@ function SalesDocEditor({
       ? String(seed.discountPct)
       : "0",
   );
-  const [tax, setTax] = useState(() =>
-    // a document with no saved rate inherits the workspace default rather
-    // than starting from a hard zero
+  /**
+   * The rate this document was raised with, or the workspace default when it
+   * has none. Nothing is edited here — each line carries its own rate — so it
+   * is only the figure a line falls back to and the one reported underneath
+   * the summary's tax total.
+   */
+  const taxValue =
     seed && "taxPct" in seed && seed.taxPct !== undefined
       ? String(seed.taxPct)
-      : "",
-  );
+      : String(taxDefault?.taxPct ?? 0);
   const [lines, setLines] = useState<DraftLine[]>(() =>
     seed && "lines" in seed && seed.lines.length > 0
       ? seed.lines.map((l) => ({
@@ -367,13 +370,6 @@ function SalesDocEditor({
     api.sales.deliveryDue,
     target.mode === "newDelivery" ? { saleId: target.saleId } : "skip",
   );
-
-  /**
-   * An empty tax field means "whatever the workspace charges", so the field
-   * shows that rate without having to write it into state. A rate that has
-   * been cleared on purpose stays cleared.
-   */
-  const taxValue = tax === "" ? String(taxDefault?.taxPct ?? 0) : tax;
 
   /**
    * The picker carries the rate, so the price is known before a line is even
@@ -1139,22 +1135,21 @@ function SalesDocEditor({
                     {totals.discount === 0 ? "—" : `−${money(totals.discount)}`}
                   </dd>
                 </div>
-                <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2">
-                  <dt className="text-muted-foreground">
-                    Tax amount
-                    <Input
-                      type="number"
-                      min="0"
-                      value={taxValue}
-                      onChange={(e) => setTax(e.target.value)}
-                      aria-label="Default tax percent"
-                      className={cn(FIELD, "ml-2 h-7 w-14 py-0.5 text-right text-xs")}
-                    />
-                    %
-                  </dt>
-                  <dd className="tabular-nums font-medium">
-                    {totals.tax === 0 ? "—" : money(totals.tax)}
-                  </dd>
+                {/* the tax is what the lines add up to, so the summary reports
+                    that figure; the default is named beneath for awareness */}
+                <div className="border-t border-border/60 pt-2 text-muted-foreground">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <dt>Tax amount</dt>
+                    <dd className="tabular-nums font-medium">
+                      {totals.tax === 0 ? "—" : money(totals.tax)}
+                    </dd>
+                  </div>
+                  <p className="mt-0.5 text-right text-[11px] text-muted-foreground/80">
+                    Default tax {Math.max(0, num(taxValue))}%
+                    {lines.some((l) => num(l.tax) > 0)
+                      ? " · lines may differ"
+                      : ""}
+                  </p>
                 </div>
                 <div className="flex items-center justify-between border-t pt-2 text-base font-semibold">
                   <dt>Total</dt>
