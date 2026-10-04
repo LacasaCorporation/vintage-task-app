@@ -854,7 +854,16 @@ export default function GrvPanel({
                   return (
                     <tr key={row._id} className="transition-colors hover:bg-accent/40">
                       <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap text-muted-foreground">
-                        {row.number}
+                        {/* the number opens the voucher, exactly as it does on
+                            the order and the bill registers — the number is
+                            the one thing on every row that is always there */}
+                        <button
+                          type="button"
+                          onClick={() => setViewingId(row._id)}
+                          className="font-mono text-xs font-medium hover:text-primary hover:underline"
+                        >
+                          {row.number}
+                        </button>
                       </td>
                       <td className="px-3 py-2.5 text-xs whitespace-nowrap text-muted-foreground">
                         {formatDueLabel(row.receivedAt)}
