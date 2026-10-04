@@ -143,10 +143,24 @@ export default function VendorField({
                         ) : (
                           <span className="size-3 shrink-0" />
                         )}
-                        <span className="min-w-0 flex-1 truncate">{vendor.name}</span>
-                        {vendor.contactName && (
+                        <span className="min-w-0 flex-1 truncate">
+                          {vendor.name}
+                          {vendor.legalName && (
+                            <span className="ml-1.5 text-[10px] text-muted-foreground">
+                              {vendor.legalName}
+                            </span>
+                          )}
+                        </span>
+                        {vendor.taxId && (
+                          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                            {vendor.taxId}
+                          </span>
+                        )}
+                        {(vendor.contactName || vendor.contactRole) && (
                           <span className="shrink-0 text-[10px] text-muted-foreground">
-                            {vendor.contactName}
+                            {[vendor.contactName, vendor.contactRole]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </span>
                         )}
                       </button>
@@ -172,6 +186,11 @@ export default function VendorField({
         <p className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
           <Link2 className="size-2.5" />
           Linked to “{linked.name}”
+          {linked.creditLimit !== undefined && (
+            <span className="font-normal opacity-80">
+              · credit {linked.creditLimit.toLocaleString()}
+            </span>
+          )}
           <button
             type="button"
             onClick={() => onChange({ supplierId: undefined })}

@@ -2,7 +2,17 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, Loader2, Plus, Printer, Save, Trash2, Truck, X } from "lucide-react";
+import {
+  CreditCard,
+  FileText,
+  Loader2,
+  Plus,
+  Printer,
+  Save,
+  Trash2,
+  Truck,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { useAppDialogs } from "@/components/AppDialogs";
 import { toast } from "@/lib/toast";
 import { priceTaxedLines } from "@/lib/line-tax";
 import { cn } from "@/lib/utils";
@@ -198,9 +209,11 @@ function SalesDocEditor({
   initial: SalesDocRecord | null;
 }) {
   const { format: money, symbol } = useWorkspaceCurrency();
+  const { confirm } = useAppDialogs();
   const firm = useQuery(api.settings.firmProfile) as FirmProfile | null;
   const taxDefault = useQuery(api.sales.postingDefaults);
   const customers = useQuery(api.contacts.listCustomers);
+  const sales = useQuery(api.sales.listSales);
   const addCustomer = useMutation(api.contacts.createCustomer);
 
   // Every field starts from the record being opened, not from a blank form
@@ -513,17 +526,59 @@ function SalesDocEditor({
     if (entry) setLine(i, { price: String(entry.price) });
   };
 
+  /**
+   * Where the chosen customer stands against its credit limit, and where this
+   * document would leave it. The server refuses the same thing, so this only
+   * decides whether to ask first or to send the override.
+   */
+  const credit = useMemo(() => {
+    if (kind !== "invoice" || customerId === "") return null;
+    const customer = (customers ?? []).find((c) => c._id === customerId);
+    if (customer === undefined || customer.creditLimit === undefined) return null;
+    const owed = (sales ?? [])
+      .filter((s) => s.customerId === customerId && s.isPaid !== true)
+      .reduce((sum, s) => sum + s.total, 0);
+    return {
+      customer,
+      owed,
+      limit: customer.creditLimit,
+      // editing an invoice already counted in `owed` must not count it twice
+      projected:
+        owed -
+        (editing ? ((sales ?? []).find((s) => s._id === target.id)?.total ?? 0) : 0) +
+        totals.grand,
+    };
+  }, [kind, customerId, customers, sales, totals.grand, editing, target]);
+
   /* ── save ─────────────────────────────────────────────────────── */
-  const save = async () => {
+  const save = async (overrideCreditLimit = false) => {
     if (readOnly || busy) return;
     if (problem) {
       toast.error(problem);
       return;
     }
+    // The customer's ceiling is the server's to enforce; asking here means the
+    // refusal can name the numbers and offer the override rather than just
+    // bouncing the save.
+    if (credit !== null && credit.projected > credit.limit && !overrideCreditLimit) {
+      const ok = await confirm({
+        title: `${credit.customer.name} is over its credit limit`,
+        message: `${money(credit.owed)} is already outstanding against a limit of ${money(
+          credit.limit,
+        )}. This invoice would take it to ${money(
+          credit.projected,
+        )} — ${money(credit.projected - credit.limit)} over. Save it anyway?`,
+        confirmLabel: "Save over the limit",
+        danger: true,
+      });
+      if (!ok) return;
+      return save(true);
+    }
     setBusy(true);
     try {
       const common = {
         customerId: customerId === "" ? undefined : customerId,
+        overrideCreditLimit: overrideCreditLimit || undefined,
         customerName: customerName.trim() || undefined,
         customerAddress: customerAddress.trim() || undefined,
         poRef: poRef.trim() || undefined,
@@ -819,6 +874,31 @@ function SalesDocEditor({
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     Saved under a one-off name — link it to a customer record to
                     keep their history together.
+                  </p>
+                )}
+                {/* the ceiling is checked before saving, so it is shown here
+                    rather than only appearing as a refusal */}
+                {credit !== null && (
+                  <p
+                    className={cn(
+                      "mt-1 flex flex-wrap items-center gap-1 text-[11px]",
+                      credit.projected > credit.limit
+                        ? "font-medium text-rose-600 dark:text-rose-400"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    <CreditCard className="size-2.5 shrink-0" />
+                    {credit.projected > credit.limit
+                      ? `This takes ${credit.customer.name} to ${money(
+                          credit.projected,
+                        )} — ${money(
+                          credit.projected - credit.limit,
+                        )} over their ${money(credit.limit)} credit limit.`
+                      : `${money(credit.owed)} outstanding of ${money(
+                          credit.limit,
+                        )} credit · this invoice leaves ${money(
+                          credit.limit - credit.projected,
+                        )} headroom.`}
                   </p>
                 )}
               </div>
