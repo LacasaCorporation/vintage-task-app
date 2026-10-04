@@ -113,6 +113,18 @@ export default function BillsPanel({
   /** A voucher the bill is being raised from, when it came from one. */
   const [fromGrvId, setFromGrvId] = useState<Id<"grvs"> | null>(null);
 
+  const materialOf = (id: Id<"rawMaterials"> | "") => materials.find((m) => m._id === id);
+
+  /**
+   * A line's rate: its own if one was typed, else the material's stored rate,
+   * else the document default. The order the server applies, kept in one place
+   * so the figure shown and the figure saved cannot drift apart.
+   */
+  const lineRate = (line: DraftLine, fallback: number): number =>
+    line.tax.trim() === ""
+      ? (materialOf(line.materialId)?.purchaseTaxPct ?? fallback)
+      : Math.min(100, Math.max(0, num(line.tax)));
+
   /**
    * Orders and vouchers this bill could be raised from. An order already
    * received is left out, because its stock is in and billing it as well would
@@ -214,7 +226,6 @@ export default function BillsPanel({
   const [busy, setBusy] = useState(false);
   const [repairingBills, setRepairingBills] = useState(false);
 
-  const materialOf = (id: Id<"rawMaterials"> | "") => materials.find((m) => m._id === id);
 
   const unpostedBills = (bills ?? []).filter((b) => b.entryId === undefined);
   const viewed = bills?.find((b) => b._id === viewingId) ?? null;
@@ -252,16 +263,6 @@ export default function BillsPanel({
   );
   const taxAmount = priced.tax;
   const grandTotal = priced.grand;
-  /**
-   * A line's rate: its own if one was typed, else the material's stored rate,
-   * else the document default. The order the server applies, kept in one place
-   * so the figure shown and the figure saved cannot drift apart.
-   */
-  const lineRate = (line: DraftLine, fallback: number): number =>
-    line.tax.trim() === ""
-      ? (materialOf(line.materialId)?.purchaseTaxPct ?? fallback)
-      : Math.min(100, Math.max(0, num(line.tax)));
-
   const updateLine = (index: number, patch: Partial<DraftLine>) =>
     setLines((current) =>
       current.map((line, i) => (i === index ? { ...line, ...patch } : line)),
