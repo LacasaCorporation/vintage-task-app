@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   Eye,
+  FilePlus2,
   FileSpreadsheet,
   Link2,
   Loader2,
@@ -87,6 +88,7 @@ export default function BillsPanel({
 }) {
   const bills = useQuery(api.purchases.list);
   const lpos = useQuery(api.lpo.list);
+  const grvs = useQuery(api.grv.list);
   const taxDefault = useQuery(api.purchases.postingDefaults);
   const { confirm } = useAppDialogs();
   const { format: money } = useWorkspaceCurrency();
@@ -108,6 +110,81 @@ export default function BillsPanel({
     seed !== null && seed.mode === "fromLpo" ? seed.lpo._id : null,
   );
   const seedLpo = seed !== null && seed.mode === "fromLpo" ? seed.lpo : null;
+  /** A voucher the bill is being raised from, when it came from one. */
+  const [fromGrvId, setFromGrvId] = useState<Id<"grvs"> | null>(null);
+
+  /**
+   * Orders and vouchers this bill could be raised from. An order already
+   * received is left out, because its stock is in and billing it as well would
+   * count the same delivery twice; a voucher already billed is left out for
+   * the same reason.
+   */
+  const raisableSources = useMemo(() => {
+    const orders = (lpos ?? [])
+      .filter((l) => l.status !== "received" && l.status !== "cancelled" && l.billId === undefined)
+      .map((l) => ({
+        id: l._id as string,
+        kind: "lpo" as const,
+        number: l.number,
+        vendor: l.vendor ?? "",
+        lineCount: l.lines.length,
+        at: l.orderedAt,
+      }));
+    const vouchers = (grvs ?? [])
+      .filter((g) => g.billId === undefined)
+      .map((g) => ({
+        id: g._id as string,
+        kind: "grv" as const,
+        number: g.number,
+        vendor: g.vendor ?? "",
+        lineCount: g.lines.length,
+        at: g.receivedAt,
+      }));
+    return [...orders, ...vouchers].sort((a, b) => b.at - a.at);
+  }, [lpos, grvs]);
+
+  /** Pull a chosen order or voucher's lines, vendor and rates into the form. */
+  const pullFrom = (source: (typeof raisableSources)[number] | undefined) => {
+    if (source === undefined) {
+      setFromLpoId(null);
+      setFromGrvId(null);
+      return;
+    }
+    const doc =
+      source.kind === "lpo"
+        ? lpos?.find((l) => l._id === source.id)
+        : grvs?.find((g) => g._id === source.id);
+    if (doc === undefined) return;
+    if (source.kind === "lpo") {
+      const lpo = lpos?.find((l) => l._id === source.id);
+      setFromLpoId(doc._id as Id<"lpos">);
+      setFromGrvId(null);
+      setSupplierId(lpo?.vendorId ?? supplierId);
+      if (!supplier.trim()) setSupplier(lpo?.vendor ?? "");
+    } else {
+      const grv = grvs?.find((g) => g._id === source.id);
+      setFromGrvId(doc._id as Id<"grvs">);
+      // the voucher's order stays linked, so the order is closed out too
+      setFromLpoId(grv?.lpoId ?? null);
+      setSupplierId(grv?.vendorId ?? supplierId);
+      if (!supplier.trim()) setSupplier(grv?.vendor ?? "");
+    }
+    setLines(
+      doc.lines.length > 0
+        ? doc.lines.map((line) => ({
+            materialId: line.materialId,
+            qty: String(line.qty),
+            rate: String(line.unitCost),
+            // the rate is whatever the material carries now; a voucher does
+            // not carry one of its own
+            tax:
+              materialOf(line.materialId)?.purchaseTaxPct !== undefined
+                ? String(materialOf(line.materialId)?.purchaseTaxPct ?? "")
+                : "",
+          }))
+        : [emptyLine()],
+    );
+  };
 
   const [supplierId, setSupplierId] = useState<Id<"vendors"> | undefined>(
     seed !== null && seed.mode === "new" ? seed.supplierId : undefined,
@@ -166,29 +243,24 @@ export default function BillsPanel({
    * gets saved — including tax summed across lines at their own rates.
    */
   const priced = priceTaxedLines(
-    lines.map((l) => {
-      const material = materialOf(l.materialId);
-      return {
-        qty: num(l.qty),
-        unitCost: num(l.rate),
-        taxPct: l.tax.trim() === ""
-          ? (material?.purchaseTaxPct ?? fallbackRate)
-          : num(l.tax),
-      };
-    }),
+    lines.map((l) => ({
+      qty: num(l.qty),
+      unitCost: num(l.rate),
+      taxPct: lineRate(l, fallbackRate),
+    })),
     num(discount),
   );
   const taxAmount = priced.tax;
   const grandTotal = priced.grand;
-  /** What one line owes in total, its own rate and the discount included. */
-  const lineTotal = (line: DraftLine) => priced.lineGrand({
-    qty: num(line.qty),
-    unitCost: num(line.rate),
-    taxPct:
-      line.tax.trim() === ""
-        ? (materialOf(line.materialId)?.purchaseTaxPct ?? fallbackRate)
-        : num(line.tax),
-  });
+  /**
+   * A line's rate: its own if one was typed, else the material's stored rate,
+   * else the document default. The order the server applies, kept in one place
+   * so the figure shown and the figure saved cannot drift apart.
+   */
+  const lineRate = (line: DraftLine, fallback: number): number =>
+    line.tax.trim() === ""
+      ? (materialOf(line.materialId)?.purchaseTaxPct ?? fallback)
+      : Math.min(100, Math.max(0, num(line.tax)));
 
   const updateLine = (index: number, patch: Partial<DraftLine>) =>
     setLines((current) =>
@@ -198,6 +270,7 @@ export default function BillsPanel({
   const resetForm = () => {
     setEditingId(null);
     setFromLpoId(null);
+    setFromGrvId(null);
     setSupplierId(undefined);
     setSupplier("");
     setSupplierAddress("");
@@ -257,6 +330,7 @@ export default function BillsPanel({
         discountPct: num(discount) || undefined,
         taxPct: num(taxValue) || undefined,
         lpoId: fromLpoId ?? undefined,
+        grvId: fromGrvId ?? undefined,
         lines: valid.map((l) => ({
           materialId: l.materialId as Id<"rawMaterials">,
           qty: num(l.qty),
@@ -379,16 +453,72 @@ export default function BillsPanel({
           )}
         </div>
 
-        {fromLpoId !== null && (
-          <p className="flex items-center gap-2 border-b border-border/60 bg-emerald-500/[0.07] px-5 py-2 text-xs text-emerald-700 dark:text-emerald-400">
-            <Link2 className="size-3.5 shrink-0" />
-            Raised from{" "}
-            <span className="font-mono font-medium">
-              {lpos?.find((l) => l._id === fromLpoId)?.number ?? "an order"}
+        {/* ── raise the bill from an order or a receipt ────────────── */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-5 py-2">
+          <FilePlus2 className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Raise from</span>
+          <select
+            value={
+              fromGrvId !== null
+                ? `grv:${fromGrvId}`
+                : fromLpoId !== null
+                  ? `lpo:${fromLpoId}`
+                  : ""
+            }
+            disabled={!canCreate}
+            onChange={(e) => {
+              const [kind, id] = e.target.value.split(":");
+              pullFrom(
+                raisableSources.find(
+                  (o) => o.kind === kind && o.id === id,
+                ),
+              );
+            }}
+            aria-label="Raise this bill from a purchase order or goods received voucher"
+            className="h-7 max-w-[22rem] min-w-0 flex-1 rounded-md border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+          >
+            <option value="">A blank bill</option>
+            {raisableSources.length === 0 ? (
+              <option value="" disabled>
+                No open orders or receipts
+              </option>
+            ) : (
+              raisableSources.map((o) => (
+                <option key={`${o.kind}:${o.id}`} value={`${o.kind}:${o.id}`}>
+                  {o.number} · {o.kind === "lpo" ? "order" : "receipt"} ·{" "}
+                  {o.lineCount} {o.lineCount === 1 ? "line" : "lines"}
+                  {o.vendor === "" ? "" : ` · ${o.vendor}`}
+                </option>
+              ))
+            )}
+          </select>
+          {fromGrvId !== null ? (
+            <span className="flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-400">
+              <Link2 className="size-3" />
+              saving pays for{" "}
+              <span className="font-mono font-medium">
+                {grvs?.find((g) => g._id === fromGrvId)?.number ?? "the receipt"}
+              </span>
+              {grvs?.find((g) => g._id === fromGrvId)?.status === "received"
+                ? " — its goods are already in stock"
+                : " — and brings its stock in"}
             </span>
-            — saving closes the order out and brings its stock in.
-          </p>
-        )}
+          ) : fromLpoId !== null ? (
+            <span className="flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-400">
+              <Link2 className="size-3" />
+              saving closes{" "}
+              <span className="font-mono font-medium">
+                {lpos?.find((l) => l._id === fromLpoId)?.number ?? "the order"}
+              </span>{" "}
+              out and brings its stock in
+            </span>
+          ) : (
+            <span className="text-[11px] text-muted-foreground">
+              {raisableSources.length} open{" "}
+              {raisableSources.length === 1 ? "document" : "documents"}
+            </span>
+          )}
+        </div>
 
         <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-2">
           <VendorField
@@ -433,22 +563,33 @@ export default function BillsPanel({
             <thead>
               <tr className="border-b border-border text-[11px] tracking-wide text-muted-foreground uppercase">
                 <th className="w-8 py-1.5 text-left font-medium">#</th>
-                <th className="py-1.5 text-left font-medium">Material</th>
+                <th className="w-24 py-1.5 text-left font-medium">Code</th>
+                <th className="py-1.5 text-left font-medium">Name</th>
                 <th className="w-20 py-1.5 text-right font-medium">Qty</th>
-                <th className="w-20 py-1.5 text-right font-medium">Unit</th>
+                <th className="w-14 py-1.5 text-right font-medium">Unit</th>
                 <th className="w-24 py-1.5 text-right font-medium">Rate</th>
-                <th className="w-20 py-1.5 text-right font-medium">Tax %</th>
-                <th className="w-28 py-1.5 text-right font-medium">Amount</th>
+                <th className="w-24 py-1.5 text-right font-medium">Sub total</th>
+                <th className="w-28 py-1.5 text-right font-medium">Tax</th>
+                <th className="w-28 py-1.5 text-right font-medium">Total</th>
                 <th className="w-8" />
               </tr>
             </thead>
             <tbody>
               {lines.map((line, index) => {
                 const material = materialOf(line.materialId);
+                const sub = num(line.qty) * num(line.rate);
+                // the discount comes off first, then this line's own rate is
+                // charged on what is left — the same order the server uses
+                const rate = lineRate(line, fallbackRate);
+                const net = sub * (1 - num(discount) / 100);
+                const taxMoney = (net * rate) / 100;
                 return (
                   <tr key={index} className="border-b border-border/50">
                     <td className="py-1 text-xs text-muted-foreground tabular-nums">
                       {index + 1}
+                    </td>
+                    <td className="py-1 pr-1.5 font-mono text-xs text-muted-foreground">
+                      {material?.code ?? "—"}
                     </td>
                     <td className="py-1 pr-1.5">
                       <ItemPicker
@@ -503,26 +644,37 @@ export default function BillsPanel({
                         className="h-8 rounded-md text-right text-sm tabular-nums"
                       />
                     </td>
-                    <td className="py-1 pr-1.5">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step="any"
-                        value={line.tax}
-                        placeholder={
-                          material?.purchaseTaxPct !== undefined
-                            ? String(material.purchaseTaxPct)
-                            : String(fallbackRate || 0)
-                        }
-                        disabled={!canCreate}
-                        onChange={(e) => updateLine(index, { tax: e.target.value })}
-                        aria-label="Line tax percent"
-                        className="h-8 rounded-md text-right text-sm tabular-nums"
-                      />
+                    <td className="py-1 pr-1.5 text-right text-sm tabular-nums text-muted-foreground">
+                      {money(sub)}
                     </td>
-                    <td className="py-1 text-right tabular-nums">
-                      {money(lineTotal(line))}
+                    <td className="py-1 pr-1.5">
+                      <div className="flex flex-col items-end">
+                        <span className="text-sm tabular-nums">{money(taxMoney)}</span>
+                        {/* the rate sits under its own figure, small and quiet,
+                            so the money is what the eye lands on */}
+                        <label className="mt-0.5 flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="any"
+                            value={line.tax}
+                            placeholder={String(
+                              material?.purchaseTaxPct ?? fallbackRate ?? 0,
+                            )}
+                            disabled={!canCreate}
+                            onChange={(e) =>
+                              updateLine(index, { tax: e.target.value })
+                            }
+                            aria-label="Line tax percent"
+                            className="w-8 border-b border-dashed border-border bg-transparent text-right tabular-nums outline-none focus:border-primary"
+                          />
+                          %
+                        </label>
+                      </div>
+                    </td>
+                    <td className="py-1 text-right text-sm font-medium tabular-nums">
+                      {money(net + taxMoney)}
                     </td>
                     <td className="py-1 text-right">
                       {lines.length > 1 && (

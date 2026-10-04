@@ -536,6 +536,15 @@ const schema = defineSchema(
        * order is that order's delivery, so the order is closed out with it.
        */
       lpoId: v.optional(v.id("lpos")),
+      /**
+       * The goods-received voucher this bill pays for. A received voucher
+       * already brought its goods into stock, so this bill did not — and an
+       * edit of it must not move stock either, or the same delivery would be
+       * counted in twice.
+       */
+      grvId: v.optional(v.id("grvs")),
+      /** True when this bill deliberately did not write stock movements. */
+      stockFromGrv: v.optional(v.boolean()),
     }).index("by_owner", ["ownerId"]),
 
     /**
@@ -678,6 +687,13 @@ const schema = defineSchema(
        * one that writes movements.
        */
       status: v.union(v.literal("draft"), v.literal("received")),
+      /**
+       * The purchase bill raised from this voucher. A received voucher has
+       * already brought its goods into stock, so a bill raised from one pays
+       * for them without counting them in a second time — setting this marks
+       * that it has been billed, so it cannot be billed twice.
+       */
+      billId: v.optional(v.id("purchases")),
       receivedInto: v.optional(v.number()), // ms, when it was counted in
     }).index("by_owner", ["ownerId"]),
 

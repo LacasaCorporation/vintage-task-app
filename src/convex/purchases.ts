@@ -5,7 +5,7 @@ import { postBill, postBillPayment, reverseEntry } from "./ledger";
 import { defaultTaxPct } from "./accountingDefaults";
 import { setStockTo, stockIn, stockOut } from "./stock";
 import type { MutationCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
 
@@ -70,6 +70,8 @@ export const create = mutation({    args: {
     taxPct: v.optional(v.number()),
     /** The purchase order this bill is being raised from, if any. */
     lpoId: v.optional(v.id("lpos")),
+    /** The goods-received voucher this bill settles, if any. */
+    grvId: v.optional(v.id("grvs")),
     lines: v.array(
       v.object({
         materialId: v.id("rawMaterials"),
@@ -106,6 +108,20 @@ export const create = mutation({    args: {
       }
     }
 
+    // A received voucher has already put its goods into stock, so a bill
+    // raised from one pays for them — it must not count them in a second time.
+    let grv: Doc<"grvs"> | null = null;
+    if (args.grvId !== undefined) {
+      grv = await ctx.db.get(args.grvId);
+      if (grv === null || grv.ownerId !== userId) {
+        throw new Error("That receipt no longer exists.");
+      }
+      if (grv.billId !== undefined) {
+        throw new Error(`${grv.number} has already been billed.`);
+      }
+    }
+    const skipStock = grv !== null && grv.status === "received";
+
     const number = await nextPurchaseNumber(ctx, userId);
     const at = purchasedAt ?? Date.now();
     const resolved = [];
@@ -128,15 +144,18 @@ export const create = mutation({    args: {
         unitCost: line.unitCost,
         taxPct: rate || undefined,
       });
-      // stock in, logged as income against this bill
-      await stockIn(ctx, {
-        ownerId: userId,
-        material,
-        qty: line.qty,
-        source: "purchase",
-        ref: number,
-        at,
-      });
+      // stock in, logged as income against this bill — unless a received
+      // voucher already brought these very goods in, which it did
+      if (!skipStock) {
+        await stockIn(ctx, {
+          ownerId: userId,
+          material,
+          qty: line.qty,
+          source: "purchase",
+          ref: number,
+          at,
+        });
+      }
     }
 
     const cleanSupplier = (supplier ?? "").trim().slice(0, MAX_NAME_LENGTH);
@@ -160,6 +179,8 @@ export const create = mutation({    args: {
       taxAmount: priced.tax || undefined,
       isPaid: undefined,
       lpoId: args.lpoId,
+      grvId: grv?._id,
+      stockFromGrv: grv !== null ? skipStock : undefined,
     });
     // remember each line so this bill can be edited and reversed later
     for (const line of resolved) {
@@ -188,6 +209,11 @@ export const create = mutation({    args: {
         receivedAt: lpo.receivedAt ?? at,
         billId: purchaseId,
       });
+    }
+    // a voucher is marked billed rather than received — the goods came in when
+    // it was received, and all this bill does is pay for them
+    if (grv !== null) {
+      await ctx.db.patch(grv._id, { billId: purchaseId });
     }
     return purchaseId;
   },
@@ -234,18 +260,24 @@ export const update = mutation({
       .query("purchaseLines")
       .withIndex("by_purchase", (q) => q.eq("purchaseId", id))
       .collect();
+    // A bill raised from a received voucher never moved stock, because the
+    // voucher had already brought those goods in. Editing it must leave stock
+    // alone too, or the same delivery would be counted in a second time.
+    const skipStock = bill.stockFromGrv === true;
     for (const line of previous) {
       const material = await ctx.db.get(line.materialId);
       if (material === null || material.ownerId !== userId) continue;
       // an edited bill is a correction, not new income
-      await stockOut(ctx, {
-        ownerId: userId,
-        material,
-        qty: line.qty,
-        source: "adjustment",
-        ref: `${bill.number} (edited)`,
-        at: args.purchasedAt ?? bill.purchasedAt,
-      });
+      if (!skipStock) {
+        await stockOut(ctx, {
+          ownerId: userId,
+          material,
+          qty: line.qty,
+          source: "adjustment",
+          ref: `${bill.number} (edited)`,
+          at: args.purchasedAt ?? bill.purchasedAt,
+        });
+      }
       await ctx.db.delete(line._id);
     }
 
@@ -272,14 +304,16 @@ export const update = mutation({
       };
       resolved.push(stored);
       await ctx.db.insert("purchaseLines", { ownerId: userId, purchaseId: id, ...stored });
-      await stockIn(ctx, {
-        ownerId: userId,
-        material,
-        qty: line.qty,
-        source: "purchase",
-        ref: bill.number,
-        at: args.purchasedAt ?? bill.purchasedAt,
-      });
+      if (!skipStock) {
+        await stockIn(ctx, {
+          ownerId: userId,
+          material,
+          qty: line.qty,
+          source: "purchase",
+          ref: bill.number,
+          at: args.purchasedAt ?? bill.purchasedAt,
+        });
+      }
     }
 
     const supplier = (args.supplier ?? "").trim().slice(0, MAX_NAME_LENGTH);
@@ -421,6 +455,14 @@ export const remove = mutation({
         });
       }
     }
+    // the voucher it paid for is open to be billed again — unlike an order, a
+    // voucher is not reopened, because its goods stayed in stock
+    if (bill.grvId !== undefined) {
+      const grv = await ctx.db.get(bill.grvId);
+      if (grv !== null && grv.ownerId === userId) {
+        await ctx.db.patch(bill.grvId, { billId: undefined });
+      }
+    }
     // prefer the stored lines so a bill edited since creation still reverses
     const stored = await ctx.db
       .query("purchaseLines")
@@ -429,7 +471,9 @@ export const remove = mutation({
     if (stored.length > 0) {
       for (const line of stored) {
         const material = await ctx.db.get(line.materialId);
-        if (material !== null && material.ownerId === userId) {
+        // a bill raised from a received voucher never brought its goods in,
+        // so deleting it must not take them back out
+        if (material !== null && material.ownerId === userId && bill.stockFromGrv !== true) {
           await stockOut(ctx, {
             ownerId: userId,
             material,
