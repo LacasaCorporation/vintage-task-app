@@ -10,6 +10,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  CreditCard,
   Eye,
   FilePlus2,
   FileSpreadsheet,
@@ -91,6 +92,7 @@ export default function BillsPanel({
   const bills = useQuery(api.purchases.list);
   const lpos = useQuery(api.lpo.list);
   const grvs = useQuery(api.grv.list);
+  const vendors = useQuery(api.contacts.listVendors);
   const taxDefault = useQuery(api.purchases.postingDefaults);
   const { confirm } = useAppDialogs();
   const { format: money } = useWorkspaceCurrency();
@@ -294,6 +296,41 @@ export default function BillsPanel({
   );
   const taxAmount = priced.tax;
   const grandTotal = priced.grand;
+
+  /**
+   * Where the chosen vendor stands against its credit limit, and where this
+   * bill would leave it. The server refuses the same thing, so this only
+   * decides whether to ask first or to send the override.
+   */
+  const creditVendor =
+    supplierId === undefined
+      ? undefined
+      : (vendors ?? []).find((v) => v._id === supplierId);
+  const creditOwed =
+    creditVendor?.creditLimit === undefined
+      ? 0
+      : (bills ?? [])
+          .filter((b) => b.supplierId === supplierId && b.isPaid !== true)
+          .reduce((sum, b) => sum + b.total, 0);
+  const creditEditingBill =
+    editingId !== null ? (bills ?? []).find((b) => b._id === editingId) : undefined;
+  const credit =
+    creditVendor?.creditLimit === undefined || creditVendor === undefined
+      ? null
+      : {
+          vendor: creditVendor,
+          owed: creditOwed,
+          limit: creditVendor.creditLimit,
+          // editing a bill already counted in `owed` must not count it twice
+          projected:
+            creditOwed -
+            (creditEditingBill !== undefined &&
+            creditEditingBill.isPaid !== true &&
+            creditEditingBill.supplierId === supplierId
+              ? creditEditingBill.total
+              : 0) +
+            grandTotal,
+        };
   const updateLine = (index: number, patch: Partial<DraftLine>) =>
     setLines((current) =>
       current.map((line, i) => (i === index ? { ...line, ...patch } : line)),
@@ -343,12 +380,35 @@ export default function BillsPanel({
     setFormOpen(true);
   };
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent, overrideCreditLimit = false) => {
     e.preventDefault();
     const valid = lines.filter((l) => l.materialId !== "" && num(l.qty) > 0);
     if (valid.length === 0) {
       toast.error("Pick a material and a quantity first.");
       return;
+    }
+    // A supplier with a ceiling on what may be owed is checked before saving.
+    // The server refuses the same thing, so this is what turns the refusal
+    // into a question with an answer.
+    if (
+      editingId === null &&
+      supplierId !== undefined &&
+      !overrideCreditLimit &&
+      credit !== null &&
+      credit.projected > credit.limit
+    ) {
+      const ok = await confirm({
+        title: `${credit.vendor.name} is over its credit limit`,
+        message: `${money(credit.owed)} is already owed against a limit of ${money(
+          credit.limit,
+        )}. This bill would take it to ${money(
+          credit.projected,
+        )} — ${money(credit.projected - credit.limit)} over. Save it anyway?`,
+        confirmLabel: "Save over the limit",
+        danger: true,
+      });
+      if (!ok) return;
+      return submit(e, true);
     }
     setBusy(true);
     try {
@@ -378,7 +438,10 @@ export default function BillsPanel({
         await updateBill({ id: editingId, ...args });
         toast.success("Bill updated — stock adjusted.");
       } else {
-        await createBill(args);
+        await createBill({
+          ...args,
+          overrideCreditLimit: overrideCreditLimit || undefined,
+        });
         toast.success(
           fromLpoId === null
             ? "Bill saved — stock updated."
@@ -552,17 +615,44 @@ export default function BillsPanel({
         </div>
 
         <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-2">
-          <VendorField
-            supplier={supplier}
-            supplierId={supplierId}
-            address={supplierAddress}
-            onChange={(patch) => {
-              if (patch.supplier !== undefined) setSupplier(patch.supplier);
-              if (patch.supplierId !== undefined) setSupplierId(patch.supplierId);
-              if (patch.supplierAddress !== undefined)
-                setSupplierAddress(patch.supplierAddress);
-            }}
-          />
+          <div>
+            <VendorField
+              supplier={supplier}
+              supplierId={supplierId}
+              address={supplierAddress}
+              onChange={(patch) => {
+                if (patch.supplier !== undefined) setSupplier(patch.supplier);
+                if (patch.supplierId !== undefined) setSupplierId(patch.supplierId);
+                if (patch.supplierAddress !== undefined)
+                  setSupplierAddress(patch.supplierAddress);
+              }}
+            />
+            {/* the ceiling is checked before saving, so it is shown here rather
+                than only appearing as a refusal */}
+            {credit !== null && (
+              <p
+                className={cn(
+                  "mt-1 flex flex-wrap items-center gap-1 text-[11px]",
+                  credit.projected > credit.limit
+                    ? "font-medium text-rose-600 dark:text-rose-400"
+                    : "text-muted-foreground",
+                )}
+              >
+                <CreditCard className="size-2.5 shrink-0" />
+                {credit.projected > credit.limit
+                  ? `This takes ${credit.vendor.name} to ${money(
+                      credit.projected,
+                    )} — ${money(credit.projected - credit.limit)} over their ${money(
+                      credit.limit,
+                    )} credit limit.`
+                  : `${money(credit.owed)} owed of ${money(
+                      credit.limit,
+                    )} credit · this bill leaves ${money(
+                      credit.limit - credit.projected,
+                    )} headroom.`}
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
