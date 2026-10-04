@@ -8,9 +8,12 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft,
   ClipboardList,
+  FilePlus2,
   Loader2,
   PackageCheck,
+  Pencil,
   Plus,
+  Receipt,
   Save,
   Trash2,
   X,
@@ -21,12 +24,31 @@ import { formatDueLabel, toLocalInput } from "@/lib/task-utils";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { priceTaxedLines } from "@/lib/line-tax";
+import VendorField from "@/components/VendorField";
 
 type MaterialDoc = Doc<"rawMaterials">;
 type GrvRow = Doc<"grvs"> & { lpoNumber?: string };
 
-type DraftLine = { materialId: Id<"rawMaterials"> | ""; qty: string; rate: string };
-const emptyLine = (): DraftLine => ({ materialId: "", qty: "1", rate: "" });
+/**
+ * How the panel is asked to open: a blank voucher, one saved voucher in the
+ * form, or one saved voucher on its own screen. The panel is remounted on this
+ * so the form starts from the seed rather than being filled in by an effect —
+ * the arrangement the order and the bill already use.
+ */
+export type GrvSeed =
+  | { mode: "new"; lpoId?: Id<"lpos"> }
+  | { mode: "edit"; grvId: Id<"grvs"> }
+  | { mode: "view"; grvId: Id<"grvs"> };
+
+type DraftLine = {
+  materialId: Id<"rawMaterials"> | "";
+  qty: string;
+  rate: string;
+  /** This line's own tax rate. Empty means "use the material's". */
+  tax: string;
+};
+const emptyLine = (): DraftLine => ({ materialId: "", qty: "1", rate: "", tax: "" });
 const num = (value: string) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
 const FIELD =
@@ -44,31 +66,103 @@ export default function GrvPanel({
   canEdit,
   canDelete,
   seed = null,
+  onCreateBill,
 }: {
   materials: MaterialDoc[];
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
-  seed?: { lpoId?: Id<"lpos"> } | null;
+  seed?: GrvSeed | null;
+  /** Opens the bill form pre-filled from this voucher's lines. */
+  onCreateBill?: (grv: Doc<"grvs">) => void;
 }) {
   const grvs = useQuery(api.grv.list);
   const options = useQuery(api.grv.options);
-  const vendors = useQuery(api.contacts.listVendors);
   const { format: money } = useWorkspaceCurrency();
   const { confirm } = useAppDialogs();
   const createGrv = useMutation(api.grv.create);
+  const updateGrv = useMutation(api.grv.update);
   const receiveGrv = useMutation(api.grv.receive);
   const removeGrv = useMutation(api.grv.remove);
+  const taxDefault = useQuery(api.purchases.postingDefaults);
+  const lpos = useQuery(api.lpo.list);
 
-  const [formOpen, setFormOpen] = useState(seed !== null && canCreate);
-  const [vendorId, setVendorId] = useState<Id<"vendors"> | "">("");
-  const [receivedOn, setReceivedOn] = useState(() => toLocalInput(new Date()));
-  const [reference, setReference] = useState("");
-  const [note, setNote] = useState("");
-  const [lpoId, setLpoId] = useState<Id<"lpos"> | "">(seed?.lpoId ?? "");
-  const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
+  const seedGrv =
+    seed !== null && seed.mode !== "new"
+      ? (grvs ?? []).find((g) => g._id === seed.grvId) ?? null
+      : null;
+  const seedLpo =
+    seed !== null && seed.mode === "new" && seed.lpoId !== undefined
+      ? (lpos ?? []).find((l) => l._id === seed.lpoId) ?? null
+      : null;
+
+  // the two screens this panel can show besides the register
+  const [formOpen, setFormOpen] = useState(
+    canCreate && seed !== null && seed.mode !== "view",
+  );
+  const [editingId, setEditingId] = useState<Id<"grvs"> | null>(
+    seed !== null && seed.mode === "edit" ? seed.grvId : null,
+  );
+  const [viewingId, setViewingId] = useState<Id<"grvs"> | null>(
+    seed !== null && seed.mode === "view" ? seed.grvId : null,
+  );
+  const [vendorId, setVendorId] = useState<Id<"vendors"> | undefined>(
+    seedGrv?.vendorId,
+  );
+  const [vendor, setVendor] = useState(seedGrv?.vendor ?? seedLpo?.vendor ?? "");
+  const [address, setAddress] = useState(seedGrv?.supplierAddress ?? "");
+  const [receivedOn, setReceivedOn] = useState(() =>
+    toLocalInput(new Date(seedGrv?.receivedAt ?? Date.now())),
+  );
+  const [reference, setReference] = useState(seedGrv?.reference ?? "");
+  const [note, setNote] = useState(seedGrv?.note ?? "");
+  const [discount, setDiscount] = useState(String(seedGrv?.discountPct ?? 0));
+  const [lpoId, setLpoId] = useState<Id<"lpos"> | undefined>(
+    seedGrv?.lpoId ?? (seed !== null && seed.mode === "new" ? seed.lpoId : undefined),
+  );
+  const [lines, setLines] = useState<DraftLine[]>(() => {
+    // a saved voucher keeps the rates it was received at; an order already
+    // carries a rate on each line, so its rates arrive here too
+    const from = seedGrv?.lines ?? seedLpo?.lines ?? null;
+    return from !== null && from.length > 0
+      ? from.map((l) => ({
+          materialId: l.materialId,
+          qty: String(l.qty),
+          rate: String(l.unitCost),
+          tax: l.taxPct !== undefined ? String(l.taxPct) : "",
+        }))
+      : [emptyLine()];
+  });
   const [busy, setBusy] = useState(false);
   const [busyRow, setBusyRow] = useState<Id<"grvs"> | null>(null);
+  const viewed = (grvs ?? []).find((g) => g._id === viewingId) ?? null;
+
+  const materialOf = (id: Id<"rawMaterials"> | "") =>
+    materials.find((m) => m._id === id);
+
+  /**
+   * A line's rate: its own if one was typed, else the material's stored rate,
+   * else nothing at all — the same rule the purchase bill uses, so a voucher
+   * and the bill raised from it tax alike.
+   */
+  const lineRate = (line: DraftLine): number =>
+    line.tax.trim() === ""
+      ? (materialOf(line.materialId)?.purchaseTaxPct ?? 0)
+      : Math.min(100, Math.max(0, num(line.tax)));
+
+  /**
+   * The same arithmetic the server runs, so the screen and the save agree —
+   * computed each render, exactly as the purchase bill form does it, so a
+   * material whose rate changed under the form is picked up straight away.
+   */
+  const priced = priceTaxedLines(
+    lines.map((l) => ({
+      qty: num(l.qty),
+      unitCost: num(l.rate),
+      taxPct: lineRate(l),
+    })),
+    num(discount),
+  );
 
   const openLpos = options?.lpos ?? [];
 
@@ -95,31 +189,59 @@ export default function GrvPanel({
     );
 
   const resetForm = () => {
-    setVendorId("");
+    setEditingId(null);
+    setVendorId(undefined);
+    setVendor("");
+    setAddress("");
     setReceivedOn(toLocalInput(new Date()));
     setReference("");
     setNote("");
-    setLpoId("");
+    setDiscount("0");
+    setLpoId(undefined);
     setLines([emptyLine()]);
   };
 
-  /** Choosing an order fills the vendor and copies its lines in. */
+  /** Choosing an order fills the supplier and copies its lines in. */
   const pickLpo = (id: string) => {
-    setLpoId(id as Id<"lpos"> | "");
+    setLpoId(id === "" ? undefined : (id as Id<"lpos">));
     if (id === "") return;
     const lpo = openLpos.find((l) => l.id === id);
     if (lpo === undefined) return;
-    const match = (vendors ?? []).find((v) => v.name === (lpo.vendor ?? ""));
-    if (match) setVendorId(match._id);
+    if (lpo.vendorId !== undefined) setVendorId(lpo.vendorId);
+    if (lpo.vendor !== undefined) setVendor(lpo.vendor);
     if (lpo.lines.length > 0) {
       setLines(
         lpo.lines.map((line) => ({
           materialId: line.materialId,
           qty: String(line.qty),
           rate: String(line.unitCost),
+          tax: line.taxPct !== undefined ? String(line.taxPct) : "",
         })),
       );
     }
+  };
+
+  /** Open a saved voucher in the form, pre-filled, for editing. */
+  const startEdit = (row: GrvRow) => {
+    setEditingId(row._id);
+    setVendorId(row.vendorId);
+    setVendor(row.vendor ?? "");
+    setAddress(row.supplierAddress ?? "");
+    setReceivedOn(toLocalInput(new Date(row.receivedAt)));
+    setReference(row.reference ?? "");
+    setNote(row.note ?? "");
+    setDiscount(String(row.discountPct ?? 0));
+    setLpoId(row.lpoId);
+    setLines(
+      row.lines.map((l) => ({
+        materialId: l.materialId,
+        qty: String(l.qty),
+        rate: String(l.unitCost),
+        tax: l.taxPct !== undefined ? String(l.taxPct) : "",
+      })),
+    );
+    setViewingId(null);
+    setFormOpen(true);
   };
 
   const submit = async (status: "draft" | "received") => {
@@ -130,27 +252,42 @@ export default function GrvPanel({
     }
     setBusy(true);
     try {
-      await createGrv({
-        vendorId: vendorId === "" ? undefined : vendorId,
-        vendor: (vendors ?? []).find((v) => v._id === vendorId)?.name,
+      const args = {
+        vendorId,
+        vendor: vendor.trim() || undefined,
+        supplierAddress: address.trim() || undefined,
         receivedAt: new Date(`${receivedOn}T12:00:00`).getTime(),
-        lpoId: lpoId === "" ? undefined : lpoId,
+        lpoId,
         reference: reference.trim() || undefined,
         note: note.trim() || undefined,
-        status,
+        discountPct: num(discount) || undefined,
         lines: valid.map((l) => ({
           materialId: l.materialId as Id<"rawMaterials">,
           qty: num(l.qty),
           unitCost: num(l.rate),
+          // a line with no rate of its own takes the material's, which the
+          // server also knows how to do
+          taxPct:
+            l.tax.trim() === ""
+              ? undefined
+              : Math.min(100, Math.max(0, num(l.tax))),
         })),
-      });
-      toast.success(
-        status === "received"
-          ? "Voucher saved — the goods are in stock."
-          : "Voucher saved as a draft.",
-      );
+      };
+      if (editingId !== null) {
+        await updateGrv({ id: editingId, ...args });
+        toast.success("Voucher updated.");
+      } else {
+        await createGrv({ ...args, status });
+        toast.success(
+          status === "received"
+            ? "Voucher saved — the goods are in stock."
+            : "Voucher saved as a draft.",
+        );
+      }
+      const wasEditing = editingId;
       resetForm();
       setFormOpen(false);
+      if (wasEditing !== null) setViewingId(wasEditing);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Couldn't save the voucher.",
@@ -195,6 +332,21 @@ export default function GrvPanel({
     }
   };
 
+  /**
+   * An edit seed names a saved voucher, and the voucher is resolved from the
+   * list — which arrives a render or two after the panel mounts. The form
+   * reads it once, into its initial state, so opening it before the list has
+   * landed would start it blank and never fill it in. Hold the form back
+   * until the lookup it depends on has actually resolved.
+   */
+  if (formOpen && seed !== null && seed.mode === "edit" && grvs === undefined) {
+    return (
+      <div className="flex items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" /> Opening the voucher…
+      </div>
+    );
+  }
+
   /* ── the voucher form, full-screen ────────────────────────────── */
   if (formOpen) {
     return (
@@ -213,14 +365,16 @@ export default function GrvPanel({
             >
               <ArrowLeft className="size-3.5" /> Goods received
             </Button>
-            <h2 className="font-display text-lg font-semibold">New goods received</h2>
+            <h2 className="font-display text-lg font-semibold">
+              {editingId !== null ? "Edit goods received" : "New goods received"}
+            </h2>
           </div>
           <div className="flex items-center gap-2">
             <Button
               type="button"
               size="sm"
               variant="outline"
-              disabled={busy}
+              disabled={busy || editingId !== null}
               onClick={() => void submit("draft")}
               className="h-8 rounded-lg text-xs"
             >
@@ -234,7 +388,7 @@ export default function GrvPanel({
             <Button
               type="button"
               size="sm"
-              disabled={busy}
+              disabled={busy || editingId !== null}
               onClick={() => void submit("received")}
               className="h-8 rounded-lg text-xs"
             >
@@ -244,24 +398,24 @@ export default function GrvPanel({
         </div>
 
         <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="space-y-1 text-xs font-medium">
-            <span className="text-muted-foreground">Supplier</span>
-            <select
-              value={vendorId}
-              onChange={(e) => setVendorId(e.target.value as Id<"vendors"> | "")}
-              className={FIELD}
-            >
-              <option value="">Choose a supplier…</option>
-              {(vendors ?? []).map((v) => (
-                <option key={v._id} value={v._id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <VendorField
+            supplier={vendor}
+            supplierId={vendorId}
+            address={address}
+            onChange={(patch) => {
+              if (patch.supplier !== undefined) setVendor(patch.supplier);
+              if (patch.supplierId !== undefined) setVendorId(patch.supplierId);
+              if (patch.supplierAddress !== undefined)
+                setAddress(patch.supplierAddress);
+            }}
+          />
           <label className="space-y-1 text-xs font-medium">
             <span className="text-muted-foreground">Against an order (optional)</span>
-            <select value={lpoId} onChange={(e) => pickLpo(e.target.value)} className={FIELD}>
+            <select
+              value={lpoId ?? ""}
+              onChange={(e) => pickLpo(e.target.value)}
+              className={FIELD}
+            >
               <option value="">Not against an order</option>
               {openLpos.map((l) => (
                 <option key={l.id} value={l.id}>
@@ -295,38 +449,56 @@ export default function GrvPanel({
             <thead>
               <tr className="border-b border-border text-[11px] tracking-wide text-muted-foreground uppercase">
                 <th className="w-8 py-1.5 text-left font-medium">#</th>
-                <th className="py-1.5 text-left font-medium">Material</th>
-                <th className="w-24 py-1.5 text-right font-medium">Qty</th>
-                <th className="w-20 py-1.5 text-right font-medium">Unit</th>
-                <th className="w-32 py-1.5 text-right font-medium">Rate</th>
-                <th className="w-32 py-1.5 text-right font-medium">Amount</th>
+                <th className="w-24 py-1.5 text-left font-medium">Code</th>
+                <th className="py-1.5 text-left font-medium">Name</th>
+                <th className="w-20 py-1.5 text-right font-medium">Qty</th>
+                <th className="w-14 py-1.5 text-right font-medium">Unit</th>
+                <th className="w-24 py-1.5 text-right font-medium">Rate</th>
+                <th className="w-24 py-1.5 text-right font-medium">Sub total</th>
+                <th className="w-28 py-1.5 text-right font-medium">Tax</th>
+                <th className="w-28 py-1.5 text-right font-medium">Total</th>
                 <th className="w-8" />
               </tr>
             </thead>
             <tbody>
               {lines.map((line, index) => {
-                const material = materials.find((m) => m._id === line.materialId);
+                const material = materialOf(line.materialId);
+                const sub = num(line.qty) * num(line.rate);
+                // the discount comes off first, then this line's own rate is
+                // charged on what is left — the same order the server uses
+                const net = sub * (1 - num(discount) / 100);
+                const taxMoney = (net * lineRate(line)) / 100;
                 return (
                   <tr key={index} className="border-b border-border/50">
-                    <td className="py-2 text-xs text-muted-foreground tabular-nums">
+                    <td className="py-1 text-xs text-muted-foreground tabular-nums">
                       {index + 1}
                     </td>
-                    <td className="py-2 pr-2">
+                    <td className="py-1 pr-1.5 font-mono text-xs text-muted-foreground">
+                      {material?.code ?? "—"}
+                    </td>
+                    <td className="py-1 pr-1.5">
                       <ItemPicker
                         items={materialOptions}
                         value={line.materialId}
                         onChange={(id) => {
-                          // a different material means the rate on screen was
-                          // the previous one's, so take the new one's rate
-                          const changed = line.materialId !== id;
+                          const materialId = id as Id<"rawMaterials"> | "";
+                          const material = materialOf(materialId);
+                          // A different material means the rate and tax on
+                          // screen belonged to the old one, so they are taken
+                          // from the newly chosen material.
+                          const changed = line.materialId !== materialId;
                           updateLine(index, {
-                            materialId: id as Id<"rawMaterials"> | "",
+                            materialId,
                             rate: changed
-                              ? String(
-                                  materials.find((m) => m._id === id)?.pricePerUnit ??
-                                    "",
-                                )
+                              ? String(material?.pricePerUnit ?? "")
                               : line.rate,
+                            // offered, not imposed — the field fills in and
+                            // stays editable either way
+                            tax: changed
+                              ? material?.purchaseTaxPct !== undefined
+                                ? String(material.purchaseTaxPct)
+                                : ""
+                              : line.tax,
                           });
                         }}
                         placeholder="Choose or search material…"
@@ -335,7 +507,7 @@ export default function GrvPanel({
                         aria-label="Material"
                       />
                     </td>
-                    <td className="py-2 pr-2">
+                    <td className="py-1 pr-1.5">
                       <Input
                         type="number"
                         min={0}
@@ -343,13 +515,13 @@ export default function GrvPanel({
                         value={line.qty}
                         onChange={(e) => updateLine(index, { qty: e.target.value })}
                         aria-label="Quantity"
-                        className="h-9 rounded-lg text-right text-sm tabular-nums"
+                        className="h-8 rounded-md text-right text-sm tabular-nums"
                       />
                     </td>
-                    <td className="py-2 pr-2 text-right text-xs text-muted-foreground">
+                    <td className="py-1 pr-1.5 text-right text-xs text-muted-foreground">
                       {material?.unit ?? "—"}
                     </td>
-                    <td className="py-2 pr-2">
+                    <td className="py-1 pr-1.5">
                       <Input
                         type="number"
                         min={0}
@@ -358,13 +530,37 @@ export default function GrvPanel({
                         placeholder={String(material?.pricePerUnit ?? 0)}
                         onChange={(e) => updateLine(index, { rate: e.target.value })}
                         aria-label="Rate"
-                        className="h-9 rounded-lg text-right text-sm tabular-nums"
+                        className="h-8 rounded-md text-right text-sm tabular-nums"
                       />
                     </td>
-                    <td className="py-2 text-right tabular-nums">
-                      {money(num(line.qty) * num(line.rate))}
+                    <td className="py-1 pr-1.5 text-right text-sm tabular-nums text-muted-foreground">
+                      {money(sub)}
                     </td>
-                    <td className="py-2 text-right">
+                    <td className="py-1 pr-1.5">
+                      <div className="flex flex-col items-end">
+                        <span className="text-sm tabular-nums">{money(taxMoney)}</span>
+                        {/* the rate sits under its own figure, small and
+                            quiet, so the money is what the eye lands on */}
+                        <label className="mt-0.5 flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="any"
+                            value={line.tax}
+                            placeholder={String(material?.purchaseTaxPct ?? 0)}
+                            onChange={(e) => updateLine(index, { tax: e.target.value })}
+                            aria-label="Line tax percent"
+                            className="w-8 border-b border-dashed border-border bg-transparent text-right tabular-nums outline-none focus:border-primary"
+                          />
+                          %
+                        </label>
+                      </div>
+                    </td>
+                    <td className="py-1 text-right text-sm font-medium tabular-nums">
+                      {money(net + taxMoney)}
+                    </td>
+                    <td className="py-1 text-right">
                       {lines.length > 1 && (
                         <button
                           type="button"
@@ -402,14 +598,198 @@ export default function GrvPanel({
               placeholder="Condition on arrival, shortages…"
             />
           </label>
-          <div className="flex items-end justify-end text-sm">
-            <span className="mr-3 text-muted-foreground">Value</span>
-            <span className="text-base font-semibold tabular-nums">
-              {money(subtotal)}
-            </span>
+          {/* the same summary a purchase bill closes with */}
+          <div className="space-y-1.5 text-sm">
+            <div className="flex items-center justify-between gap-6 text-muted-foreground">
+              <span>Subtotal</span>
+              <span className="tabular-nums">{money(subtotal)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-6 text-muted-foreground">
+              <span className="flex items-center gap-2">
+                Discount
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="any"
+                  value={discount}
+                  onChange={(e) => setDiscount(e.target.value)}
+                  aria-label="Discount percent"
+                  className="h-7 w-16 rounded-md border bg-card px-1.5 text-right text-xs tabular-nums"
+                />
+                %
+              </span>
+              <span className="tabular-nums">− {money(priced.discount)}</span>
+            </div>
+            {/* the tax on this voucher is whatever the lines add up to, so the
+                summary reports that figure rather than a rate to edit here */}
+            <div className="text-muted-foreground">
+              <div className="flex items-baseline justify-between gap-2">
+                <span>Tax amount</span>
+                <span className="tabular-nums">+ {money(priced.tax)}</span>
+              </div>
+              <p className="mt-0.5 text-right text-[11px] text-muted-foreground/80">
+                Default tax {Math.max(0, taxDefault?.taxPct ?? 0)}%
+                {lines.some((l) => num(l.tax) > 0) ? " · lines may differ" : ""}
+                {editingId !== null ? " · from this voucher" : ""}
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-6 border-t border-border pt-2 text-base font-semibold">
+              <span>Value</span>
+              <span className="tabular-nums">{money(priced.grand)}</span>
+            </div>
           </div>
         </div>
       </div>
+    );
+  }
+
+  /* ── one voucher's detail screen ──────────────────────────────── */
+  if (viewed !== null) {
+    return (
+      <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 bg-muted/30 px-5 py-4">
+          <div>
+            <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+              Goods received
+            </p>
+            <h2 className="font-display font-mono text-lg font-semibold">
+              {viewed.number}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {viewed.vendor || "No supplier"} · {formatDueLabel(viewed.receivedAt)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                viewed.status === "received"
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              {viewed.status === "received" ? "Counted in" : "Draft"}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setViewingId(null)}
+              className="h-8 rounded-lg text-xs"
+            >
+              <ArrowLeft className="size-3.5" /> Goods received
+            </Button>
+            {canEdit && viewed.status === "draft" && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => startEdit(viewed)}
+                className="h-8 rounded-lg text-xs"
+              >
+                <Pencil className="size-3.5" /> Edit
+              </Button>
+            )}
+            {canCreate && viewed.billId === undefined && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onCreateBill?.(viewed)}
+                className="h-8 rounded-lg text-xs"
+              >
+                <FilePlus2 className="size-3.5" /> Raise bill
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-4">
+          <div>
+            <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+              Supplier
+            </p>
+            <p className="text-sm">{viewed.vendor || "—"}</p>
+            {viewed.supplierAddress && (
+              <p className="text-xs text-muted-foreground">{viewed.supplierAddress}</p>
+            )}
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+              Received on
+            </p>
+            <p className="text-sm">{formatDueLabel(viewed.receivedAt)}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+              Against order
+            </p>
+            <p className="text-sm font-mono">{viewed.lpoNumber ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
+              Delivery note
+            </p>
+            <p className="text-sm">{viewed.reference || "—"}</p>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto px-5 py-4">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border text-[11px] tracking-wide text-muted-foreground uppercase">
+                <th className="w-8 py-1.5 text-left font-medium">#</th>
+                <th className="py-1.5 text-left font-medium">Material</th>
+                <th className="w-24 py-1.5 text-right font-medium">Qty</th>
+                <th className="w-32 py-1.5 text-right font-medium">Rate</th>
+                <th className="w-28 py-1.5 text-right font-medium">Tax</th>
+                <th className="w-32 py-1.5 text-right font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {viewed.lines.map((line, index) => (
+                <tr key={`${line.materialId}-${index}`} className="border-b border-border/50">
+                  <td className="py-1 text-xs text-muted-foreground tabular-nums">
+                    {index + 1}
+                  </td>
+                  <td className="py-2">{line.name}</td>
+                  <td className="py-1 text-right tabular-nums">
+                    {line.qty} {line.unit}
+                  </td>
+                  <td className="py-1 text-right tabular-nums">{money(line.unitCost)}</td>
+                  <td className="py-1 text-right tabular-nums">
+                    <div>{money(line.qty * line.unitCost * ((line.taxPct ?? 0) / 100))}</div>
+                    <div className="text-[10px] text-muted-foreground">{line.taxPct ?? 0}%</div>
+                  </td>
+                  <td className="py-1 text-right font-medium tabular-nums">
+                    {money(line.qty * line.unitCost * (1 + (line.taxPct ?? 0) / 100))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-5 py-4">
+          <p className="max-w-md text-xs text-muted-foreground">
+            {viewed.note || "No notes on this voucher."}
+          </p>
+          <div className="space-y-1.5 text-sm">
+            <div className="flex items-center justify-between gap-8 text-muted-foreground">
+              <span>Items</span>
+              <span className="tabular-nums">{viewed.lines.length}</span>
+            </div>
+            <div className="flex items-center justify-between gap-8 text-muted-foreground">
+              <span>Tax amount</span>
+              <span className="tabular-nums">+ {money(viewed.taxAmount ?? 0)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-8 border-t border-border pt-2 text-base font-semibold">
+              <span>Value</span>
+              <span className="tabular-nums">{money(viewed.total)}</span>
+            </div>
+          </div>
+        </div>
+      </section>
     );
   }
 
@@ -462,6 +842,7 @@ export default function GrvPanel({
                   <th className="px-3 py-2 text-left font-medium">Supplier</th>
                   <th className="px-3 py-2 text-left font-medium">Order</th>
                   <th className="px-3 py-2 text-right font-medium">Items</th>
+                  <th className="px-3 py-2 text-right font-medium">Tax</th>
                   <th className="px-3 py-2 text-right font-medium">Value</th>
                   <th className="px-3 py-2 text-left font-medium">Status</th>
                   <th className="w-32 px-2 py-2" />
@@ -492,6 +873,9 @@ export default function GrvPanel({
                       <td className="px-3 py-2.5 text-right text-xs tabular-nums">
                         {row.lines.length}
                       </td>
+                      <td className="px-3 py-2.5 text-right text-xs tabular-nums text-muted-foreground">
+                        {money(row.taxAmount ?? 0)}
+                      </td>
                       <td className="px-3 py-2.5 text-right font-medium tabular-nums">
                         {money(row.total)}
                       </td>
@@ -509,6 +893,39 @@ export default function GrvPanel({
                       </td>
                       <td className="px-2 py-1 text-right">
                         <span className="flex items-center justify-end gap-1">
+                          {canCreate && row.billId === undefined && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onCreateBill?.(row)}
+                              title="Raise a purchase bill that pays for this delivery — its goods are already in stock"
+                              className="h-7 rounded-lg px-2 text-xs"
+                            >
+                              <FilePlus2 className="size-3" />
+                              Bill
+                            </Button>
+                          )}
+                          {canEdit && row.status === "draft" && (
+                            <button
+                              type="button"
+                              aria-label={`Edit ${row.number}`}
+                              title="Edit voucher"
+                              onClick={() => startEdit(row)}
+                              className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`Open ${row.number}`}
+                            title="Open voucher"
+                            onClick={() => setViewingId(row._id)}
+                            className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+                          >
+                            <Receipt className="size-3.5" />
+                          </button>
                           {row.status === "draft" && canEdit && (
                             <Button
                               type="button"

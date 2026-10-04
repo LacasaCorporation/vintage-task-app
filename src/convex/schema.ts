@@ -634,7 +634,12 @@ const schema = defineSchema(
         v.literal("received"),
         v.literal("cancelled"),
       ),
+      supplierAddress: v.optional(v.string()),
       note: v.optional(v.string()),
+      /** Discount off the whole order, before tax is charged. */
+      discountPct: v.optional(v.number()),
+      /** The blended rate this order's tax works out at, for the ledger. */
+      taxPct: v.optional(v.number()),
       lines: v.array(
         v.object({
           materialId: v.id("rawMaterials"),
@@ -642,9 +647,16 @@ const schema = defineSchema(
           unit: v.string(),
           qty: v.number(),
           unitCost: v.number(),
+          /** This line's own rate; absent means no tax on it. */
+          taxPct: v.optional(v.number()),
         }),
       ),
       total: v.number(),
+      /**
+       * The tax actually charged, summed from the lines — kept beside `total`
+       * so it never has to be re-derived from one blended percentage.
+       */
+      taxAmount: v.optional(v.number()),
       receivedAt: v.optional(v.number()),
       /**
        * The purchase bill raised from this order. Setting it also marks the
@@ -669,8 +681,13 @@ const schema = defineSchema(
       receivedAt: v.number(), // ms
       /** The order this delivery answers, when there is one. */
       lpoId: v.optional(v.id("lpos")),
+      supplierAddress: v.optional(v.string()),
       note: v.optional(v.string()),
       reference: v.optional(v.string()), // supplier's delivery note number
+      /** Discount agreed with the supplier, before tax is charged. */
+      discountPct: v.optional(v.number()),
+      /** The blended rate this voucher's tax works out at, for the ledger. */
+      taxPct: v.optional(v.number()),
       lines: v.array(
         v.object({
           materialId: v.id("rawMaterials"),
@@ -678,9 +695,13 @@ const schema = defineSchema(
           unit: v.string(),
           qty: v.number(),
           unitCost: v.number(),
+          /** This line's own rate; absent means no tax on it. */
+          taxPct: v.optional(v.number()),
         }),
       ),
       total: v.number(),
+      /** The tax actually charged, summed from the lines. */
+      taxAmount: v.optional(v.number()),
       /**
        * draft = recorded but not counted in, received = the goods are in stock.
        * Goods cannot be counted in twice, so a received voucher is the only

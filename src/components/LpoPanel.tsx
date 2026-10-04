@@ -24,6 +24,8 @@ import { toLocalInput } from "@/lib/task-utils";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import { useAppDialogs } from "@/components/AppDialogs";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
+import { priceTaxedLines } from "@/lib/line-tax";
+import VendorField from "@/components/VendorField";
 
 type MaterialDoc = Doc<"rawMaterials">;
 type LpoDoc = Doc<"lpos">;
@@ -52,9 +54,15 @@ const day = (ms: number) =>
   });
 
 /** One line being typed on the order form. */
-type DraftLine = { materialId: Id<"rawMaterials"> | ""; qty: string; rate: string };
+type DraftLine = {
+  materialId: Id<"rawMaterials"> | "";
+  qty: string;
+  rate: string;
+  /** This line's own tax rate. Empty means "use the material's". */
+  tax: string;
+};
 
-const emptyLine = (): DraftLine => ({ materialId: "", qty: "1", rate: "" });
+const emptyLine = (): DraftLine => ({ materialId: "", qty: "1", rate: "", tax: "" });
 const num = (value: string) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 
 /**
@@ -88,7 +96,13 @@ function LpoForm({
 }) {
   const createLpo = useMutation(api.lpo.create);
   const updateLpo = useMutation(api.lpo.update);
+  const taxDefault = useQuery(api.purchases.postingDefaults);
+  const [vendorId, setVendorId] = useState<Id<"vendors"> | undefined>(
+    editing?.vendorId,
+  );
   const [vendor, setVendor] = useState(editing?.vendor ?? "");
+  const [address, setAddress] = useState(editing?.supplierAddress ?? "");
+  const [discount, setDiscount] = useState(String(editing?.discountPct ?? 0));
   const [orderedOn, setOrderedOn] = useState(() =>
     toLocalInput(new Date(editing?.orderedAt ?? Date.now())),
   );
@@ -102,6 +116,8 @@ function LpoForm({
           materialId: l.materialId,
           qty: String(l.qty),
           rate: String(l.unitCost),
+          // a saved line keeps the rate it was ordered at
+          tax: l.taxPct !== undefined ? String(l.taxPct) : "",
         }))
       : [emptyLine()],
   );
@@ -114,6 +130,34 @@ function LpoForm({
     [lines],
   );
 
+  const materialOf = (id: Id<"rawMaterials"> | "") =>
+    materials.find((m) => m._id === id);
+
+  /**
+   * A line's rate: its own if one was typed, else the material's stored rate,
+   * else nothing at all — the same rule the purchase bill uses, so an order and
+   * the bill raised from it tax alike. A material with no rate of its own is
+   * charged no tax; the workspace default is a starting point for new
+   * documents, not a rate imposed on an item the user never set one for.
+   */
+  const lineRate = (line: DraftLine): number =>
+    line.tax.trim() === ""
+      ? (materialOf(line.materialId)?.purchaseTaxPct ?? 0)
+      : Math.min(100, Math.max(0, num(line.tax)));
+
+  /**
+   * The same arithmetic the server runs, so what this screen shows is what
+   * gets saved — including tax summed across lines at their own rates.
+   */
+  const priced = priceTaxedLines(
+    lines.map((l) => ({
+      qty: num(l.qty),
+      unitCost: num(l.rate),
+      taxPct: lineRate(l),
+    })),
+    num(discount),
+  );
+
   const updateLine = (index: number, patch: Partial<DraftLine>) =>
     setLines((current) =>
       current.map((line, i) => (i === index ? { ...line, ...patch } : line)),
@@ -122,6 +166,9 @@ function LpoForm({
   /** Blank the form without leaving it. */
   const clear = () => {
     setVendor("");
+    setVendorId(undefined);
+    setAddress("");
+    setDiscount("0");
     setOrderedOn(toLocalInput(new Date()));
     setExpectedOn("");
     setNote("");
@@ -142,13 +189,22 @@ function LpoForm({
     }
     const payload = {
       vendor: vendor.trim() || undefined,
+      vendorId,
+      supplierAddress: address.trim() || undefined,
       orderedAt: new Date(`${orderedOn}T12:00:00`).getTime(),
       expectedAt: expectedOn ? new Date(`${expectedOn}T12:00:00`).getTime() : undefined,
       note: note.trim() || undefined,
+      discountPct: num(discount) || undefined,
       lines: clean.map((l) => ({
         materialId: l.materialId as Id<"rawMaterials">,
         qty: num(l.qty),
         unitCost: num(l.rate),
+        // a line with no rate of its own takes the material's, which the
+        // server also knows how to do
+        taxPct:
+          l.tax.trim() === ""
+            ? undefined
+            : Math.min(100, Math.max(0, num(l.tax))),
       })),
     };
     setBusy(true);
@@ -232,18 +288,19 @@ function LpoForm({
         quantities into raw-material stock.
       </p>
 
-      <div className="grid gap-3 border-b border-border/60 px-5 py-4 sm:grid-cols-3">
-        <label className="block">
-          <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
-            Vendor
-          </span>
-          <Input
-            value={vendor}
-            onChange={(e) => setVendor(e.target.value)}
-            placeholder="e.g. Maida Traders"
-            className="mt-1 h-9 rounded-lg text-sm"
-          />
-        </label>
+      <div className="grid gap-4 border-b border-border/60 px-5 py-4 sm:grid-cols-2">
+        <VendorField
+          supplier={vendor}
+          supplierId={vendorId}
+          address={address}
+          onChange={(patch) => {
+            if (patch.supplier !== undefined) setVendor(patch.supplier);
+            if (patch.supplierId !== undefined) setVendorId(patch.supplierId);
+            if (patch.supplierAddress !== undefined)
+              setAddress(patch.supplierAddress);
+          }}
+        />
+        <div className="grid grid-cols-2 gap-3">
         <label className="block">
           <span className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase">
             Ordered on
@@ -266,6 +323,7 @@ function LpoForm({
             className="mt-1 h-9 rounded-lg text-sm"
           />
         </label>
+        </div>
       </div>
 
       <div className="overflow-x-auto px-5 py-4">
@@ -273,27 +331,43 @@ function LpoForm({
           <thead>
             <tr className="border-b border-border text-[11px] tracking-wide text-muted-foreground uppercase">
               <th className="w-8 py-1.5 text-left font-medium">#</th>
-              <th className="py-1.5 text-left font-medium">Material</th>
-              <th className="w-24 py-1.5 text-right font-medium">Qty</th>
-              <th className="w-32 py-1.5 text-right font-medium">Rate</th>
-              <th className="w-32 py-1.5 text-right font-medium">Amount</th>
+              <th className="w-24 py-1.5 text-left font-medium">Code</th>
+              <th className="py-1.5 text-left font-medium">Name</th>
+              <th className="w-20 py-1.5 text-right font-medium">Qty</th>
+              <th className="w-14 py-1.5 text-right font-medium">Unit</th>
+              <th className="w-24 py-1.5 text-right font-medium">Rate</th>
+              <th className="w-24 py-1.5 text-right font-medium">Sub total</th>
+              <th className="w-28 py-1.5 text-right font-medium">Tax</th>
+              <th className="w-28 py-1.5 text-right font-medium">Total</th>
               <th className="w-8" />
             </tr>
           </thead>
           <tbody>
-            {lines.map((line, index) => (
+            {lines.map((line, index) => {
+              const material = materialOf(line.materialId);
+              const sub = num(line.qty) * num(line.rate);
+              // the discount comes off first, then this line's own rate is
+              // charged on what is left — the same order the server uses
+              const net = sub * (1 - num(discount) / 100);
+              const taxMoney = (net * lineRate(line)) / 100;
+              return (
               <tr key={index} className="border-b border-border/50">
-                <td className="py-2 text-xs text-muted-foreground tabular-nums">{index + 1}</td>
-                <td className="py-2 pr-2">
+                <td className="py-1 text-xs text-muted-foreground tabular-nums">{index + 1}</td>
+                <td className="py-1 pr-1.5 font-mono text-xs text-muted-foreground">
+                  {material?.code ?? "—"}
+                </td>
+                <td className="py-1 pr-1.5">
                   <ItemPicker
                     className="w-full"
                     items={materialOptions}
                     value={line.materialId}
                     onChange={(id) => {
                       const materialId = id as Id<"rawMaterials"> | "";
-                      const material = materials.find((m) => m._id === materialId);
-                      // a different material means the rate on screen was the
-                      // previous one's, so take the new one's rate
+                      const material = materialOf(materialId);
+                      // A different material means the rate and tax on screen
+                      // belonged to the old one, so they are taken from the
+                      // newly chosen material. Re-picking the same one changes
+                      // nothing.
                       const changed = line.materialId !== materialId;
                       updateLine(index, {
                         materialId,
@@ -303,6 +377,13 @@ function LpoForm({
                             : changed
                               ? ""
                               : line.rate,
+                        // offered, not imposed — the field fills in and stays
+                        // editable either way
+                        tax: changed
+                          ? material?.purchaseTaxPct !== undefined
+                            ? String(material.purchaseTaxPct)
+                            : ""
+                          : line.tax,
                       });
                     }}
                     placeholder="Choose or search material…"
@@ -311,7 +392,7 @@ function LpoForm({
                     aria-label="Material"
                   />
                 </td>
-                <td className="py-2">
+                <td className="py-1 pr-1.5">
                   <Input
                     type="number"
                     min="0"
@@ -320,10 +401,13 @@ function LpoForm({
                     onChange={(e) => updateLine(index, { qty: e.target.value })}
                     aria-label="Quantity"
                     placeholder="Qty"
-                    className="ml-auto block h-9 w-24 rounded-lg text-right text-sm"
+                    className="ml-auto block h-8 rounded-md text-right text-sm tabular-nums"
                   />
                 </td>
-                <td className="py-2">
+                <td className="py-1 pr-1.5 text-right text-xs text-muted-foreground">
+                  {material?.unit ?? "—"}
+                </td>
+                <td className="py-1 pr-1.5">
                   <Input
                     type="number"
                     min="0"
@@ -332,13 +416,37 @@ function LpoForm({
                     onChange={(e) => updateLine(index, { rate: e.target.value })}
                     aria-label="Rate"
                     placeholder="Rate"
-                    className="ml-auto block h-9 w-28 rounded-lg text-right text-sm"
+                    className="ml-auto block h-8 rounded-md text-right text-sm tabular-nums"
                   />
                 </td>
-                <td className="py-2 text-right font-medium tabular-nums">
-                  {money(num(line.qty) * num(line.rate))}
+                <td className="py-1 pr-1.5 text-right text-sm tabular-nums text-muted-foreground">
+                  {money(sub)}
                 </td>
-                <td className="py-2 pl-2">
+                <td className="py-1 pr-1.5">
+                  <div className="flex flex-col items-end">
+                    <span className="text-sm tabular-nums">{money(taxMoney)}</span>
+                    {/* the rate sits under its own figure, small and quiet, so
+                        the money is what the eye lands on */}
+                    <label className="mt-0.5 flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="any"
+                        value={line.tax}
+                        placeholder={String(material?.purchaseTaxPct ?? 0)}
+                        onChange={(e) => updateLine(index, { tax: e.target.value })}
+                        aria-label="Line tax percent"
+                        className="w-8 border-b border-dashed border-border bg-transparent text-right tabular-nums outline-none focus:border-primary"
+                      />
+                      %
+                    </label>
+                  </div>
+                </td>
+                <td className="py-1 text-right text-sm font-medium tabular-nums">
+                  {money(net + taxMoney)}
+                </td>
+                <td className="py-1 text-right">
                   <button
                     type="button"
                     aria-label="Remove line"
@@ -349,13 +457,14 @@ function LpoForm({
                           : current.filter((_, x) => x !== index),
                       )
                     }
-                    className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-destructive"
+                    className="grid size-6 place-items-center rounded text-muted-foreground hover:text-destructive"
                   >
-                    <X className="size-4" />
+                    <X className="size-3.5" />
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         <Button
@@ -382,6 +491,8 @@ function LpoForm({
             className="mt-1"
           />
         </label>
+        {/* the same summary a purchase bill closes with: subtotal, discount,
+            the tax the lines add up to, then the total */}
         <div className="space-y-1.5 text-sm">
           <div className="flex items-center justify-between gap-6 text-muted-foreground">
             <span>Items</span>
@@ -389,9 +500,45 @@ function LpoForm({
               {lines.filter((l) => l.materialId !== "").length}
             </span>
           </div>
+          <div className="flex items-center justify-between gap-6 text-muted-foreground">
+            <span>Subtotal</span>
+            <span className="tabular-nums">{money(subtotal)}</span>
+          </div>
+          <div className="flex items-center justify-between gap-6 text-muted-foreground">
+            <span className="flex items-center gap-2">
+              Discount
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step="any"
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+                aria-label="Discount percent"
+                className="h-7 w-16 rounded-md border bg-card px-1.5 text-right text-xs tabular-nums"
+              />
+              %
+            </span>
+            <span className="tabular-nums">− {money(priced.discount)}</span>
+          </div>
+          {/* the tax on this order is whatever the lines add up to, so the
+              summary reports that figure rather than offering a rate to edit
+              here — a rate would imply one tax for the whole order. The
+              default is named underneath, for awareness only. */}
+          <div className="text-muted-foreground">
+            <div className="flex items-baseline justify-between gap-2">
+              <span>Tax amount</span>
+              <span className="tabular-nums">+ {money(priced.tax)}</span>
+            </div>
+            <p className="mt-0.5 text-right text-[11px] text-muted-foreground/80">
+              Default tax {Math.max(0, taxDefault?.taxPct ?? 0)}%
+              {lines.some((l) => num(l.tax) > 0) ? " · lines may differ" : ""}
+              {editing ? " · from this order" : ""}
+            </p>
+          </div>
           <div className="flex items-center justify-between gap-6 border-t border-border pt-2 text-base font-semibold">
             <span>Order total</span>
-            <span className="tabular-nums">{money(subtotal)}</span>
+            <span className="tabular-nums">{money(priced.grand)}</span>
           </div>
           {!editing && (
             <label className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
@@ -427,6 +574,7 @@ export default function LpoPanel({
   canDelete,
   seed = null,
   onCreateBill,
+  onCreateGrv,
   billNumberOf,
 }: {
   materials: MaterialDoc[];
@@ -437,6 +585,8 @@ export default function LpoPanel({
   seed?: LpoSeed | null;
   /** Opens the bill form pre-filled from this order's lines. */
   onCreateBill: (lpo: LpoDoc) => void;
+  /** Opens the goods-received form pre-filled from this order's lines. */
+  onCreateGrv?: (lpo: LpoDoc) => void;
   /** The bill number an order was raised into, so it can be named. */
   billNumberOf?: (billId: Id<"purchases">) => string | undefined;
 }) {
@@ -597,6 +747,18 @@ export default function LpoPanel({
                 <FileText className="size-3.5" /> Bill
               </Button>
             )}
+            {billable && canEdit && onCreateGrv !== undefined && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onCreateGrv(viewed)}
+                title="Record what actually arrived — the voucher's lines come from this order"
+                className="h-8 rounded-lg text-xs"
+              >
+                <ClipboardList className="size-3.5" /> Record delivery
+              </Button>
+            )}
             {billable && canEdit && (
               <Button
                 type="button"
@@ -610,7 +772,7 @@ export default function LpoPanel({
                     `${viewed.number} received — stock updated.`,
                   )
                 }
-                title="Goods are here but there is no bill yet"
+                title="Count the whole order in without recording what arrived"
                 className="h-8 rounded-lg text-xs"
               >
                 {busy === viewed._id ? (
@@ -677,7 +839,8 @@ export default function LpoPanel({
                 <th className="py-1.5 text-left font-medium">Material</th>
                 <th className="w-24 py-1.5 text-right font-medium">Qty</th>
                 <th className="w-32 py-1.5 text-right font-medium">Rate</th>
-                <th className="w-32 py-1.5 text-right font-medium">Amount</th>
+                <th className="w-28 py-1.5 text-right font-medium">Tax</th>
+                <th className="w-32 py-1.5 text-right font-medium">Total</th>
               </tr>
             </thead>
             <tbody>
@@ -689,8 +852,14 @@ export default function LpoPanel({
                     {line.qty} {line.unit}
                   </td>
                   <td className="py-2 text-right tabular-nums">{money(line.unitCost)}</td>
+                  <td className="py-2 text-right tabular-nums">
+                    <div>{money(line.qty * line.unitCost * ((line.taxPct ?? 0) / 100))}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {line.taxPct ?? 0}%
+                    </div>
+                  </td>
                   <td className="py-2 text-right font-medium tabular-nums">
-                    {money(line.qty * line.unitCost)}
+                    {money(line.qty * line.unitCost * (1 + (line.taxPct ?? 0) / 100))}
                   </td>
                 </tr>
               ))}
@@ -706,6 +875,10 @@ export default function LpoPanel({
             <div className="flex items-center justify-between gap-8 text-muted-foreground">
               <span>Items</span>
               <span className="tabular-nums">{viewed.lines.length}</span>
+            </div>
+            <div className="flex items-center justify-between gap-8 text-muted-foreground">
+              <span>Tax amount</span>
+              <span className="tabular-nums">+ {money(viewed.taxAmount ?? 0)}</span>
             </div>
             <div className="flex items-center justify-between gap-8 border-t border-border pt-2 text-base font-semibold">
               <span>Order total</span>
@@ -800,6 +973,7 @@ export default function LpoPanel({
                   <th className="w-24 px-3 py-2">Ordered</th>
                   <th className="w-24 px-3 py-2">Expected</th>
                   <th className="w-16 px-3 py-2 text-right">Items</th>
+                  <th className="w-24 px-3 py-2 text-right">Tax</th>
                   <th className="w-28 px-3 py-2 text-right">Total</th>
                   <th className="w-28 px-3 py-2">Status</th>
                   <th className="px-2 py-2" />
@@ -835,7 +1009,12 @@ export default function LpoPanel({
                       <td className="px-3 py-2 text-right text-xs tabular-nums">
                         {l.lines.length}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{money(l.total)}</td>
+                      <td className="px-3 py-2 text-right text-xs tabular-nums text-muted-foreground">
+                        {money(l.taxAmount ?? 0)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium tabular-nums">
+                        {money(l.total)}
+                      </td>
                       <td className="px-3 py-2">
                         <span
                           className={cn(
