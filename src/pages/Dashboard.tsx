@@ -58,7 +58,14 @@ export default function Dashboard() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const { confirm, prompt, promptMulti } = useAppDialogs();
-  const [section, setSection] = useState<Section>("tasks");
+  // a page of its own links back to the section it was raised from, so the
+  // section is read from the address bar rather than always starting on tasks
+  const [section, setSection] = useState<Section>(() => {
+    const asked = new URLSearchParams(window.location.search).get("section");
+    return asked === "costing" || asked === "notes" || asked === "tasks"
+      ? asked
+      : "tasks";
+  });
 
   // ── Access control (Settings tab roles & restrictions) ─────────────
   const myAccess = useQuery(api.settings.getMyAccess);
@@ -475,9 +482,10 @@ export default function Dashboard() {
   const updateProjectM = useMutation(api.costing.updateProject);
   const removeProjectM = useMutation(api.costing.removeProject);
   const [costingView, setCostingView] = useState<CostingView>(() => {
-    // a document page links back to the list it was raised from
+    // a page of its own links back to the list it was raised from
     const asked = new URLSearchParams(window.location.search).get("view");
     if (asked === "sales") return { kind: "sales", tab: "dashboard" };
+    if (asked === "materials") return { kind: "materials" };
     return { kind: "projects" };
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

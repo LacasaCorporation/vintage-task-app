@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import MaterialImportDialog from "@/components/MaterialImportDialog";
 import ActiveToggle from "@/components/ActiveToggle";
 import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
-import CreateMaterialDialog from "@/components/CreateMaterialDialog";
 import StockMovementList from "@/components/StockMovementList";
 import type { StockRow } from "@/lib/stock-types";
 import {
@@ -33,6 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { exportMaterialTemplate, exportMaterials } from "@/lib/materialImport";
 import { Fragment, useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -246,7 +246,6 @@ export default function MaterialsSheet({
   canImport?: boolean;
 }) {
   const { format: money, code: currencyCode } = useWorkspaceCurrency();
-  const updateMaterial = useMutation(api.costing.updateMaterial);
   const removeMaterial = useMutation(api.costing.removeMaterial);
 
   // managed master data for dropdowns
@@ -260,63 +259,11 @@ export default function MaterialsSheet({
   );
   const units = masterUnits ?? [];
   const allCategories = masterCategories ?? [];
-  const { promptMulti, confirm } = useAppDialogs();
+  const { confirm } = useAppDialogs();
+  const navigate = useNavigate();
 
-  /** Open the styled edit dialog for one material row. */
-  const handleEdit = async (m: MaterialDoc) => {
-    const result = await promptMulti({
-      title: `Edit “${m.name}”`,
-      message: `Update the raw material details. Its code ${m.code ?? "—"} is fixed — it is what every sheet, bill and ledger line quotes.`,
-      columns: 2,
-      confirmLabel: "Save changes",
-      fields: [
-        { key: "name", label: "Material name", initial: m.name, required: true },
-        {
-          key: "category",
-          label: "Category",
-          initial: m.category ?? "",
-          placeholder: "e.g. Wood",
-        },
-        {
-          key: "subCategory",
-          label: "Sub-category",
-          initial: m.subCategory ?? "",
-          placeholder: "e.g. Hardwood",
-        },
-        { key: "unit", label: "Unit", initial: m.unit, required: true, placeholder: "pcs" },
-        {
-          key: "price",
-          label: "Unit price",
-          initial: String(m.pricePerUnit),
-          type: "number",
-          required: true,
-          validate: (v) =>
-            v && (Number.isNaN(Number(v)) || Number(v) < 0) ? "Enter a valid price." : null,
-        },
-      ],
-    });
-    if (result === null) return;
-    const priceNum = Number(result.price);
-    if (!Number.isFinite(priceNum) || priceNum < 0) {
-      toast.error("Enter a valid price per unit.");
-      return;
-    }
-    try {
-      await updateMaterial({
-        id: m._id,
-        // sent back unchanged: the code is fixed once created
-        code: m.code ?? "",
-        name: result.name,
-        category: result.category,
-        subCategory: result.subCategory,
-        unit: result.unit,
-        pricePerUnit: priceNum,
-      });
-      toast.success("Material updated.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the material.");
-    }
-  };
+  /** Open the full form for one material row, on a page of its own. */
+  const handleEdit = (m: MaterialDoc) => navigate(`/materials/${m._id}`);
 
   const handleDelete = async (m: MaterialDoc) => {
     // a recipe or a purchase bill holds it; its own stock ledger does not,
@@ -351,7 +298,6 @@ export default function MaterialsSheet({
     }
   };
 
-  const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   /** All materials, or only the ones carrying the Active mark. */
@@ -441,8 +387,8 @@ export default function MaterialsSheet({
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => setCreateOpen(true)}
-              title="New raw material — name, code, unit, price"
+              onClick={() => navigate("/materials/new")}
+              title="New raw material — identity, pricing, stock levels and tax"
               className="h-7 shrink-0 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs font-medium text-primary transition-colors hover:border-primary/50 hover:bg-primary/10 hover:text-primary"
             >
               <Plus className="size-3.5" />
@@ -823,13 +769,6 @@ export default function MaterialsSheet({
         This list is the master price list — costing sheets pick materials from here, so prices stay
         consistent across products.
       </p>
-
-      <CreateMaterialDialog
-        key={createOpen ? "open" : "closed"}
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreated={() => {}}
-      />
 
       <MaterialImportDialog
         open={importOpen}

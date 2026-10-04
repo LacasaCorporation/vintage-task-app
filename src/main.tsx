@@ -48,6 +48,7 @@ const Dashboard = lazyRoute(() => import("./pages/Dashboard.tsx"));
 const SalesDocumentPage = lazyRoute(
   () => import("./pages/SalesDocumentPage.tsx"),
 );
+const MaterialPage = lazyRoute(() => import("./pages/MaterialPage.tsx"));
 const NotFound = lazyRoute(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -189,6 +190,14 @@ createRoot(document.getElementById("root")!).render(
                   element={
                     <RequireAuth>
                       <SalesDocumentPage />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/materials/:id?"
+                  element={
+                    <RequireAuth>
+                      <MaterialPage />
                     </RequireAuth>
                   }
                 />

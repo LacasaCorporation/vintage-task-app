@@ -262,7 +262,37 @@ export const listMaterials = query({
   },
 });
 
+/**
+ * One raw material, for the form that edits it on a page of its own. Scoped
+ * like every other read, so another firm's id simply does not resolve.
+ */
+export const getMaterial = query({
+  args: { id: v.id("rawMaterials") },
+  handler: async (ctx, { id }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return null;
+    const material = await ctx.db.get(id);
+    if (material === null || material.ownerId !== userId) return null;
+    return material;
+  },
+});
+
 /** Add a raw material. */
+/**
+ * A quantity or rate the user typed, made safe once and for all: a blank
+ * field means "not set", and nothing negative or absurd is ever written.
+ */
+function nonNegative(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value < 0) return undefined;
+  return value;
+}
+
+/** A tax rate, held between 0 and 100 because anything above is a typo. */
+function ratePct(value: number | undefined): number | undefined {
+  const clean = nonNegative(value);
+  return clean === undefined ? undefined : Math.min(clean, 100);
+}
+
 export const addMaterial = mutation({
   args: {
     code: v.optional(v.string()),
@@ -271,10 +301,16 @@ export const addMaterial = mutation({
     subCategory: v.optional(v.string()),
     unit: v.string(),
     pricePerUnit: v.number(),
+    note: v.optional(v.string()),
+    minStock: v.optional(v.number()),
+    reorderLevel: v.optional(v.number()),
+    salesTaxPct: v.optional(v.number()),
+    purchaseTaxPct: v.optional(v.number()),
   },
-  handler: async (ctx, { code, name, category, subCategory, unit, pricePerUnit }) => {
+  handler: async (ctx, args) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
+    const { code, name, category, unit, pricePerUnit } = args;
     const clean = name.trim();
     if (clean.length === 0) throw new Error("Give the material a name.");
     if (clean.length > MAX_NAME_LENGTH) throw new Error("That name is too long.");
@@ -295,9 +331,14 @@ export const addMaterial = mutation({
       isActive: true,
       activeAt: Date.now(),
       category: category?.trim() || undefined,
-      subCategory: subCategory?.trim() || undefined,
+      subCategory: args.subCategory?.trim() || undefined,
       unit: cleanUnit,
       pricePerUnit,
+      note: args.note?.trim() || undefined,
+      minStock: nonNegative(args.minStock),
+      reorderLevel: nonNegative(args.reorderLevel),
+      salesTaxPct: ratePct(args.salesTaxPct),
+      purchaseTaxPct: ratePct(args.purchaseTaxPct),
     });
   },
 });
@@ -312,6 +353,11 @@ export const updateMaterial = mutation({
     subCategory: v.optional(v.string()),
     unit: v.optional(v.string()),
     pricePerUnit: v.optional(v.number()),
+    note: v.optional(v.string()),
+    minStock: v.optional(v.number()),
+    reorderLevel: v.optional(v.number()),
+    salesTaxPct: v.optional(v.number()),
+    purchaseTaxPct: v.optional(v.number()),
   },
   handler: async (ctx, { id, ...patch }) => {
     const userId = await scopeUserId(ctx);
@@ -340,6 +386,12 @@ export const updateMaterial = mutation({
       patch.subCategory = patch.subCategory.trim() || undefined;
     if (patch.pricePerUnit !== undefined && patch.pricePerUnit < 0)
       throw new Error("Price can't be negative.");
+    if (patch.minStock !== undefined) patch.minStock = nonNegative(patch.minStock);
+    if (patch.reorderLevel !== undefined)
+      patch.reorderLevel = nonNegative(patch.reorderLevel);
+    if (patch.salesTaxPct !== undefined) patch.salesTaxPct = ratePct(patch.salesTaxPct);
+    if (patch.purchaseTaxPct !== undefined)
+      patch.purchaseTaxPct = ratePct(patch.purchaseTaxPct);
     await ctx.db.patch(id, patch);
   },
 });

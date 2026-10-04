@@ -2,7 +2,6 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import CreateMaterialDialog from "@/components/CreateMaterialDialog";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import type { CostingView } from "@/components/CostingSidebar";
 import {
@@ -24,6 +23,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import ConnectJobDialog from "@/components/ConnectJobDialog";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
@@ -213,6 +213,7 @@ export default function CostingPanel({
   canEditProject?: boolean;
   canDeleteProject?: boolean;
 }) {
+  const navigate = useNavigate();
   const [projectFocus, setProjectFocus] = useState<string | null>(null);
   /** The product whose costing sheet is open over the current view. */
   const [sheetId, setSheetId] = useState<Id<"finishedGoods"> | null>(null);
@@ -288,9 +289,6 @@ export default function CostingPanel({
 
   // ── FG costing grid state ──────────────────────────────────────────
   const [addingMaterialId, setAddingMaterialId] = useState("");
-  const [createMaterialOpen, setCreateMaterialOpen] = useState(false);
-  // bumped on every open so the dialog starts with blank fields
-  const [createMaterialKey, setCreateMaterialKey] = useState(0);
   const [materialQty, setMaterialQty] = useState("1");
   const [customLabel, setCustomLabel] = useState("");
   const [customQty, setCustomQty] = useState("1");
@@ -1076,10 +1074,11 @@ export default function CostingPanel({
                 searchPlaceholder="Search name, code or category…"
                 emptyLabel="No material matches that."
                 aria-label="Choose a raw material"
-                onCreateNew={() => {
-                  setCreateMaterialKey((k) => k + 1);
-                  setCreateMaterialOpen(true);
-                }}
+                onCreateNew={(term) =>
+                  navigate(
+                    `/materials/new?name=${encodeURIComponent(term.trim())}`,
+                  )
+                }
               />
               <Input
                 type="number"
@@ -1458,12 +1457,6 @@ export default function CostingPanel({
         </div>
       )}
 
-      <CreateMaterialDialog
-        key={createMaterialKey}
-        open={createMaterialOpen}
-        onClose={() => setCreateMaterialOpen(false)}
-        onCreated={(id) => setAddingMaterialId(id)}
-      />
     </div>
   );
 }

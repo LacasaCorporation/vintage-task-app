@@ -472,6 +472,20 @@ const schema = defineSchema(
       // what was already on hand before any bill was recorded; set from the
       // Opening balance tab and kept as the authoritative figure
       opening: v.optional(v.number()),
+      /**
+       * Stock control. `minStock` is the floor below which the material counts
+       * as short; `reorderLevel` is the quantity worth raising a purchase
+       * order for. Both are advisory — the ledger is never blocked by them.
+       */
+      minStock: v.optional(v.number()),
+      reorderLevel: v.optional(v.number()),
+      /**
+       * Tax rates this material usually carries. Offered on the documents it
+       * appears on; each document can still be set differently.
+       */
+      salesTaxPct: v.optional(v.number()), // default rate when sold
+      purchaseTaxPct: v.optional(v.number()), // default rate when bought
+      note: v.optional(v.string()), // short description, shown in the list
       // marked active by hand — a working mark of its own, separate from any
       // status, so the Active list can gather whatever is being worked on now
       isActive: v.optional(v.boolean()),
