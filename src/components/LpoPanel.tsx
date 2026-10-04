@@ -816,22 +816,32 @@ export default function LpoPanel({
                 Receive
               </Button>
             )}
-            {viewed.status !== "received" &&
-              viewed.billId === undefined &&
-              canEdit && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setEditingId(viewed._id);
-                    setFormOpen(true);
-                  }}
-                  className="h-8 rounded-lg text-xs"
-                >
-                  <Pencil className="size-3.5" /> Edit
-                </Button>
-              )}
+            {canEdit && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setEditingId(viewed._id);
+                  setFormOpen(true);
+                }}
+                className="h-8 rounded-lg text-xs"
+              >
+                <Pencil className="size-3.5" /> Edit
+              </Button>
+            )}
+            {canDelete && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy === viewed._id}
+                onClick={() => void confirmDelete(viewed)}
+                className="h-8 rounded-lg text-xs text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="size-3.5" /> Delete
+              </Button>
+            )}
             {viewed.billId !== undefined && (
               <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
                 <FileText className="size-3" />
@@ -1133,7 +1143,7 @@ export default function LpoPanel({
                                 </Button>
                               </>
                             )}
-                          {editable && canEdit && (
+                          {canEdit && (
                             <button
                               type="button"
                               aria-label={`Edit ${l.number}`}
@@ -1167,7 +1177,7 @@ export default function LpoPanel({
                               Cancel
                             </Button>
                           )}
-                          {editable && canDelete && (
+                          {canDelete && (
                             <button
                               type="button"
                               aria-label={`Delete ${l.number}`}

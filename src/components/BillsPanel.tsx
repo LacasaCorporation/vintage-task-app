@@ -956,6 +956,17 @@ export default function BillsPanel({
                 <Pencil className="size-3.5" /> Edit
               </Button>
             )}
+            {canDelete && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void confirmDelete(viewed)}
+                className="h-8 rounded-lg text-xs text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="size-3.5" /> Delete
+              </Button>
+            )}
           </div>
         </div>
 

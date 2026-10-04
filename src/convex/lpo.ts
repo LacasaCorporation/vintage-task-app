@@ -174,9 +174,6 @@ export const update = mutation({
     if (lpo === null || lpo.ownerId !== userId) {
       throw new Error("That order no longer exists.");
     }
-    if (lpo.status === "received") {
-      throw new Error("This order is already received — the stock is in.");
-    }
     const lines = await resolveLines(ctx, userId, args.lines);
     const priced = priceTaxedLines(lines, args.discountPct);
     await ctx.db.patch(args.id, {
@@ -207,6 +204,7 @@ export const setStatus = mutation({
       v.literal("draft"),
       v.literal("ordered"),
       v.literal("cancelled"),
+      v.literal("received"),
     ),
   },
   handler: async (ctx, { id, status }): Promise<void> => {
@@ -215,12 +213,6 @@ export const setStatus = mutation({
     const lpo = await ctx.db.get(id);
     if (lpo === null || lpo.ownerId !== userId) {
       throw new Error("That order no longer exists.");
-    }
-    if (lpo.status === "received") {
-      throw new Error("This order is already received — the stock is in.");
-    }
-    if (lpo.billId !== undefined) {
-      throw new Error("This order has already been billed.");
     }
     await ctx.db.patch(id, { status });
   },
@@ -297,7 +289,7 @@ export const receive = mutation({
   },
 });
 
-/** Remove an order that was never received. */
+/** Remove an order. Cleanly unlinks from any linked purchase bills or vouchers. */
 export const remove = mutation({
   args: { id: v.id("lpos") },
   handler: async (ctx, { id }): Promise<void> => {
@@ -305,16 +297,39 @@ export const remove = mutation({
     if (userId === null) throw new Error("Sign in first.");
     const lpo = await ctx.db.get(id);
     if (lpo === null || lpo.ownerId !== userId) return;
+
+    // Unlink from any linked purchase bills
     if (lpo.billId !== undefined) {
-      throw new Error(
-        "This order has been billed — delete the purchase bill instead.",
-      );
+      const bill = await ctx.db.get(lpo.billId);
+      if (bill !== null && bill.ownerId === userId && bill.lpoId === id) {
+        await ctx.db.patch(lpo.billId, { lpoId: undefined });
+      }
     }
-    if (lpo.status === "received") {
-      throw new Error(
-        "This order is already received — delete the purchase bill instead.",
-      );
+    const linkedBills = await ctx.db
+      .query("purchases")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .filter((q) => q.eq(q.field("lpoId"), id))
+      .collect();
+    for (const b of linkedBills) {
+      await ctx.db.patch(b._id, { lpoId: undefined });
     }
+
+    // Unlink from any linked GRVs
+    if (lpo.grvId !== undefined) {
+      const grv = await ctx.db.get(lpo.grvId);
+      if (grv !== null && grv.ownerId === userId && grv.lpoId === id) {
+        await ctx.db.patch(lpo.grvId, { lpoId: undefined });
+      }
+    }
+    const linkedGrvs = await ctx.db
+      .query("grvs")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .filter((q) => q.eq(q.field("lpoId"), id))
+      .collect();
+    for (const g of linkedGrvs) {
+      await ctx.db.patch(g._id, { lpoId: undefined });
+    }
+
     await ctx.db.delete(id);
   },
 });

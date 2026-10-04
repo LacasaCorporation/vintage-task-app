@@ -262,13 +262,38 @@ export const update = mutation({
     if (grv === null || grv.ownerId !== userId) {
       throw new Error("That voucher no longer exists.");
     }
-    if (grv.status === "received") {
-      throw new Error(
-        `${grv.number} is already counted in — its stock cannot be edited.`,
-      );
-    }
     const resolved = await resolveLines(ctx, userId, args.lines);
     const priced = priceTaxedLines(resolved, args.discountPct);
+
+    // If the voucher is already counted into stock, adjust stock for the difference
+    if (grv.status === "received") {
+      // Reverse old lines
+      for (const line of grv.lines) {
+        const material = await ctx.db.get(line.materialId);
+        if (material === null || material.ownerId !== userId) continue;
+        await stockOut(ctx, {
+          ownerId: userId,
+          material,
+          qty: line.qty,
+          source: "adjustment",
+          ref: `${grv.number} (edited)`,
+          at: args.receivedAt ?? grv.receivedAt,
+        });
+      }
+      // Count in new lines
+      for (const line of resolved) {
+        const material = await ctx.db.get(line.materialId);
+        if (material === null || material.ownerId !== userId) continue;
+        await stockIn(ctx, {
+          ownerId: userId,
+          material,
+          qty: line.qty,
+          source: "grv",
+          ref: grv.number,
+          at: args.receivedAt ?? grv.receivedAt,
+        });
+      }
+    }
 
     let vendor = (args.vendor ?? "").trim().slice(0, MAX_NAME_LENGTH);
     if (args.vendorId !== undefined) {
@@ -336,9 +361,7 @@ export const remove = mutation({
     }
     // an order that was received through this voucher is no longer covered by
     // it: the link is cleared and the order goes back to being outstanding,
-    // so a bill raised from it can bring the goods in instead. Without this
-    // the stock would be out and the order stuck as received — receivable by
-    // nobody.
+    // so a bill raised from it can bring the goods in instead.
     if (grv.lpoId !== undefined) {
       const lpo = await ctx.db.get(grv.lpoId);
       if (lpo !== null && lpo.ownerId === userId && lpo.grvId === id) {
@@ -349,6 +372,22 @@ export const remove = mutation({
         });
       }
     }
+    // Unlink from any linked purchase bills
+    if (grv.billId !== undefined) {
+      const bill = await ctx.db.get(grv.billId);
+      if (bill !== null && bill.ownerId === userId && bill.grvId === id) {
+        await ctx.db.patch(grv.billId, { grvId: undefined });
+      }
+    }
+    const linkedBills = await ctx.db
+      .query("purchases")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .filter((q) => q.eq(q.field("grvId"), id))
+      .collect();
+    for (const b of linkedBills) {
+      await ctx.db.patch(b._id, { grvId: undefined });
+    }
+
     await ctx.db.delete(id);
   },
 });

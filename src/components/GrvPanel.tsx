@@ -680,7 +680,7 @@ export default function GrvPanel({
             >
               <ArrowLeft className="size-3.5" /> Goods received
             </Button>
-            {canEdit && viewed.status === "draft" && (
+            {canEdit && (
               <Button
                 type="button"
                 size="sm"
@@ -688,6 +688,17 @@ export default function GrvPanel({
                 className="h-8 rounded-lg text-xs"
               >
                 <Pencil className="size-3.5" /> Edit
+              </Button>
+            )}
+            {canDelete && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void confirmRemove(viewed)}
+                className="h-8 rounded-lg text-xs text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="size-3.5" /> Delete
               </Button>
             )}
             {canCreate && viewed.billId === undefined && (
@@ -926,7 +937,7 @@ export default function GrvPanel({
                               Bill
                             </Button>
                           )}
-                          {canEdit && row.status === "draft" && (
+                          {canEdit && (
                             <button
                               type="button"
                               aria-label={`Edit ${row.number}`}
