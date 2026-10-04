@@ -316,13 +316,17 @@ export default function GrvPanel({
                         items={materialOptions}
                         value={line.materialId}
                         onChange={(id) => {
+                          // a different material means the rate on screen was
+                          // the previous one's, so take the new one's rate
+                          const changed = line.materialId !== id;
                           updateLine(index, {
                             materialId: id as Id<"rawMaterials"> | "",
-                            rate:
-                              line.rate ||
-                              String(
-                                materials.find((m) => m._id === id)?.pricePerUnit ?? "",
-                              ),
+                            rate: changed
+                              ? String(
+                                  materials.find((m) => m._id === id)?.pricePerUnit ??
+                                    "",
+                                )
+                              : line.rate,
                           });
                         }}
                         placeholder="Choose or search material…"

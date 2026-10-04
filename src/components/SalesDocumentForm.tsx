@@ -484,18 +484,24 @@ function SalesDocEditor({
   const chooseProduct = (i: number, id: string) => {
     const entry = listById.get(id as Id<"finishedGoods">);
     const current = lines[i];
-    // an empty or untouched rate takes the sheet's price; a rate someone has
-    // deliberately typed is left exactly as it is
-    const keepTyped = current.price !== "" && current.price !== "0";
     const product = byId.get(id as Id<"finishedGoods">);
+    // A different product means the rate and tax on screen belonged to the old
+    // one, so both are taken from the newly chosen product. Re-picking the same
+    // product changes nothing — whatever was typed is left alone.
+    const changed = current.productId !== id;
     setLine(i, {
       productId: id as Id<"finishedGoods">,
-      price:
-        keepTyped || !entry || entry.price <= 0 ? current.price : String(entry.price),
-      // offered, not imposed — the field fills in and stays editable
-      tax:
-        current.tax ||
-        (product?.salesTaxPct !== undefined ? String(product.salesTaxPct) : ""),
+      price: changed
+        ? entry !== undefined && entry.price > 0
+          ? String(entry.price)
+          : ""
+        : current.price,
+      // offered, not imposed — the field fills in and stays editable either way
+      tax: changed
+        ? product?.salesTaxPct !== undefined
+          ? String(product.salesTaxPct)
+          : ""
+        : current.tax,
     });
   };
 

@@ -606,16 +606,23 @@ export default function BillsPanel({
                         disabled={!canCreate}
                         onChange={(id) => {
                           const picked = materialOf(id as Id<"rawMaterials">);
+                          // A different material means the rate and tax on
+                          // screen belonged to the old one, so they are taken
+                          // from the newly chosen material. Re-picking the same
+                          // one changes nothing.
+                          const changed = line.materialId !== id;
                           updateLine(index, {
                             materialId: id as Id<"rawMaterials"> | "",
-                            rate: line.rate || String(picked?.pricePerUnit ?? ""),
-                            // the material's own rate is offered, not imposed:
-                            // the field fills in, and stays editable
-                            tax:
-                              line.tax ||
-                              (picked?.purchaseTaxPct !== undefined
+                            rate: changed
+                              ? String(picked?.pricePerUnit ?? "")
+                              : line.rate,
+                            // offered, not imposed — the field fills in and
+                            // stays editable either way
+                            tax: changed
+                              ? picked?.purchaseTaxPct !== undefined
                                 ? String(picked.purchaseTaxPct)
-                                : ""),
+                                : ""
+                              : line.tax,
                           });
                         }}
                         placeholder="Choose or search material…"

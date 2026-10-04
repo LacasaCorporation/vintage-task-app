@@ -292,12 +292,17 @@ function LpoForm({
                     onChange={(id) => {
                       const materialId = id as Id<"rawMaterials"> | "";
                       const material = materials.find((m) => m._id === materialId);
+                      // a different material means the rate on screen was the
+                      // previous one's, so take the new one's rate
+                      const changed = line.materialId !== materialId;
                       updateLine(index, {
                         materialId,
                         rate:
-                          material && line.rate === ""
+                          changed && material
                             ? String(material.pricePerUnit)
-                            : line.rate,
+                            : changed
+                              ? ""
+                              : line.rate,
                       });
                     }}
                     placeholder="Choose or search material…"

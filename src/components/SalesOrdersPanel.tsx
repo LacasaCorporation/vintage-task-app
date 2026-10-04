@@ -415,18 +415,24 @@ function SalesOrderForm({
                     onChange={(id) => {
                       const productId = id as Id<"finishedGoods"> | "";
                       const product = rows.find((p) => p._id === productId);
+                      // a different product means the rate and tax on screen
+                      // belonged to the old one, so both are taken from the
+                      // newly chosen product
+                      const changed = line.productId !== productId;
                       updateLine(index, {
                         productId,
-                        price:
-                          product && line.price === ""
-                            ? String(priceOf.get(product._id) ?? 0)
-                            : line.price,
-                        // the product's own rate is offered, not imposed
-                        tax:
-                          line.tax ||
-                          (product?.salesTaxPct !== undefined
+                        price: changed
+                          ? productId === ""
+                            ? ""
+                            : String(priceOf.get(productId) ?? 0)
+                          : line.price,
+                        // offered, not imposed — the field fills in and stays
+                        // editable either way
+                        tax: changed
+                          ? product?.salesTaxPct !== undefined
                             ? String(product.salesTaxPct)
-                            : ""),
+                            : ""
+                          : line.tax,
                       });
                     }}
                     placeholder="Choose or search product…"
