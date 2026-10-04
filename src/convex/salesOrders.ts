@@ -113,10 +113,10 @@ export const create = mutation({
         unitPrice: line.unitPrice,
         // fixed onto the line, so a product's rate changing later cannot
         // rewrite an order that has already been confirmed
-        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
+        taxPct: lineRate(line.taxPct, product.salesTaxPct),
       });
     }
-    const priced = priceLines(lines, args.discountPct, args.taxPct);
+    const priced = priceLines(lines, args.discountPct);
     const discount = Math.min(100, Math.max(0, args.discountPct ?? 0));
 
     // the order remembers where it came from, so the quotation is not
@@ -204,11 +204,11 @@ export const update = mutation({
         unitPrice: line.unitPrice,
         // fixed onto the line, so a product's rate changing later cannot
         // rewrite an order that has already been confirmed
-        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
+        taxPct: lineRate(line.taxPct, product.salesTaxPct),
       });
     }
     const discount = Math.min(100, Math.max(0, args.discountPct ?? 0));
-    const priced = priceLines(lines, discount, args.taxPct);
+    const priced = priceLines(lines, discount);
 
     await ctx.db.patch(args.id, {
       customerId: args.customerId,

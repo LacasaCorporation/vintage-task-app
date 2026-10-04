@@ -117,12 +117,16 @@ export default function BillsPanel({
 
   /**
    * A line's rate: its own if one was typed, else the material's stored rate,
-   * else the document default. The order the server applies, kept in one place
-   * so the figure shown and the figure saved cannot drift apart.
+   * else nothing at all.
+   *
+   * A material with no tax rate of its own is charged no tax — the workspace
+   * default is not applied to it, because a rate the user never set on that
+   * item is not a rate they agreed to. The default is only a starting point
+   * for new documents, and it says so in the summary.
    */
-  const lineRate = (line: DraftLine, fallback: number): number =>
+  const lineRate = (line: DraftLine): number =>
     line.tax.trim() === ""
-      ? (materialOf(line.materialId)?.purchaseTaxPct ?? fallback)
+      ? (materialOf(line.materialId)?.purchaseTaxPct ?? 0)
       : Math.min(100, Math.max(0, num(line.tax)));
 
   /**
@@ -265,7 +269,7 @@ export default function BillsPanel({
     lines.map((l) => ({
       qty: num(l.qty),
       unitCost: num(l.rate),
-      taxPct: lineRate(l, fallbackRate),
+      taxPct: lineRate(l),
     })),
     num(discount),
   );
@@ -588,7 +592,7 @@ export default function BillsPanel({
                 const sub = num(line.qty) * num(line.rate);
                 // the discount comes off first, then this line's own rate is
                 // charged on what is left — the same order the server uses
-                const rate = lineRate(line, fallbackRate);
+                const rate = lineRate(line);
                 const net = sub * (1 - num(discount) / 100);
                 const taxMoney = (net * rate) / 100;
                 return (
@@ -674,8 +678,11 @@ export default function BillsPanel({
                             max={100}
                             step="any"
                             value={line.tax}
+                            // shows the material's own rate, and nothing when
+                            // it has none — the workspace default is not
+                            // quietly applied to a line that never asked for it
                             placeholder={String(
-                              material?.purchaseTaxPct ?? fallbackRate ?? 0,
+                              material?.purchaseTaxPct ?? 0,
                             )}
                             disabled={!canCreate}
                             onChange={(e) =>

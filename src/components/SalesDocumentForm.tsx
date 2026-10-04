@@ -439,15 +439,17 @@ function SalesDocEditor({
           unit: product?.unit ?? "pcs",
           qty: num(l.qty),
           price: num(l.price),
-          // a line with no rate of its own takes the product's, falling back
-          // to the document default — the same order the server applies
+          // A line with no rate of its own takes the product's, and a product
+          // with no rate of its own is charged nothing. The workspace default
+          // is a starting point for new documents, not a rate applied to
+          // every product in them.
           taxPct:
             l.tax.trim() === ""
-              ? (product?.salesTaxPct ?? Math.max(0, num(taxValue)))
+              ? (product?.salesTaxPct ?? 0)
               : Math.min(100, Math.max(0, num(l.tax))),
         };
       }),
-    [lines, byId, taxValue],
+    [lines, byId],
   );
 
   const totals = useMemo(() => {
@@ -1009,9 +1011,7 @@ function SalesDocEditor({
                               max="100"
                               step="any"
                               value={l.tax}
-                              placeholder={String(
-                                p?.taxPct ?? Math.max(0, num(taxValue)),
-                              )}
+                              placeholder={String(p?.taxPct ?? 0)}
                               onChange={(e) =>
                                 setLine(i, { tax: e.target.value })
                               }

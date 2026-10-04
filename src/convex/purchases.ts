@@ -83,7 +83,10 @@ export const create = mutation({    args: {
     ),
   },
   handler: async (ctx, args) => {
-    const { supplier, supplierId, supplierAddress, purchasedAt, dueAt, note, currency, discountPct, taxPct, lines } = args;
+    // `taxPct` stays in the validator for older callers, but the tax on this
+    // bill is now decided by the lines; the rate stored on the document is the
+    // blend of what they add up to.
+    const { supplier, supplierId, supplierAddress, purchasedAt, dueAt, note, currency, discountPct, lines } = args;
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     await requireItem(ctx, userId, "purchases", "create");
@@ -131,18 +134,20 @@ export const create = mutation({    args: {
       if (material.ownerId !== userId) throw new Error("That material belongs to another workspace.");
       if (line.qty <= 0) throw new Error(`Quantity for “${material.name}” must be more than zero.`);
       if (line.unitCost < 0) throw new Error("Unit cost can't be negative.");
-      // the rate is fixed onto the line here, so it never moves afterwards —
-      // what the supplier charged is what the bill and the ledger record
-      const rate = cleanRate(
-        line.taxPct ?? material.purchaseTaxPct ?? taxPct ?? 0,
-      );
+      // The rate is fixed onto the line here, so it never moves afterwards —
+      // what the supplier charged is what the bill and the ledger record.
+      // A material with no rate of its own is charged no tax: the workspace
+      // default is not applied to a line that never asked for it.
+      const rate = cleanRate(line.taxPct ?? material.purchaseTaxPct ?? 0);
       resolved.push({
         materialId: material._id,
         name: material.name,
         unit: material.unit,
         qty: line.qty,
         unitCost: line.unitCost,
-        taxPct: rate || undefined,
+        // 0 is stored as 0: this line is exempt, which is a different thing
+        // from having no rate on file
+        taxPct: rate,
       });
       // stock in, logged as income against this bill — unless a received
       // voucher already brought these very goods in, which it did
@@ -297,10 +302,9 @@ export const update = mutation({
         qty: line.qty,
         unitCost: line.unitCost,
         // an edited line keeps the rate it was billed at unless the bill says
-        // otherwise; the material's current rate is the fallback
-        taxPct: cleanRate(
-          line.taxPct ?? material.purchaseTaxPct ?? args.taxPct ?? 0,
-        ) || undefined,
+        // otherwise; the material's current rate is the fallback, and no rate
+        // at all means no tax
+        taxPct: cleanRate(line.taxPct ?? material.purchaseTaxPct ?? 0),
       };
       resolved.push(stored);
       await ctx.db.insert("purchaseLines", { ownerId: userId, purchaseId: id, ...stored });

@@ -170,9 +170,11 @@ function SalesOrderForm({
       return {
         qty: num(l.qty),
         unitPrice: num(l.price),
+        // a product with no rate of its own is charged nothing; the workspace
+        // default is not applied to every line in the document
         taxPct:
           l.tax.trim() === ""
-            ? (product?.salesTaxPct ?? Math.max(0, num(taxValue)))
+            ? (product?.salesTaxPct ?? 0)
             : Math.min(100, Math.max(0, num(l.tax))),
       };
     }),
@@ -473,8 +475,7 @@ function SalesOrderForm({
                     step="any"
                     value={line.tax}
                     placeholder={String(
-                      rows.find((p) => p._id === line.productId)?.salesTaxPct ??
-                        Math.max(0, num(taxValue)),
+                      rows.find((p) => p._id === line.productId)?.salesTaxPct ?? 0,
                     )}
                     onChange={(e) => updateLine(index, { tax: e.target.value })}
                     aria-label="Line tax percent"
@@ -489,7 +490,7 @@ function SalesOrderForm({
                       taxPct:
                         line.tax.trim() === ""
                           ? (rows.find((p) => p._id === line.productId)
-                              ?.salesTaxPct ?? Math.max(0, num(taxValue)))
+                              ?.salesTaxPct ?? 0)
                           : num(line.tax),
                     }),
                   )}

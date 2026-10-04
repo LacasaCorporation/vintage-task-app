@@ -68,22 +68,19 @@ export const salesLineValidator = lineValidator;
  * Price a document: line totals, less a percentage discount, plus tax on what
  * is left.
  *
- * Each line carries its own rate. A line without one falls back to the
- * document's rate, so a document raised with a single tax percentage priced
- * exactly as it always did — the arithmetic in `line-tax` reduces to the old
- * formula when every line agrees.
+ * Each line's own rate decides its tax. A line with no rate of its own is
+ * charged nothing — the document's rate is deliberately not substituted, so a
+ * zero-tax line cannot silently pick the document's rate back up.
  */
 export function priceLines(
   lines: { qty: number; unitPrice: number; taxPct?: number | undefined }[],
   discountPct: number | undefined,
-  taxPct: number | undefined,
 ): { total: number; grand: number; taxAmount: number } {
-  const fallback = cleanRate(taxPct);
   const priced = priceTaxedLines(
     lines.map((line) => ({
       qty: line.qty,
       unitPrice: line.unitPrice,
-      taxPct: line.taxPct ?? fallback,
+      taxPct: line.taxPct ?? 0,
     })),
     discountPct,
   );
@@ -92,15 +89,18 @@ export function priceLines(
 
 /**
  * The rate fixed onto one line: what was sent for it, else the product's own
- * rate, else the document's. Fixed at the moment the line is written, so a
- * product's rate changing later never rewrites a document already raised.
+ * rate, else nothing. Fixed at the moment the line is written, so a product's
+ * rate changing later never rewrites a document already raised.
+ *
+ * A product with no rate of its own is charged no tax. The document's rate is
+ * deliberately not a fallback — a percentage the user never set on that
+ * product is not one they agreed to.
  */
 export function lineRate(
   sent: number | undefined,
   productRate: number | undefined,
-  documentRate: number | undefined,
 ): number {
-  return cleanRate(sent ?? productRate ?? documentRate ?? 0);
+  return cleanRate(sent ?? productRate ?? 0);
 }
 
 /** Every quotation, newest first. */
@@ -178,10 +178,10 @@ export const createQuotation = mutation({
         unitPrice: line.unitPrice,
           // fixed onto the line now: a product whose rate changes
           // later must never rewrite a document already raised
-        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
+        taxPct: lineRate(line.taxPct, product.salesTaxPct),
       });
     }
-    const priced = priceLines(resolved, args.discountPct, args.taxPct);
+    const priced = priceLines(resolved, args.discountPct);
     return await ctx.db.insert("quotations", {
       ownerId: userId,
       number: await nextNumber(ctx, "quotations", userId, "QT"),
@@ -263,13 +263,12 @@ export const updateQuotation = mutation({
           unitPrice: line.unitPrice,
           // fixed onto the line now: a product whose rate changes
           // later must never rewrite a document already raised
-          taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
+          taxPct: lineRate(line.taxPct, product.salesTaxPct),
         });
       }
       const priced = priceLines(
         resolved,
         patch.discountPct as number | undefined,
-        patch.taxPct as number | undefined,
       );
       patch.lines = resolved;
       patch.total = priced.grand;
@@ -295,7 +294,7 @@ export const convertToSale = mutation({
     if (quote.invoicedAs !== undefined)
       throw new Error("This quotation has already been turned into a sales bill.");
 
-    const priced = priceLines(quote.lines, quote.discountPct, quote.taxPct);
+    const priced = priceLines(quote.lines, quote.discountPct);
     const saleId = await ctx.db.insert("sales", {
       ownerId: userId,
       number: await nextNumber(ctx, "sales", userId, "SAL"),
@@ -382,10 +381,10 @@ export const createSale = mutation({
         unitPrice: line.unitPrice,
           // fixed onto the line now: a product whose rate changes
           // later must never rewrite a document already raised
-        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
+        taxPct: lineRate(line.taxPct, product.salesTaxPct),
       });
     }
-    const priced = priceLines(resolved, args.discountPct, args.taxPct);
+    const priced = priceLines(resolved, args.discountPct);
     const saleId = await ctx.db.insert("sales", {
       ownerId: userId,
       number: await nextNumber(ctx, "sales", userId, "SAL"),
@@ -598,7 +597,7 @@ export const updateSale = mutation({
         unitPrice: line.unitPrice,
           // fixed onto the line now: a product whose rate changes
           // later must never rewrite a document already raised
-        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
+        taxPct: lineRate(line.taxPct, product.salesTaxPct),
       });
     }
 
@@ -617,7 +616,7 @@ export const updateSale = mutation({
     }
 
     // … then do it again with the new one
-    const priced = priceLines(resolved, args.discountPct, args.taxPct);
+    const priced = priceLines(resolved, args.discountPct);
     const fields = {
       customerId: args.customerId,
       customerName: args.customerName?.trim() || undefined,
@@ -692,10 +691,10 @@ export const updateQuotationLines = mutation({
         unitPrice: line.unitPrice,
           // fixed onto the line now: a product whose rate changes
           // later must never rewrite a document already raised
-        taxPct: lineRate(line.taxPct, product.salesTaxPct, args.taxPct) || undefined,
+        taxPct: lineRate(line.taxPct, product.salesTaxPct),
       });
     }
-    const priced = priceLines(resolved, args.discountPct, args.taxPct);
+    const priced = priceLines(resolved, args.discountPct);
     await ctx.db.patch(args.id, {
       customerId: args.customerId,
       customerName: args.customerName?.trim() || undefined,
