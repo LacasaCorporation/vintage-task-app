@@ -4,6 +4,7 @@ import { scopeUserId } from "./org";
 import { postSale, postSaleReceipt, reverseEntry } from "./ledger";
 import { defaultTaxPct } from "./accountingDefaults";
 import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
+import { creditRefusalMessage, creditState } from "../lib/credit";
 import { getSettings } from "./settings";
 import { currencySymbol } from "../lib/currency";
 import { costByProduct } from "../lib/product-cost";
@@ -356,6 +357,8 @@ export const createSale = mutation({
     currency: v.optional(v.string()),
     discountPct: v.optional(v.number()),
     taxPct: v.optional(v.number()),
+    /** Set by the form when the user chooses to invoice past a credit limit. */
+    overrideCreditLimit: v.optional(v.boolean()),
     lines: lineValidator,
   },
   handler: async (ctx, args) => {
@@ -385,6 +388,44 @@ export const createSale = mutation({
       });
     }
     const priced = priceLines(resolved, args.discountPct);
+
+    // A customer with a ceiling on what they may owe gets its balance checked
+    // before the invoice is written. Saving over the limit is possible, but
+    // only on purpose — the form sends `overrideCreditLimit` when told to.
+    if (args.customerId !== undefined && args.overrideCreditLimit !== true) {
+      const customer = await ctx.db.get(args.customerId);
+      if (
+        customer !== null &&
+        customer.ownerId === userId &&
+        customer.creditLimit !== undefined
+      ) {
+        const owed = (
+          await ctx.db
+            .query("sales")
+            .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+            .collect()
+        ).reduce(
+          (sum, s) =>
+            s.customerId === args.customerId && s.isPaid !== true
+              ? sum + s.total
+              : sum,
+          0,
+        );
+        const state = creditState(customer.creditLimit, owed, priced.grand);
+        if (state.overLimit) {
+          throw new Error(
+            creditRefusalMessage(
+              customer.name,
+              customer.creditLimit,
+              owed,
+              priced.grand,
+              (n) => n.toFixed(2),
+            ),
+          );
+        }
+      }
+    }
+
     const saleId = await ctx.db.insert("sales", {
       ownerId: userId,
       number: await nextNumber(ctx, "sales", userId, "SAL"),
