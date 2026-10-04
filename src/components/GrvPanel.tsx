@@ -852,7 +852,15 @@ export default function GrvPanel({
                 {grvs.map((g) => {
                   const row = g as GrvRow;
                   return (
-                    <tr key={row._id} className="transition-colors hover:bg-accent/40">
+                    <tr
+                      key={row._id}
+                      onClick={() => setViewingId(row._id)}
+                      title={`Open ${row.number}`}
+                      className={cn(
+                        "cursor-pointer transition-colors hover:bg-accent/40",
+                        viewingId === row._id && "bg-primary/[0.05]",
+                      )}
+                    >
                       <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap text-muted-foreground">
                         {/* the number opens the voucher, exactly as it does on
                             the order and the bill registers — the number is
@@ -907,7 +915,10 @@ export default function GrvPanel({
                               type="button"
                               size="sm"
                               variant="outline"
-                              onClick={() => onCreateBill?.(row)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onCreateBill?.(row);
+                              }}
                               title="Raise a purchase bill that pays for this delivery — its goods are already in stock"
                               className="h-7 rounded-lg px-2 text-xs"
                             >
@@ -920,7 +931,10 @@ export default function GrvPanel({
                               type="button"
                               aria-label={`Edit ${row.number}`}
                               title="Edit voucher"
-                              onClick={() => startEdit(row)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startEdit(row);
+                              }}
                               className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
                             >
                               <Pencil className="size-3.5" />
@@ -941,7 +955,10 @@ export default function GrvPanel({
                               size="sm"
                               variant="outline"
                               disabled={busyRow === row._id}
-                              onClick={() => void receive(row)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void receive(row);
+                              }}
                               className="h-7 rounded-lg px-2 text-xs"
                             >
                               {busyRow === row._id ? (
@@ -957,7 +974,10 @@ export default function GrvPanel({
                               type="button"
                               aria-label={`Delete ${row.number}`}
                               title="Delete voucher"
-                              onClick={() => void confirmRemove(row)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void confirmRemove(row);
+                              }}
                               className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-destructive"
                             >
                               <Trash2 className="size-3.5" />

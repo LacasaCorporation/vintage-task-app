@@ -985,8 +985,11 @@ export default function LpoPanel({
                   return (
                     <tr
                       key={l._id}
+                      onClick={() => setViewingId(l._id)}
+                      title={`Open ${l.number}`}
                       className={cn(
-                        "transition-colors hover:bg-accent/40",
+                        "cursor-pointer transition-colors hover:bg-accent/40",
+                        viewingId === l._id && "bg-primary/[0.05]",
                         l.status === "cancelled" && "opacity-60",
                       )}
                     >
@@ -1038,13 +1041,14 @@ export default function LpoPanel({
                               size="sm"
                               variant="outline"
                               disabled={busy === l._id}
-                              onClick={() =>
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 void act(
                                   l._id,
                                   () => setStatus({ id: l._id, status: "ordered" }),
                                   `${l.number} marked as sent.`,
-                                )
-                              }
+                                );
+                              }}
                               className="h-7 rounded-lg px-2 text-xs"
                             >
                               <Send className="size-3" /> Send
@@ -1057,7 +1061,10 @@ export default function LpoPanel({
                                 <Button
                                   type="button"
                                   size="sm"
-                                  onClick={() => onCreateBill(l)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onCreateBill(l);
+                                  }}
                                   title="Open the bill form with these lines filled in — saving it brings the stock in"
                                   className="h-7 rounded-lg px-2 text-xs text-emerald-600 hover:text-emerald-600"
                                 >
@@ -1068,13 +1075,14 @@ export default function LpoPanel({
                                   size="sm"
                                   variant="outline"
                                   disabled={busy === l._id}
-                                  onClick={() =>
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     void act(
                                       l._id,
                                       () => receive({ id: l._id }),
                                       `${l.number} received — stock updated.`,
-                                    )
-                                  }
+                                    );
+                                  }}
                                   title="Goods are here but there is no bill yet"
                                   className="h-7 rounded-lg px-2 text-xs"
                                 >
@@ -1092,7 +1100,8 @@ export default function LpoPanel({
                               type="button"
                               aria-label={`Edit ${l.number}`}
                               title="Edit order"
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setEditingId(l._id);
                                 setFormOpen(true);
                               }}
@@ -1107,13 +1116,14 @@ export default function LpoPanel({
                               size="sm"
                               variant="outline"
                               disabled={busy === l._id}
-                              onClick={() =>
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 void act(
                                   l._id,
                                   () => setStatus({ id: l._id, status: "cancelled" }),
                                   `${l.number} cancelled.`,
-                                )
-                              }
+                                );
+                              }}
                               className="h-7 rounded-lg px-2 text-xs"
                             >
                               Cancel
@@ -1124,7 +1134,10 @@ export default function LpoPanel({
                               type="button"
                               aria-label={`Delete ${l.number}`}
                               disabled={busy === l._id}
-                              onClick={() => void confirmDelete(l)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void confirmDelete(l);
+                              }}
                               className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-destructive"
                             >
                               <Trash2 className="size-3.5" />

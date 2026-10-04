@@ -1110,7 +1110,10 @@ export default function BillsPanel({
                     <td className="px-3 py-2.5 text-right font-medium tabular-nums">
                       {money(bill.total)}
                     </td>
-                    <td className="px-3 py-2.5 text-center">
+                    <td
+                      className="px-3 py-2.5 text-center"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <Checkbox
                         checked={bill.isPaid ?? false}
                         disabled={!canEdit}
