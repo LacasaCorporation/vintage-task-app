@@ -9,112 +9,9 @@ import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
 
 const MAX_NAME_LENGTH = 120;
 
-const lineValidator = v.array(
-  v.object({
-    materialId: v.id("rawMaterials"),
-    qty: v.number(),
-    unitCost: v.number(),
-    /** Absent means the line takes the material's own purchase rate. */
-    taxPct: v.optional(v.number()),
-  }),
-);
-
-/** A voucher line as the form sends it, before the material is looked up. */
-type LineIn = {
-  materialId: Id<"rawMaterials">;
-  qty: number;
-  unitCost: number;
-  taxPct?: number;
-};
-
-/**
- * Names each material the way it is stored and settles each line's rate: a
- * rate of its own, else the material's own purchase rate. Exactly the bill's
- * rule, so a voucher and the bill raised from it tax alike.
- */
-async function resolveLines(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  lines: readonly LineIn[],
-): Promise<
-  {
-    materialId: Id<"rawMaterials">;
-    name: string;
-    unit: string;
-    qty: number;
-    unitCost: number;
-    taxPct: number;
-  }[]
-> {
-  if (lines.length === 0) {
-    throw new Error("Add at least one material to the voucher.");
-  }
-  const resolved: {
-    materialId: Id<"rawMaterials">;
-    name: string;
-    unit: string;
-    qty: number;
-    unitCost: number;
-    taxPct: number;
-  }[] = [];
-  for (const line of lines) {
-    const material = await ctx.db.get(line.materialId);
-    if (material === null) throw new Error("A material on this voucher no longer exists.");
-    if (material.ownerId !== userId) {
-      throw new Error("That material belongs to another workspace.");
-    }
-    if (line.qty <= 0) {
-      throw new Error(`Quantity for “${material.name}” must be more than zero.`);
-    }
-    if (line.unitCost < 0) throw new Error("Unit cost can't be negative.");
-    resolved.push({
-      materialId: material._id,
-      name: material.name,
-      unit: material.unit,
-      qty: line.qty,
-      unitCost: line.unitCost,
-      // 0 is stored as 0: exempt is a decision, not an absent rate
-      taxPct:
-        line.taxPct !== undefined
-          ? cleanRate(line.taxPct)
-          : cleanRate(material.purchaseTaxPct),
-    });
-  }
-  return resolved;
-}
-
-/** The figures both create and update store, priced exactly as the form does. */
-function totalsOf(
-  lines: readonly { qty: number; unitCost: number; taxPct: number }[],
-  discountPct: number | undefined,
-) {
-  const discount = Math.min(100, Math.max(0, discountPct ?? 0));
-  const priced = priceTaxedLines(lines, discount);
-  return {
-    discountPct: discount || undefined,
-    taxPct: blendedRate(priced.net, priced.tax) || undefined,
-    total: Math.round(priced.grand * 100) / 100,
-    taxAmount: Math.round(priced.tax * 100) / 100 || undefined,
-  };
-}
-
-/** The supplier's name, from the typed text or the linked vendor. */
-async function vendorName(
-  ctx: MutationCtx,
-  userId: Id<"users">,
-  vendor: string | undefined,
-  vendorId: Id<"vendors"> | undefined,
-): Promise<string | undefined> {
-  let name = (vendor ?? "").trim().slice(0, MAX_NAME_LENGTH);
-  if (vendorId !== undefined) {
-    const doc = await ctx.db.get(vendorId);
-    if (doc === null || doc.ownerId !== userId) {
-      throw new Error("That supplier no longer exists.");
-    }
-    if (name === "") name = doc.name;
-  }
-  return name || undefined;
-}
+/** A discount percentage, clamped the way the pricing helper clamps it. */
+const cleanDiscount = (value: number | undefined): number =>
+  Math.min(100, Math.max(0, value ?? 0));
 
 /** Next sequential voucher number: GRV0001, GRV0002, … */
 async function nextGrvNumber(
@@ -180,10 +77,8 @@ export const options = query({
         .map((l) => ({
           id: l._id,
           number: l.number,
-          vendor: l.vendor,
-          // so a voucher raised from this order links to the same saved
-          // vendor the order does, rather than only carrying its name
           vendorId: l.vendorId,
+          vendor: l.vendor,
           lines: l.lines.map((line) => ({
             materialId: line.materialId,
             qty: line.qty,
@@ -227,6 +122,55 @@ async function countIn(
   }
 }
 
+/** The typed lines of a voucher, shared by create and update. */
+const lineValidator = v.array(
+  v.object({
+    materialId: v.id("rawMaterials"),
+    qty: v.number(),
+    unitCost: v.number(),
+    taxPct: v.optional(v.number()),
+  }),
+);
+
+/** Resolves the typed lines, naming each material the way it is stored. */
+async function resolveLines(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+  lines: readonly {
+    materialId: Id<"rawMaterials">;
+    qty: number;
+    unitCost: number;
+    taxPct?: number | undefined;
+  }[],
+) {
+  if (lines.length === 0) {
+    throw new Error("Add at least one material to the voucher.");
+  }
+  const resolved = [];
+  for (const line of lines) {
+    const material = await ctx.db.get(line.materialId);
+    if (material === null) {
+      throw new Error("A material on this voucher no longer exists.");
+    }
+    if (material.ownerId !== ownerId) {
+      throw new Error("That material belongs to another workspace.");
+    }
+    if (line.qty <= 0) {
+      throw new Error(`Quantity for “${material.name}” must be more than zero.`);
+    }
+    if (line.unitCost < 0) throw new Error("Unit cost can't be negative.");
+    resolved.push({
+      materialId: material._id,
+      name: material.name,
+      unit: material.unit,
+      qty: line.qty,
+      unitCost: line.unitCost,
+      taxPct: line.taxPct === undefined ? undefined : cleanRate(line.taxPct),
+    });
+  }
+  return resolved;
+}
+
 /**
  * Record goods that have arrived. Saved as a draft it changes nothing; marked
  * received — either here or later — its quantities go into raw-material stock.
@@ -248,17 +192,24 @@ export const create = mutation({
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     await requireItem(ctx, userId, "purchases", "create");
-
     const at = args.receivedAt ?? Date.now();
     const resolved = await resolveLines(ctx, userId, args.lines);
+    const priced = priceTaxedLines(resolved, args.discountPct);
 
-    let vendor = await vendorName(ctx, userId, args.vendor, args.vendorId);
+    let vendor = (args.vendor ?? "").trim().slice(0, MAX_NAME_LENGTH);
+    if (args.vendorId !== undefined) {
+      const vendorDoc = await ctx.db.get(args.vendorId);
+      if (vendorDoc === null || vendorDoc.ownerId !== userId) {
+        throw new Error("That supplier no longer exists.");
+      }
+      if (vendor === "") vendor = vendorDoc.name;
+    }
     if (args.lpoId !== undefined) {
       const lpo = await ctx.db.get(args.lpoId);
       if (lpo === null || lpo.ownerId !== userId) {
         throw new Error("That order no longer exists.");
       }
-      if (vendor === undefined) vendor = (lpo.vendor ?? "").trim() || undefined;
+      if (vendor === "") vendor = (lpo.vendor ?? "").trim();
     }
 
     const status = args.status ?? "draft";
@@ -266,14 +217,17 @@ export const create = mutation({
       ownerId: userId,
       number: await nextGrvNumber(ctx, userId),
       vendorId: args.vendorId,
-      vendor,
-      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
+      vendor: vendor || undefined,
       receivedAt: at,
       lpoId: args.lpoId,
       reference: args.reference?.trim().slice(0, 60) || undefined,
+      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
-      ...totalsOf(resolved, args.discountPct),
+      discountPct: cleanDiscount(args.discountPct) || undefined,
       lines: resolved,
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
+      total: priced.grand,
+      taxAmount: priced.tax,
       status,
     });
     if (status === "received") {
@@ -285,12 +239,8 @@ export const create = mutation({
 });
 
 /**
- * Edit a draft voucher — the same edit a purchase bill gets, so a delivery can
- * be corrected while it is still only a record.
- *
- * A voucher that has been counted in is left alone: its quantities are already
- * in the stock ledger, and correcting it here would silently disagree with
- * them. Delete it (which takes the stock back out) and raise it again.
+ * Edit a draft voucher. A voucher whose goods are already counted in cannot be
+ * changed, because the stock it wrote would no longer match the paperwork.
  */
 export const update = mutation({
   args: {
@@ -298,7 +248,6 @@ export const update = mutation({
     vendorId: v.optional(v.id("vendors")),
     vendor: v.optional(v.string()),
     receivedAt: v.optional(v.number()),
-    lpoId: v.optional(v.id("lpos")),
     reference: v.optional(v.string()),
     supplierAddress: v.optional(v.string()),
     note: v.optional(v.string()),
@@ -315,31 +264,32 @@ export const update = mutation({
     }
     if (grv.status === "received") {
       throw new Error(
-        `${grv.number} has already been counted in — delete it and raise it again to change the goods.`,
+        `${grv.number} is already counted in — its stock cannot be edited.`,
       );
     }
-    if (grv.billId !== undefined) {
-      throw new Error("This voucher has already been billed.");
-    }
     const resolved = await resolveLines(ctx, userId, args.lines);
-    let vendor = await vendorName(ctx, userId, args.vendor, args.vendorId);
-    if (args.lpoId !== undefined) {
-      const lpo = await ctx.db.get(args.lpoId);
-      if (lpo === null || lpo.ownerId !== userId) {
-        throw new Error("That order no longer exists.");
+    const priced = priceTaxedLines(resolved, args.discountPct);
+
+    let vendor = (args.vendor ?? "").trim().slice(0, MAX_NAME_LENGTH);
+    if (args.vendorId !== undefined) {
+      const vendorDoc = await ctx.db.get(args.vendorId);
+      if (vendorDoc === null || vendorDoc.ownerId !== userId) {
+        throw new Error("That supplier no longer exists.");
       }
-      if (vendor === undefined) vendor = (lpo.vendor ?? "").trim() || undefined;
+      if (vendor === "") vendor = vendorDoc.name;
     }
     await ctx.db.patch(args.id, {
-      vendorId: args.vendorId,
-      vendor,
-      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
+      vendorId: args.vendorId ?? grv.vendorId,
+      vendor: vendor || undefined,
       receivedAt: args.receivedAt ?? grv.receivedAt,
-      lpoId: args.lpoId,
       reference: args.reference?.trim().slice(0, 60) || undefined,
+      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
-      ...totalsOf(resolved, args.discountPct),
+      discountPct: cleanDiscount(args.discountPct) || undefined,
       lines: resolved,
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
+      total: priced.grand,
+      taxAmount: priced.tax,
     });
   },
 });

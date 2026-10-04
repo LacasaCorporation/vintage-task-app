@@ -312,7 +312,7 @@ export function AddProductToJobDialog({
               <option value="">Not set</option>
               {units.map((u) => (
                 <option key={u._id} value={u.name}>
-                  {u.name}
+                  {u.abbreviation?.trim() || u.name}
                 </option>
               ))}
             </select>

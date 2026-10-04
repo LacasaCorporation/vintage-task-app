@@ -105,11 +105,13 @@ export default function CustomersPanel({
                 <th className="px-3 py-2 text-left font-medium">Contact</th>
                 <th className="px-3 py-2 text-left font-medium">Phone</th>
                 <th className="px-3 py-2 text-left font-medium">Email</th>
+                <th className="px-3 py-2 text-left font-medium">Tax no.</th>
                 <th className="px-3 py-2 text-left font-medium">Projects</th>
                 <th className="px-3 py-2 text-right font-medium">Invoices</th>
                 <th className="px-3 py-2 text-right font-medium">Invoiced</th>
                 <th className="px-3 py-2 text-right font-medium">Received</th>
                 <th className="px-3 py-2 text-right font-medium">Balance</th>
+                <th className="px-3 py-2 text-left font-medium">Credit</th>
                 <th className="w-14 px-2 py-2" />
               </tr>
             </thead>
@@ -127,6 +129,13 @@ export default function CustomersPanel({
                     .reduce((sum, s) => sum + s.total, 0),
                 );
                 const owing = round2(invoiced - received);
+                const overLimit =
+                  customer.creditLimit !== undefined &&
+                  owing > customer.creditLimit;
+                const usedPct =
+                  customer.creditLimit !== undefined && customer.creditLimit > 0
+                    ? Math.min(100, Math.max(0, (owing / customer.creditLimit) * 100))
+                    : 0;
                 return (
                   <tr
                     key={customer._id}
@@ -181,6 +190,9 @@ export default function CustomersPanel({
                         "—"
                       )}
                     </td>
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-muted-foreground">
+                      {customer.taxId || "—"}
+                    </td>
                     <td className="px-3 py-2.5">
                       {projects.length > 0 ? (
                         <span
@@ -212,6 +224,42 @@ export default function CustomersPanel({
                       )}
                     >
                       {theirSales.length > 0 ? money(owing) : "—"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {customer.creditLimit !== undefined ? (
+                        <div className="min-w-24">
+                          <p
+                            className={cn(
+                              "text-[11px] font-medium tabular-nums",
+                              overLimit
+                                ? "text-rose-600 dark:text-rose-400"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {overLimit
+                              ? `${money(round2(owing - customer.creditLimit))} over`
+                              : `${money(round2(customer.creditLimit - owing))} left`}
+                          </p>
+                          <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className={cn(
+                                "h-full rounded-full",
+                                overLimit
+                                  ? "bg-rose-500"
+                                  : usedPct > 80
+                                    ? "bg-amber-500"
+                                    : "bg-emerald-500",
+                              )}
+                              style={{ width: `${Math.max(usedPct, 2)}%` }}
+                            />
+                          </div>
+                          <p className="mt-0.5 text-[10px] text-muted-foreground tabular-nums">
+                            of {money(customer.creditLimit)}
+                          </p>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-2 py-2 text-center">
                       {onPick && (
@@ -249,6 +297,19 @@ export default function CustomersPanel({
         open={open}
         onOpenChange={setOpen}
         contacts={customers}
+        balanceOf={(id) => {
+          const theirs = (sales ?? []).filter((s) => s.customerId === id);
+          const billed = round2(theirs.reduce((sum, s) => sum + s.total, 0));
+          const settled = round2(
+            theirs
+              .filter((s) => s.isPaid === true)
+              .reduce((sum, s) => sum + s.total, 0),
+          );
+          return {
+            outstanding: round2(billed - settled),
+            documents: theirs.length,
+          };
+        }}
         onCreate={async (args) => addCustomer(args)}
         onUpdate={async (id, args) => {
           await editCustomer({ id: id as Id<"customers">, ...args });

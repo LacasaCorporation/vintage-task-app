@@ -6,7 +6,12 @@ import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
 
-const round = (n: number) => Math.round(n * 100) / 100;
+/**
+ * A discount percentage, clamped the way the pricing helper clamps it, so what
+ * is stored is what the form showed.
+ */
+const cleanDiscount = (value: number | undefined): number =>
+  Math.min(100, Math.max(0, value ?? 0));
 
 /** LPO0001, LPO0002, … */
 async function nextNumber(
@@ -30,7 +35,6 @@ const lineValidator = v.array(
     materialId: v.id("rawMaterials"),
     qty: v.number(),
     unitCost: v.number(),
-    /** Absent means the line takes the material's own purchase rate. */
     taxPct: v.optional(v.number()),
   }),
 );
@@ -43,7 +47,7 @@ async function resolveLines(
     materialId: Id<"rawMaterials">;
     qty: number;
     unitCost: number;
-    taxPct?: number;
+    taxPct?: number | undefined;
   }[],
 ): Promise<
   {
@@ -52,7 +56,7 @@ async function resolveLines(
     unit: string;
     qty: number;
     unitCost: number;
-    taxPct: number;
+    taxPct?: number;
   }[]
 > {
   if (lines.length === 0) {
@@ -74,12 +78,9 @@ async function resolveLines(
       unit: material.unit,
       qty: line.qty,
       unitCost: line.unitCost,
-      // a line with no rate of its own takes the material's, the same rule the
-      // bill uses; 0 is stored as 0, because exempt is a decision, not a gap
-      taxPct:
-        line.taxPct !== undefined
-          ? cleanRate(line.taxPct)
-          : cleanRate(material.purchaseTaxPct),
+      // a line with no rate of its own carries none, rather than a zero that
+      // would claim it was taxed at nothing
+      taxPct: line.taxPct === undefined ? undefined : cleanRate(line.taxPct),
     });
   }
   return resolved;
@@ -116,25 +117,26 @@ export const create = mutation({
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const lines = await resolveLines(ctx, userId, args.lines);
-    // priced from the lines, each at its own rate, by the same code the form
-    // runs — so what the order says is what the bill raised from it charges
-    const discount = Math.min(100, Math.max(0, args.discountPct ?? 0));
-    const priced = priceTaxedLines(lines, discount);
+    // discount comes off the lines in proportion, then each line is taxed at
+    // its own rate — the same arithmetic the form shows
+    const priced = priceTaxedLines(lines, args.discountPct);
     return ctx.db.insert("lpos", {
       ownerId: userId,
       number: await nextNumber(ctx, userId),
       vendorId: args.vendorId,
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
-      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       orderedAt: args.orderedAt ?? Date.now(),
       expectedAt: args.expectedAt,
       status: args.status ?? "draft",
+      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
-      discountPct: discount || undefined,
-      taxPct: blendedRate(priced.net, priced.tax) || undefined,
+      discountPct: cleanDiscount(args.discountPct) || undefined,
       lines,
-      total: round(priced.grand),
-      taxAmount: round(priced.tax) || undefined,
+      // the blended rate is stored beside the money so the ledger never has to
+      // re-derive it from a single percentage the lines do not agree on
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
+      total: priced.grand,
+      taxAmount: priced.tax,
     });
   },
 });
@@ -163,20 +165,19 @@ export const update = mutation({
       throw new Error("This order is already received — the stock is in.");
     }
     const lines = await resolveLines(ctx, userId, args.lines);
-    const discount = Math.min(100, Math.max(0, args.discountPct ?? 0));
-    const priced = priceTaxedLines(lines, discount);
+    const priced = priceTaxedLines(lines, args.discountPct);
     await ctx.db.patch(args.id, {
       vendorId: args.vendorId,
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
-      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       orderedAt: args.orderedAt ?? lpo.orderedAt,
       expectedAt: args.expectedAt,
+      supplierAddress: args.supplierAddress?.trim().slice(0, 240) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
-      discountPct: discount || undefined,
-      taxPct: blendedRate(priced.net, priced.tax) || undefined,
+      discountPct: cleanDiscount(args.discountPct) || undefined,
       lines,
-      total: round(priced.grand),
-      taxAmount: round(priced.tax) || undefined,
+      taxPct: blendedRate(priced.net, priced.tax) || undefined,
+      total: priced.grand,
+      taxAmount: priced.tax,
     });
   },
 });

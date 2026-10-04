@@ -8,6 +8,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
+import { creditRefusalMessage, creditState } from "../lib/credit";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -72,6 +73,8 @@ export const create = mutation({    args: {
     lpoId: v.optional(v.id("lpos")),
     /** The goods-received voucher this bill settles, if any. */
     grvId: v.optional(v.id("grvs")),
+    /** Set by the form when the user chooses to save past a credit limit. */
+    overrideCreditLimit: v.optional(v.boolean()),
     lines: v.array(
       v.object({
         materialId: v.id("rawMaterials"),
@@ -167,6 +170,38 @@ export const create = mutation({    args: {
     const discount = Math.min(100, Math.max(0, discountPct ?? 0));
     // priced from the lines, each at its own rate, by the same code the form runs
     const priced = priceTaxedLines(resolved, discount);
+
+    // A supplier with a ceiling on what may be owed gets its balance checked
+    // before the bill is written. Saving over the limit is possible, but only
+    // on purpose — the form sends `overrideCreditLimit` when the user says so.
+    if (supplierId !== undefined && args.overrideCreditLimit !== true) {
+      const vendor = await ctx.db.get(supplierId);
+      if (vendor !== null && vendor.ownerId === userId && vendor.creditLimit !== undefined) {
+        const owed = (
+          await ctx.db
+            .query("purchases")
+            .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+            .collect()
+        ).reduce(
+          (sum, b) =>
+            b.supplierId === supplierId && b.isPaid !== true ? sum + b.total : sum,
+          0,
+        );
+        const state = creditState(vendor.creditLimit, owed, priced.grand);
+        if (state.overLimit) {
+          throw new Error(
+            creditRefusalMessage(
+              vendor.name,
+              vendor.creditLimit,
+              owed,
+              priced.grand,
+              (n) => n.toFixed(2),
+            ),
+          );
+        }
+      }
+    }
+
     const purchaseId = await ctx.db.insert("purchases", {
       ownerId: userId,
       number,

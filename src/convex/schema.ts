@@ -777,6 +777,37 @@ const schema = defineSchema(
       phone: v.optional(v.string()),
       address: v.optional(v.string()),
       note: v.optional(v.string()),
+      /**
+       * Trading name, when it differs from the name the register files them
+       * under — “Maida Traders” is how you refer to them, the registered
+       * entity is what goes on the paperwork.
+       */
+      legalName: v.optional(v.string()),
+      /** The role of the person to ask for, e.g. “Sales manager”. */
+      contactRole: v.optional(v.string()),
+      altPhone: v.optional(v.string()),
+      website: v.optional(v.string()),
+      /** Tax registration number: VAT, TIN, GSTIN — whichever this firm uses. */
+      taxId: v.optional(v.string()),
+      /** Tax office / jurisdiction the number belongs to. */
+      taxOffice: v.optional(v.string()),
+      /** The default rate to offer on this supplier's purchase tax lines. */
+      defaultTaxPct: v.optional(v.number()),
+      /** Company registration / incorporation number. */
+      registrationNo: v.optional(v.string()),
+      /** What to bill or pay in, when it differs from the workspace default. */
+      currency: v.optional(v.string()),
+      /** How long this supplier takes to deliver, in days. */
+      leadTimeDays: v.optional(v.number()),
+      /**
+       * How much may be owed to this supplier before a new bill is refused.
+       * Absent means no ceiling is enforced.
+       */
+      creditLimit: v.optional(v.number()),
+      /** Days of credit agreed — the payment terms, in days. */
+      creditDays: v.optional(v.number()),
+      /** The price list negotiated with them, free text. */
+      priceList: v.optional(v.string()),
     })
       .index("by_owner", ["ownerId"])
       .index("by_name", ["name"]),
@@ -790,6 +821,27 @@ const schema = defineSchema(
       phone: v.optional(v.string()),
       address: v.optional(v.string()),
       note: v.optional(v.string()),
+      /** Registered entity name, when it differs from the trading name. */
+      legalName: v.optional(v.string()),
+      contactRole: v.optional(v.string()),
+      altPhone: v.optional(v.string()),
+      website: v.optional(v.string()),
+      /** Tax registration number: VAT, TIN, GSTIN — whichever this firm uses. */
+      taxId: v.optional(v.string()),
+      taxOffice: v.optional(v.string()),
+      /** The default rate to offer on this customer's sales tax lines. */
+      defaultTaxPct: v.optional(v.number()),
+      registrationNo: v.optional(v.string()),
+      currency: v.optional(v.string()),
+      /**
+       * How much this customer may owe before a new invoice is refused.
+       * Absent means no ceiling is enforced.
+       */
+      creditLimit: v.optional(v.number()),
+      /** Days of credit agreed — the payment terms, in days. */
+      creditDays: v.optional(v.number()),
+      /** The price list they are on, free text. */
+      priceList: v.optional(v.string()),
     })
       .index("by_owner", ["ownerId"])
       .index("by_name", ["name"]),
@@ -1241,9 +1293,9 @@ const schema = defineSchema(
       unitPrice: v.number(), // copied from material but editable
       unit: v.optional(v.string()),
       /**
-       * Tax on this line alone, as a percentage. A recipe buys things at
-       * different rates — glue at 12%, a board at 18% — so the tax is priced
-       * per line instead of one percentage over the whole sheet.
+       * Tax for this line. Left off, a material line takes its own purchase rate
+       * and a custom line takes none — the sheet never guesses a rate the user
+       * did not ask for.
        */
       taxPct: v.optional(v.number()),
     })
@@ -1254,7 +1306,30 @@ const schema = defineSchema(
     // managed units of measure for costing (kg, pcs, m…)
     costUnits: defineTable({
       ownerId: v.id("users"),
+      /**
+       * Short display label, e.g. `Kg`, `Pcs`, `Box500`, `Dozen`. The first
+       * token of `name` when omitted.
+       */
+      abbreviation: v.optional(v.string()),
+      /**
+       * Full descriptive name, e.g. `Kilograms`, `Pieces`, `Cardboard box
+       * (500 pcs)`, `Dozen`. The full `name` when omitted.
+       */
+      fullName: v.optional(v.string()),
       name: v.string(),
+      /**
+       * The unit this one is measured against — its parent/base unit. A base
+       * unit (e.g. `pcs`) leaves this unset; a derived unit (e.g. `dozen`)
+       * points at the unit it converts to. Units nest freely, so a chain like
+       * pcs → dozen → box is allowed, each level with its own factor.
+       */
+      parentId: v.optional(v.id("costUnits")),
+      /**
+       * How many parent units one of this unit equals:
+       * `1 <this unit> = factor × <parent unit>`, e.g. `1 dozen = 12 pcs`.
+       * Undefined for a base unit.
+       */
+      factor: v.optional(v.number()),
     }).index("by_owner", ["ownerId"]),
 
     // managed categories (parentId undefined) and sub-categories
