@@ -9,6 +9,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
 import { creditRefusalMessage, creditState } from "../lib/credit";
+import { nextGrvNumber } from "./grv";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -54,10 +55,16 @@ export const list = query({
     return bills.sort((a, b) => b.purchasedAt - a.purchasedAt || b._creationTime - a._creationTime);
   },
 });
-
 /**
- * Save a purchase bill. Every line adds its quantity to the material's stock,
- * so the raw-materials list always shows what is on hand.
+ * Save a purchase bill.
+ *
+ * Stock ONLY rises via a GRV — the bill itself never writes to stock.
+ * - If the bill is linked to an already-received GRV → stock is already in,
+ *   just record the bill for vendor accountability.
+ * - If the LPO already has a GRV from its "Receive" button → reuse that GRV.
+ * - Otherwise → auto-create a GRV from the bill lines, count it in immediately
+ *   (which raises the stock), then link both the GRV and the bill together.
+ *   The GRV is the permanent audit trail; deleting it takes the stock back out.
  */
 export const create = mutation({    args: {
       supplier: v.optional(v.string()),
@@ -94,8 +101,8 @@ export const create = mutation({    args: {
     if (userId === null) throw new Error("Sign in first.");
     await requireItem(ctx, userId, "purchases", "create");
     if (lines.length === 0) throw new Error("Add at least one material to the bill.");
-    // an order that was already received informally has its stock in; billing
-    // it too would count the same delivery twice
+
+    // validate LPO state up front
     if (args.lpoId !== undefined) {
       const lpo = await ctx.db.get(args.lpoId);
       if (lpo === null || lpo.ownerId !== userId) {
@@ -104,30 +111,12 @@ export const create = mutation({    args: {
       if (lpo.billId !== undefined) {
         throw new Error(`${lpo.number} has already been billed.`);
       }
-      if (lpo.status === "received") {
-        throw new Error(
-          `${lpo.number} was already received, so its stock is in. Delete the order's receipt first if you want this bill to bring the goods in.`,
-        );
-      }
       if (lpo.status === "cancelled") {
         throw new Error(`${lpo.number} was cancelled — raise a new order instead.`);
       }
     }
 
-    // A received voucher has already put its goods into stock, so a bill
-    // raised from one pays for them — it must not count them in a second time.
-    let grv: Doc<"grvs"> | null = null;
-    if (args.grvId !== undefined) {
-      grv = await ctx.db.get(args.grvId);
-      if (grv === null || grv.ownerId !== userId) {
-        throw new Error("That receipt no longer exists.");
-      }
-      if (grv.billId !== undefined) {
-        throw new Error(`${grv.number} has already been billed.`);
-      }
-    }
-    const skipStock = grv !== null && grv.status === "received";
-
+    // Resolve and validate all lines first.
     const number = await nextPurchaseNumber(ctx, userId);
     const at = purchasedAt ?? Date.now();
     const resolved = [];
@@ -135,12 +124,9 @@ export const create = mutation({    args: {
       const material = await ctx.db.get(line.materialId);
       if (material === null) throw new Error("A material on this bill no longer exists.");
       if (material.ownerId !== userId) throw new Error("That material belongs to another workspace.");
-      if (line.qty <= 0) throw new Error(`Quantity for “${material.name}” must be more than zero.`);
+      if (line.qty <= 0) throw new Error(`Quantity for "${material.name}" must be more than zero.`);
       if (line.unitCost < 0) throw new Error("Unit cost can't be negative.");
-      // The rate is fixed onto the line here, so it never moves afterwards —
-      // what the supplier charged is what the bill and the ledger record.
-      // A material with no rate of its own is charged no tax: the workspace
-      // default is not applied to a line that never asked for it.
+      // The rate is fixed onto the line here, so it never moves afterwards.
       const rate = cleanRate(line.taxPct ?? material.purchaseTaxPct ?? 0);
       resolved.push({
         materialId: material._id,
@@ -148,32 +134,15 @@ export const create = mutation({    args: {
         unit: material.unit,
         qty: line.qty,
         unitCost: line.unitCost,
-        // 0 is stored as 0: this line is exempt, which is a different thing
-        // from having no rate on file
         taxPct: rate,
       });
-      // stock in, logged as income against this bill — unless a received
-      // voucher already brought these very goods in, which it did
-      if (!skipStock) {
-        await stockIn(ctx, {
-          ownerId: userId,
-          material,
-          qty: line.qty,
-          source: "purchase",
-          ref: number,
-          at,
-        });
-      }
     }
 
     const cleanSupplier = (supplier ?? "").trim().slice(0, MAX_NAME_LENGTH);
     const discount = Math.min(100, Math.max(0, discountPct ?? 0));
-    // priced from the lines, each at its own rate, by the same code the form runs
     const priced = priceTaxedLines(resolved, discount);
 
-    // A supplier with a ceiling on what may be owed gets its balance checked
-    // before the bill is written. Saving over the limit is possible, but only
-    // on purpose — the form sends `overrideCreditLimit` when the user says so.
+    // Credit-limit check (unchanged).
     if (supplierId !== undefined && args.overrideCreditLimit !== true) {
       const vendor = await ctx.db.get(supplierId);
       if (vendor !== null && vendor.ownerId === userId && vendor.creditLimit !== undefined) {
@@ -202,6 +171,79 @@ export const create = mutation({    args: {
       }
     }
 
+    // ── GRV resolution ───────────────────────────────────────────────────────
+    // Stock ONLY rises through a GRV — bills never write to stock directly.
+    //
+    // Case 1: caller supplied an explicit GRV (bill raised from GRV panel).
+    //   → goods already in stock; just pay for them.
+    //
+    // Case 2: bill from an LPO that already has a GRV ("Receive" was pressed).
+    //   → reuse the LPO's existing GRV; no new GRV, no new stock movement.
+    //
+    // Case 3: standalone bill OR bill from an LPO not yet formally received.
+    //   → auto-create a GRV, count it in immediately, link both.
+    let resolvedGrvId: Id<"grvs"> | undefined = undefined;
+
+    if (args.grvId !== undefined) {
+      // Case 1
+      const grv = await ctx.db.get(args.grvId);
+      if (grv === null || grv.ownerId !== userId) {
+        throw new Error("That receipt no longer exists.");
+      }
+      if (grv.billId !== undefined) {
+        throw new Error(`${grv.number} has already been billed.`);
+      }
+      resolvedGrvId = grv._id;
+    } else {
+      // Check if the LPO already has a GRV from the "Receive" button (Case 2)
+      if (args.lpoId !== undefined) {
+        const lpo = await ctx.db.get(args.lpoId);
+        if (lpo !== null && lpo.ownerId === userId && lpo.grvId !== undefined) {
+          const existingGrv = await ctx.db.get(lpo.grvId);
+          if (existingGrv !== null && existingGrv.billId === undefined) {
+            resolvedGrvId = lpo.grvId; // Case 2: reuse
+          }
+        }
+      }
+
+      if (resolvedGrvId === undefined) {
+        // Case 3: auto-create GRV and count in
+        const grvNumber = await nextGrvNumber(ctx, userId);
+        const grvId = await ctx.db.insert("grvs", {
+          ownerId: userId,
+          number: grvNumber,
+          vendorId: supplierId,
+          vendor: cleanSupplier || undefined,
+          supplierAddress: (supplierAddress ?? "").trim().slice(0, 240) || undefined,
+          receivedAt: at,
+          lpoId: args.lpoId,
+          note: (note ?? "").trim().slice(0, 500) || undefined,
+          discountPct: discount || undefined,
+          lines: resolved,
+          taxPct: blendedRate(priced.net, priced.tax) || undefined,
+          total: priced.grand,
+          taxAmount: priced.tax || undefined,
+          status: "received",
+          receivedInto: at,
+        });
+        // GRV is the sole event that raises raw-material stock.
+        for (const line of resolved) {
+          const material = await ctx.db.get(line.materialId);
+          if (material === null || material.ownerId !== userId) continue;
+          await stockIn(ctx, {
+            ownerId: userId,
+            material,
+            qty: line.qty,
+            source: "grv",
+            ref: grvNumber,
+            at,
+          });
+        }
+        resolvedGrvId = grvId;
+      }
+    }
+    // ── end GRV resolution ───────────────────────────────────────────────────
+
     const purchaseId = await ctx.db.insert("purchases", {
       ownerId: userId,
       number,
@@ -219,23 +261,19 @@ export const create = mutation({    args: {
       taxAmount: priced.tax || undefined,
       isPaid: undefined,
       lpoId: args.lpoId,
-      grvId: grv?._id,
-      stockFromGrv: grv !== null ? skipStock : undefined,
+      grvId: resolvedGrvId,
+      // Bills never directly move stock — the linked GRV always does.
+      stockFromGrv: true,
     });
-    // remember each line so this bill can be edited and reversed later
     for (const line of resolved) {
       await ctx.db.insert("purchaseLines", { ownerId: userId, purchaseId, ...line });
     }
-    // the bill reaches the ledger in the same call, so the register and the
-    // accounts can never drift apart
     const created = await ctx.db.get(purchaseId);
     if (created !== null) {
       const entryId = await postBill(ctx, userId, created);
       await ctx.db.patch(purchaseId, { entryId });
     }
-    // a bill raised from an order *is* that order's delivery: the stock is
-    // already in from the lines above, so the order is closed out here rather
-    // than received a second time
+    // close out the LPO
     if (args.lpoId !== undefined) {
       const lpo = await ctx.db.get(args.lpoId);
       if (lpo === null || lpo.ownerId !== userId) {
@@ -248,12 +286,15 @@ export const create = mutation({    args: {
         status: "received",
         receivedAt: lpo.receivedAt ?? at,
         billId: purchaseId,
+        grvId: lpo.grvId ?? resolvedGrvId,
       });
     }
-    // a voucher is marked billed rather than received — the goods came in when
-    // it was received, and all this bill does is pay for them
-    if (grv !== null) {
-      await ctx.db.patch(grv._id, { billId: purchaseId });
+    // link the GRV to this bill for vendor accountability
+    if (resolvedGrvId !== undefined) {
+      const grv = await ctx.db.get(resolvedGrvId);
+      if (grv !== null && grv.billId === undefined) {
+        await ctx.db.patch(resolvedGrvId, { billId: purchaseId });
+      }
     }
     return purchaseId;
   },
