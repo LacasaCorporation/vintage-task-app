@@ -47,11 +47,15 @@ const STATUS_LABEL: Record<Status, string> = {
 };
 
 const day = (ms: number) =>
-  new Date(ms).toLocaleDateString(undefined, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  // a date that never made it through the form reads as blank rather than as
+  // "Invalid Date" in the register
+  Number.isFinite(ms)
+    ? new Date(ms).toLocaleDateString(undefined, {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
 
 /** One line being typed on the order form. */
 type DraftLine = {
@@ -591,6 +595,12 @@ export default function LpoPanel({
   billNumberOf?: (billId: Id<"purchases">) => string | undefined;
 }) {
   const lpos = useQuery(api.lpo.list);
+  // receiving an order writes a voucher for it, so the register can name the
+  // delivery that brought the goods in
+  const grvs = useQuery(api.grv.list);
+  const grvNumbers = new Map(
+    (grvs ?? []).map((g) => [g._id, g.number] as const),
+  );
   const { confirm } = useAppDialogs();
   const { format: money } = useWorkspaceCurrency();
   const setStatus = useMutation(api.lpo.setStatus);
@@ -1030,6 +1040,11 @@ export default function LpoPanel({
                         {l.billId !== undefined && (
                           <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
                             {billNumberOf?.(l.billId) ?? "billed"}
+                          </span>
+                        )}
+                        {l.grvId !== undefined && (
+                          <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
+                            {grvNumbers.get(l.grvId) ?? "received"}
                           </span>
                         )}
                       </td>

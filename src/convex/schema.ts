@@ -664,6 +664,12 @@ const schema = defineSchema(
        * either the receipt or the bill, never both.
        */
       billId: v.optional(v.id("purchases")),
+      /**
+       * The goods-received voucher raised when this order was received without
+       * a bill. It owns the stock movement, so the paperwork and the ledger can
+       * never disagree — and deleting the voucher takes the stock back out.
+       */
+      grvId: v.optional(v.id("grvs")),
     })
       .index("by_owner", ["ownerId"])
       .index("by_status", ["status"]),

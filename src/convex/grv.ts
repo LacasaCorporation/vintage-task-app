@@ -14,7 +14,7 @@ const cleanDiscount = (value: number | undefined): number =>
   Math.min(100, Math.max(0, value ?? 0));
 
 /** Next sequential voucher number: GRV0001, GRV0002, … */
-async function nextGrvNumber(
+export async function nextGrvNumber(
   ctx: MutationCtx,
   ownerId: Id<"users">,
 ): Promise<string> {
@@ -331,6 +331,21 @@ export const remove = mutation({
           source: "adjustment",
           ref: `${grv.number} (deleted)`,
           at: grv.receivedAt,
+        });
+      }
+    }
+    // an order that was received through this voucher is no longer covered by
+    // it: the link is cleared and the order goes back to being outstanding,
+    // so a bill raised from it can bring the goods in instead. Without this
+    // the stock would be out and the order stuck as received — receivable by
+    // nobody.
+    if (grv.lpoId !== undefined) {
+      const lpo = await ctx.db.get(grv.lpoId);
+      if (lpo !== null && lpo.ownerId === userId && lpo.grvId === id) {
+        await ctx.db.patch(grv.lpoId, {
+          grvId: undefined,
+          status: lpo.status === "received" ? "ordered" : lpo.status,
+          receivedAt: undefined,
         });
       }
     }
