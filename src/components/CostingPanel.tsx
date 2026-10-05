@@ -1278,55 +1278,12 @@ export default function CostingPanel({
             </div>
           )}
 
-          {/* add-row bar: both kinds of line on one compact row */}
+          {/* add-row bars: labour/expenses on their own line above the material
+              picker, so the two kinds of line never share one crowded row */}
           {canCreate && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-1 rounded-xl border bg-card px-2 py-1.5 shadow-sm">
-              <span
-                className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
-                title="Add a raw material from the master price list"
-              >
-                <Package className="size-3" />
-                Material
-              </span>
-              <ItemPicker
-                className="min-w-[170px] flex-1"
-                size="sm"
-                items={materialOptions}
-                value={addingMaterialId}
-                onChange={setAddingMaterialId}
-                placeholder="Choose or search material…"
-                searchPlaceholder="Search name, code or category…"
-                emptyLabel="No material matches that."
-                aria-label="Choose a raw material"
-                onCreateNew={(term) =>
-                  navigate(
-                    `/materials/new?name=${encodeURIComponent(term.trim())}`,
-                  )
-                }
-              />
-              <Input
-                type="number"
-                min="0"
-                step="any"
-                value={materialQty}
-                onChange={(e) => setMaterialQty(e.target.value)}
-                aria-label="Material quantity"
-                className="h-7 w-14 rounded-lg text-xs"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="size-7 shrink-0 rounded-lg"
-                disabled={!addingMaterialId || items === undefined}
-                onClick={addMaterialRowGuarded}
-                title="Add this material to the sheet"
-              >
-                <Plus className="size-3.5" />
-              </Button>
-
-              <span className="mx-1 h-4 w-px bg-border" />
-
+            <div className="mt-1.5 flex flex-col gap-px overflow-hidden rounded-xl border bg-card shadow-sm">
+              {/* cost line — labour, expenses and other non-material costs */}
+              <div className="flex flex-wrap items-center gap-1 px-2 py-1.5">
               <span
                 className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
                 title="Add labour, transport, packaging or any other cost"
@@ -1442,16 +1399,64 @@ export default function CostingPanel({
               >
                 <Plus className="size-3.5" />
               </Button>
+              </div>
 
-              {materials.length === 0 && (
-                <button
-                  type="button"
-                  onClick={() => onSelectView({ kind: "materials" })}
-                  className="text-[11px] text-primary hover:underline"
+              {/* material line — raw materials from the master price list */}
+              <div className="flex flex-wrap items-center gap-1 border-t bg-muted/25 px-2 py-1.5">
+                <span
+                  className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+                  title="Add a raw material from the master price list"
                 >
-                  + Add raw materials first
-                </button>
-              )}
+                  <Package className="size-3" />
+                  Material
+                </span>
+                <ItemPicker
+                  className="min-w-[170px] flex-1"
+                  size="sm"
+                  items={materialOptions}
+                  value={addingMaterialId}
+                  onChange={setAddingMaterialId}
+                  placeholder="Choose or search material…"
+                  searchPlaceholder="Search name, code or category…"
+                  emptyLabel="No material matches that."
+                  aria-label="Choose a raw material"
+                  onCreateNew={(term) =>
+                    navigate(
+                      `/materials/new?name=${encodeURIComponent(term.trim())}`,
+                    )
+                  }
+                />
+                <Input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={materialQty}
+                  onChange={(e) => setMaterialQty(e.target.value)}
+                  aria-label="Material quantity"
+                  className="h-7 w-14 rounded-lg text-xs"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="size-7 shrink-0 rounded-lg"
+                  disabled={!addingMaterialId || items === undefined}
+                  onClick={addMaterialRowGuarded}
+                  title="Add this material to the sheet"
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+
+                {materials.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectView({ kind: "materials" })}
+                    className="text-[11px] text-primary hover:underline"
+                  >
+                    + Add raw materials first
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
