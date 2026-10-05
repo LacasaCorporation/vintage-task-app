@@ -870,6 +870,42 @@ export default function CostingPanel({
       toast.error("Enter a quantity greater than zero.");
       return;
     }
+    const material = materials.find((m) => m._id === addingMaterialId);
+    // the same material already on the sheet is the same line twice over — ask
+    // before it happens rather than quietly making two rows that read as one
+    const twin =
+      material === undefined
+        ? undefined
+        : rows.find((r) => r.materialId === material._id);
+    if (twin !== undefined) {
+      // add to the quantity on screen, not the stored one — the draft may
+      // already carry an unsaved edit that a later save would otherwise lose
+      const base = drafts.find((d) => d.id === twin._id)?.qty ?? twin.qty;
+      const merged = base + qty;
+      const ok = await confirm({
+        title: `“${material?.name ?? "That material"}” is already on this sheet`,
+        message: `It is on line ${rows.indexOf(twin) + 1} at ${base.toLocaleString()} ${twin.unit ?? ""}. Add ${qty.toLocaleString()} to it instead of creating a second row?`,
+        confirmLabel: "Add to that line",
+        cancelLabel: "Cancel",
+      });
+      if (!ok) return;
+      try {
+        await updateItem({ id: twin._id, qty: merged });
+        // the draft must agree, or the next save would write the old number
+        // straight back over this one
+        updateDraft(twin._id, { qty: merged });
+        toast.success(
+          `Added ${qty.toLocaleString()} to “${twin.label}” — now ${merged.toLocaleString()}.`,
+        );
+        setAddingMaterialId("");
+        setMaterialQty("1");
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Couldn't update that line.",
+        );
+      }
+      return;
+    }
     try {
       await addFgItem({
         fgId: activeFg._id,
@@ -898,10 +934,52 @@ export default function CostingPanel({
       toast.error("Rate can't be negative.");
       return;
     }
+    const label = customLabel.trim() || COST_KINDS.find((k) => k.kind === customKind)!.label;
+    // the same cost, typed the same way, is the same line twice over — ask
+    // first and offer to add to it rather than making a second row
+    const twin = rows.find(
+      (r) =>
+        r.materialId === undefined &&
+        r.label === label &&
+        (r.kind ?? "custom") === customKind &&
+        (r.unit ?? "") === customUnit.trim() &&
+        r.unitPrice === rate &&
+        cleanRate(r.taxPct ?? 0) === costPreview.taxPct,
+    );
+    if (twin !== undefined) {
+      // the same guard as the material bar: add to what is on screen and keep
+      // the draft in step, so an unsaved edit survives and is not reverted
+      const base = drafts.find((d) => d.id === twin._id)?.qty ?? twin.qty;
+      const merged = base + qty;
+      const ok = await confirm({
+        title: `“${label}” is already on this sheet`,
+        message: `It is on line ${rows.indexOf(twin) + 1} at ${base.toLocaleString()}${twin.unit ? ` ${twin.unit}` : ""}. Add ${qty.toLocaleString()} to it instead of creating a second row?`,
+        confirmLabel: "Add to that line",
+        cancelLabel: "Cancel",
+      });
+      if (!ok) return;
+      try {
+        await updateItem({ id: twin._id, qty: merged });
+        updateDraft(twin._id, { qty: merged });
+        toast.success(
+          `Added ${qty.toLocaleString()} to “${twin.label}” — now ${merged.toLocaleString()}.`,
+        );
+        setCustomLabel("");
+        setCustomQty("1");
+        setCustomPrice("0");
+        setCustomUnit("");
+        setCustomTax("-1");
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Couldn't update that line.",
+        );
+      }
+      return;
+    }
     try {
       await addFgItem({
         fgId: activeFg._id,
-        label: customLabel.trim() || COST_KINDS.find((k) => k.kind === customKind)!.label,
+        label,
         qty,
         // the sheet stores a rate, never a total
         unitPrice: rate,
