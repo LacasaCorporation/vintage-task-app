@@ -10,6 +10,7 @@ import {
   Pencil,
   Plus,
   Ruler,
+  Sparkles,
   Tag,
   Trash2,
   X,
@@ -56,6 +57,7 @@ export default function MasterDataManager({
   const addCategoryM = useMutation(api.costing.addCategory);
   const renameCategoryM = useMutation(api.costing.renameCategory);
   const removeCategoryM = useMutation(api.costing.removeCategory);
+  const seedDefaultsM = useMutation(api.costing.seedDefaultMasterData);
   const { confirm } = useAppDialogs();
 
   const [tab, setTab] = useState<"units" | "categories">("units");
@@ -247,6 +249,46 @@ export default function MasterDataManager({
       setNewSubFor(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't add the sub-category.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Fill the firm with the standard units, categories and sub-categories, so
+   * the unit dropdowns on materials and products have something to offer from
+   * the start. Anything already named the same is left untouched.
+   */
+  const handleSeedDefaults = async () => {
+    const ok = await confirm({
+      title: "Create the default units and categories?",
+      message:
+        "Adds the standard set — pieces, kg, litres, metres, hours and the rest, plus categories like Raw Material, Packaging and Consumable with their sub-categories. Anything you have already named the same is kept as it is.",
+      confirmLabel: "Create defaults",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const added = await seedDefaultsM();
+      const total = added.units + added.categories + added.subCategories;
+      if (total === 0) {
+        toast.info("Everything is already set up — nothing was added.");
+        return;
+      }
+      const parts = [
+        added.units > 0 ? `${added.units} unit${added.units === 1 ? "" : "s"}` : null,
+        added.categories > 0
+          ? `${added.categories} categor${added.categories === 1 ? "y" : "ies"}`
+          : null,
+        added.subCategories > 0
+          ? `${added.subCategories} sub-categor${added.subCategories === 1 ? "y" : "ies"}`
+          : null,
+      ].filter((p): p is string => p !== null);
+      toast.success(`Added ${parts.join(", ")}.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't create the defaults.",
+      );
     } finally {
       setBusy(false);
     }
@@ -602,7 +644,20 @@ export default function MasterDataManager({
             Categories
           </button>
         </div>
-        {onClose && (
+        <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 rounded-lg text-xs"
+            disabled={busy}
+            onClick={() => void handleSeedDefaults()}
+            title="Create the standard units, categories and sub-categories"
+          >
+            <Sparkles className="size-3" />
+            Create defaults
+          </Button>
+          {onClose && (
           <button
             type="button"
             aria-label="Close manager"
@@ -611,7 +666,8 @@ export default function MasterDataManager({
           >
             <X className="size-3.5" />
           </button>
-        )}
+          )}
+        </div>
       </div>
 
       {tab === "units" ? (

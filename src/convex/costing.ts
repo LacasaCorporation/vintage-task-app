@@ -315,6 +315,116 @@ export const addCategory = mutation({
   },
 });
 
+/**
+ * The standard set of units, categories and sub-categories a firm starts from.
+ * Written as data rather than code paths so it stays editable after the fact —
+ * these are ordinary rows the user can rename or delete.
+ */
+const DEFAULT_UNITS: { name: string; abbreviation: string }[] = [
+  { name: "Pieces", abbreviation: "pcs" },
+  { name: "Kilograms", abbreviation: "kg" },
+  { name: "Grams", abbreviation: "g" },
+  { name: "Litres", abbreviation: "L" },
+  { name: "Metres", abbreviation: "m" },
+  { name: "Square metres", abbreviation: "sqm" },
+  { name: "Box", abbreviation: "box" },
+  { name: "Dozen", abbreviation: "dz" },
+  { name: "Pair", abbreviation: "pair" },
+  { name: "Set", abbreviation: "set" },
+  { name: "Bag", abbreviation: "bag" },
+  { name: "Roll", abbreviation: "roll" },
+  { name: "Hour", abbreviation: "hr" },
+  { name: "Day", abbreviation: "day" },
+];
+
+const DEFAULT_CATEGORIES: {
+  name: string;
+  children: string[];
+}[] = [
+  { name: "Raw Material", children: ["Wood", "Metal", "Plastic", "Fabric", "Chemical"] },
+  { name: "Packaging", children: ["Carton", "Film", "Tape", "Label"] },
+  { name: "Consumable", children: ["Glue", "Adhesive", "Paint", "Sandpaper"] },
+  { name: "Finished Goods", children: [] },
+  { name: "Hardware", children: ["Fastener", "Hinge", "Handle", "Bracket"] },
+  { name: "Electrical", children: ["Wire", "Switch", "Bulb", "Board"] },
+];
+
+/**
+ * Seed the standard units, categories and sub-categories. Safe to run more
+ * than once: anything already present by name is left alone, so a firm that
+ * has renamed a unit keeps its name and its items keep pointing at it.
+ */
+export const seedDefaultMasterData = mutation({
+  args: {},
+  handler: async (ctx): Promise<{ units: number; categories: number; subCategories: number }> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+
+    const haveUnits = await ctx.db
+      .query("costUnits")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    // matched case-insensitively on the name OR the abbreviation, because a
+    // firm that already calls its unit "KG" must not be handed "Kilograms"
+    // as well — two units meaning the same thing in one dropdown
+    const unitNames = new Set(
+      haveUnits.flatMap((u) => [
+        u.name.trim().toLowerCase(),
+        (u.abbreviation ?? "").trim().toLowerCase(),
+      ]),
+    );
+    let units = 0;
+    for (const u of DEFAULT_UNITS) {
+      if (unitNames.has(u.name.toLowerCase())) continue;
+      if (unitNames.has(u.abbreviation.toLowerCase())) continue;
+      await ctx.db.insert("costUnits", {
+        ownerId: userId,
+        name: u.name,
+        abbreviation: u.abbreviation,
+      });
+      units += 1;
+    }
+
+    const haveCats = await ctx.db
+      .query("costCategories")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const catNames = new Set(
+      haveCats.filter((c) => c.parentId === undefined).map((c) => c.name.trim().toLowerCase()),
+    );
+    const childNames = new Set(
+      haveCats.filter((c) => c.parentId !== undefined).map((c) => c.name.trim().toLowerCase()),
+    );
+    let categories = 0;
+    let subCategories = 0;
+    for (const cat of DEFAULT_CATEGORIES) {
+      let parentId: Id<"costCategories"> | undefined;
+      if (!catNames.has(cat.name.toLowerCase())) {
+        parentId = await ctx.db.insert("costCategories", {
+          ownerId: userId,
+          name: cat.name,
+        });
+        categories += 1;
+      } else {
+        parentId = haveCats.find(
+          (c) => c.parentId === undefined && c.name.trim().toLowerCase() === cat.name.toLowerCase(),
+        )?._id;
+      }
+      if (parentId === undefined) continue;
+      for (const child of cat.children) {
+        if (childNames.has(child.toLowerCase())) continue;
+        await ctx.db.insert("costCategories", {
+          ownerId: userId,
+          name: child,
+          parentId,
+        });
+        subCategories += 1;
+      }
+    }
+    return { units, categories, subCategories };
+  },
+});
+
 /** Rename a category or sub-category. */
 export const renameCategory = mutation({
   args: { id: v.id("costCategories"), name: v.string() },
