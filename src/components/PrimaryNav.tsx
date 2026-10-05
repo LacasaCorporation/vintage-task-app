@@ -185,16 +185,9 @@ export default function PrimaryNav({
               Icon={NotebookPen}
               active={section === "notes"}
               onClick={() => onSelectSection("notes")}
-            />
-            <NavRow
-              Icon={Folder}
-              label="Projects"
-              active={inCosting && (view?.kind === "projects" || view === null)}
-              n={projectCount}
-              onClick={() => onSelectView({ kind: "projects" })}
-            />
-          </div>
+          />
         </div>
+      </div>
 
       <div className="my-2 h-px bg-border/60" />
 
@@ -282,15 +275,7 @@ export default function PrimaryNav({
           )}
         </div>
       )}
-      <NavRow
-        label="Projects"
-        Icon={Folder}
-        active={inCosting && (view?.kind === "projects" || view === null)}
-        n={projectCount}
-        onClick={() => onSelectView({ kind: "projects" })}
-      />
 
-      {canViewSales && (
         <div>
           <div
             className={cn(
