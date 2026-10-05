@@ -1026,8 +1026,7 @@ export default function Dashboard() {
               loading={finishedGoods === undefined}
               view={costingView}
               onSelectView={setCostingView}
-              onNewProduct={(name) => void handleNewFg(name)}
-              onNewProject={canDoItem("projects", "create") ? () => void handleNewProject() : undefined}
+                            onNewProject={canDoItem("projects", "create") ? () => void handleNewProject() : undefined}
               onEditProject={(p) => void handleEditProject(p)}
               onDeleteProject={(p) => void handleDeleteProject(p)}
               canCreate={canDoItem("products", "create")}

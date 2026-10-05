@@ -210,8 +210,7 @@ export default function CostingPanel({
   loading,
   view,
   onSelectView,
-  onNewProduct,
-  onNewProject,
+    onNewProject,
   onEditProject,
   onDeleteProject,
   canCreate = true,
@@ -245,8 +244,7 @@ export default function CostingPanel({
   loading: boolean;
   view: CostingView;
   onSelectView: (view: CostingView) => void;
-  onNewProduct?: (projectName: string) => void;
-  onNewProject?: () => void;
+    onNewProject?: () => void;
   onEditProject?: (project: Doc<"projects">) => void;
   onDeleteProject?: (project: Doc<"projects">) => void;
   canCreate?: boolean;
@@ -2354,9 +2352,6 @@ export default function CostingPanel({
               onSelectView({ kind: "products" });
             }}
             onNewProject={onNewProject}
-            onNewProduct={
-              canCreate ? (name) => onNewProduct?.(name) : undefined
-            }
             onEditProject={canEditProject ? onEditProject : undefined}
             onDeleteProject={
               canDeleteProject ? (p) => onDeleteProject?.(p) : undefined

@@ -200,7 +200,6 @@ export default function ProjectsSheet({
   loading,
   onOpenProject,
   onNewProject,
-  onNewProduct,
   onEditProject,
   onDeleteProject,
   onOpenProduct,
@@ -209,7 +208,6 @@ export default function ProjectsSheet({
   loading: boolean;
   onOpenProject: (projectName: string) => void;
   onNewProject?: () => void;
-  onNewProduct?: (projectName: string) => void;
   onEditProject?: (project: ProjectDoc) => void;
   onDeleteProject?: (project: ProjectDoc) => void;
   onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
@@ -1200,26 +1198,6 @@ export default function ProjectsSheet({
                           onClick={() => onDeleteProject(detail)}
                         >
                           <Trash2 className="size-3" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        aria-label={`Open products of “${p.name}”`}
-                        title="Open its products"
-                        className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
-                        onClick={() => onOpenProject(p.name)}
-                      >
-                        <Package className="size-3.5" />
-                      </button>
-                      {onNewProduct && (
-                        <button
-                          type="button"
-                          aria-label={`New product under “${p.name}”`}
-                          title="New product under this project"
-                          className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
-                          onClick={() => onNewProduct(p.name)}
-                        >
-                          <Sigma className="size-3.5" />
                         </button>
                       )}
                     </span>
