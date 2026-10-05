@@ -157,24 +157,24 @@ export default function PrimaryNav({
 
   return (
     <div className="flex flex-col gap-0.5">
-      <button
-        type="button"
-        onClick={() => setPlanningOpen((v) => !v)}
-        aria-expanded={planningOpen}
-        title={planningOpen ? "Hide planning" : "Show planning"}
-        className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent"
-      >
-        <ChevronDown
-          className={cn(
-            "size-3 shrink-0 text-muted-foreground/60 transition-transform",
-            !planningOpen && "-rotate-90",
-          )}
-        />
-        <span className="text-sm text-foreground/85">Planning</span>
-      </button>
-
-      {planningOpen && (
-        <div className="ml-5 border-l border-border/60 pl-1">
+      <div className="ml-5 border-l border-border/60 pl-1">
+        <button
+          type="button"
+          onClick={() => setPlanningOpen((v) => !v)}
+          aria-expanded={planningOpen}
+          title={planningOpen ? "Hide the three planning pages" : "Show the three planning pages"}
+          aria-label="Planning: Tasks, Notes, Projects"
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent"
+        >
+          <ChevronDown
+            className={cn(
+              "size-3 shrink-0 text-muted-foreground/60 transition-transform",
+              !planningOpen && "-rotate-90",
+            )}
+          />
+          <span className="text-sm text-foreground/85">Planning</span>
+        </button>
+        <div className="ml-2 border-l border-border/60">
           <NavRow
             label="Tasks"
             Icon={CheckSquare}
@@ -195,7 +195,7 @@ export default function PrimaryNav({
             onClick={() => onSelectView({ kind: "projects" })}
           />
         </div>
-      )}
+      </div>
 
       <div className="my-2 h-px bg-border/60" />
 
