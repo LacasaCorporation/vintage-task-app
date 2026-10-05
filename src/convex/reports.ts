@@ -1259,3 +1259,770 @@ export const stockAnalysis = query({
     };
   },
 });
+
+/* ── cash flow ─────────────────────────────────────────────────────── */
+
+export type CashFlowRow = {
+  key: string;
+  label: string;
+  from: number;
+  to: number;
+  /** Money that reached the cash and bank accounts. */
+  inflow: number;
+  /** Money that left them. */
+  outflow: number;
+  net: number;
+  /** Balance at the end of this period, carried forward. */
+  running: number;
+};
+
+/**
+ * Cash flow: what actually reached the cash and bank accounts in the window.
+ *
+ * A debit to a money account is money in and a credit is money out, and the
+ * two are kept apart rather than netted — a period that took a lot and paid a
+ * lot is not a quiet one, and a single net figure would say it was. Which
+ * accounts count as money is the same setting the cash book follows, so
+ * renaming or recoding them cannot quietly empty this report.
+ *
+ * The opening figure is everything posted to those accounts before the window,
+ * which is what makes the running balance a real balance rather than a total.
+ */
+export const cashFlow = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, { from, to }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null)
+      return {
+        from,
+        to,
+        bucket: "day" as const,
+        rows: [] as CashFlowRow[],
+        totalIn: 0,
+        totalOut: 0,
+        net: 0,
+        opening: 0,
+        closing: 0,
+        empty: true,
+      };
+
+    const accounts = await ctx.db
+      .query("accounts")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const cashIds = await moneyAccountIds(ctx, userId);
+    const cashCodes = new Set(
+      accounts.filter((a) => cashIds.has(a._id)).map((a) => a.code),
+    );
+
+    const entries = await ctx.db
+      .query("journalEntries")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const lines = await ctx.db
+      .query("journalLines")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+
+    const whenOf = new Map(entries.map((e) => [e._id, e.at] as const));
+    const bucket = bucketFor(Math.round((to - from) / 86_400_000));
+    const periods = new Map<string, CashFlowRow>();
+    let opening = 0;
+
+    for (const line of lines) {
+      if (!cashIds.has(line.accountId) && !cashCodes.has(line.accountCode)) continue;
+      const when = whenOf.get(line.entryId);
+      if (when === undefined) continue;
+      const move = line.debit - line.credit;
+      if (when < from) {
+        opening += move;
+        continue;
+      }
+      if (when > to) continue;
+      const p = periodKey(when, bucket);
+      const row = periods.get(p.key) ?? {
+        key: p.key,
+        label: p.label,
+        from: p.from,
+        to: p.to,
+        inflow: 0,
+        outflow: 0,
+        net: 0,
+        running: 0,
+      };
+      if (move > 0) row.inflow += move;
+      if (move < 0) row.outflow -= move;
+      row.net += move;
+      periods.set(p.key, row);
+    }
+
+    const rows = Array.from(periods.values()).sort((a, b) => a.from - b.from);
+    let running = round(opening);
+    for (const row of rows) {
+      row.inflow = round(row.inflow);
+      row.outflow = round(row.outflow);
+      row.net = round(row.net);
+      running = round(running + row.net);
+      row.running = running;
+    }
+
+    const totalIn = round(rows.reduce((s, r) => s + r.inflow, 0));
+    const totalOut = round(rows.reduce((s, r) => s + r.outflow, 0));
+    return {
+      from,
+      to,
+      bucket,
+      rows,
+      totalIn,
+      totalOut,
+      net: round(totalIn - totalOut),
+      opening: round(opening),
+      closing: running,
+      empty: rows.length === 0,
+    };
+  },
+});
+
+/* ── ageing ────────────────────────────────────────────────────────── */
+
+export type AgeingRow = {
+  key: string;
+  label: string;
+  /** Not yet due. */
+  current: number;
+  d30: number;
+  d60: number;
+  d90: number;
+  older: number;
+  total: number;
+  oldestDays: number;
+  items: number;
+};
+
+export type AgedBalances = {
+  side: "receivable" | "payable";
+  asAt: number;
+  rows: AgeingRow[];
+  totals: {
+    current: number;
+    d30: number;
+    d60: number;
+    d90: number;
+    older: number;
+    total: number;
+  };
+  empty: boolean;
+};
+
+/** Where a debt lands: not yet due, then by how many days past due it is. */
+function ageBucket(days: number): "current" | "d30" | "d60" | "d90" | "older" {
+  if (days <= 0) return "current";
+  if (days <= 30) return "d30";
+  if (days <= 60) return "d60";
+  if (days <= 90) return "d90";
+  return "older";
+}
+
+/**
+ * Who owes the firm, or who the firm owes, split by how late the money is.
+ *
+ * This is a state rather than a period — an unpaid invoice from last year is
+ * still unpaid today — so it deliberately ignores the period control and ages
+ * every open document against today's date. The same shape serves both sides
+ * because a receivable and a payable are the same fact read in opposite
+ * directions; only the party and the document type differ.
+ */
+export const agedBalances = query({
+  args: { side: v.union(v.literal("receivable"), v.literal("payable")) },
+  handler: async (ctx, { side }): Promise<AgedBalances> => {
+    const asAt = Date.now();
+    const totals = { current: 0, d30: 0, d60: 0, d90: 0, older: 0, total: 0 };
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return { side, asAt, rows: [], totals, empty: true };
+
+    const people =
+      side === "receivable"
+        ? await ctx.db
+            .query("customers")
+            .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+            .collect()
+        : await ctx.db
+            .query("vendors")
+            .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+            .collect();
+    const names = new Map(people.map((p) => [p._id, p.name] as const));
+
+    const byParty = new Map<string, AgeingRow>();
+    const add = (
+      party: Id<"customers"> | Id<"vendors"> | undefined,
+      whose: string,
+      due: number,
+      dueAt: number | undefined,
+      at: number,
+    ) => {
+      const label = (party ? names.get(party) : undefined) ?? whose;
+      const key = party ?? `name:${label}`;
+      const row = byParty.get(key) ?? {
+        key,
+        label,
+        current: 0,
+        d30: 0,
+        d60: 0,
+        d90: 0,
+        older: 0,
+        total: 0,
+        oldestDays: 0,
+        items: 0,
+      };
+      const daysPast = Math.floor((asAt - (dueAt ?? at)) / 86_400_000);
+      const bucket = ageBucket(daysPast);
+      row[bucket] += due;
+      row.total += due;
+      row.items += 1;
+      row.oldestDays = Math.max(row.oldestDays, daysPast);
+      byParty.set(key, row);
+    };
+
+    if (side === "receivable") {
+      const all = await ctx.db
+        .query("sales")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+      for (const s of all) {
+        const paid = s.amountPaid ?? (s.isPaid === true ? s.total : 0);
+        const due = round(s.total - paid);
+        if (due <= 0) continue;
+        add(s.customerId, partyName(s.customerId, s.customerName), due, s.dueAt, s.soldAt);
+      }
+    } else {
+      const all = await ctx.db
+        .query("purchases")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+      for (const p of all) {
+        const paid = p.amountPaid ?? (p.isPaid === true ? p.total : 0);
+        const due = round(p.total - paid);
+        if (due <= 0) continue;
+        const supplier = p.supplierId ? names.get(p.supplierId) : undefined;
+        add(
+          p.supplierId,
+          supplier ?? p.supplier?.trim() ?? "Supplier",
+          due,
+          p.dueAt,
+          p.purchasedAt,
+        );
+      }
+    }
+
+    const rows = Array.from(byParty.values())
+      .map((r) => ({
+        ...r,
+        current: round(r.current),
+        d30: round(r.d30),
+        d60: round(r.d60),
+        d90: round(r.d90),
+        older: round(r.older),
+        total: round(r.total),
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    for (const r of rows) {
+      totals.current += r.current;
+      totals.d30 += r.d30;
+      totals.d60 += r.d60;
+      totals.d90 += r.d90;
+      totals.older += r.older;
+      totals.total += r.total;
+    }
+    for (const k of ["current", "d30", "d60", "d90", "older", "total"] as const) {
+      totals[k] = round(totals[k]);
+    }
+    return { side, asAt, rows, totals, empty: rows.length === 0 };
+  },
+});
+
+/* ── tax ───────────────────────────────────────────────────────────── */
+
+export type TaxPeriodRow = {
+  key: string;
+  label: string;
+  from: number;
+  to: number;
+  output: number;
+  input: number;
+  net: number;
+};
+
+export type TaxSummary = {
+  from: number;
+  to: number;
+  outputTax: number;
+  inputTax: number;
+  net: number;
+  salesCount: number;
+  purchaseCount: number;
+  rows: TaxPeriodRow[];
+  empty: boolean;
+};
+
+/**
+ * Tax charged on what the firm sold against tax paid on what it bought, by
+ * period. The figures come from the documents' own summed `taxAmount` rather
+ * than a re-derived blended rate, so this agrees with the printed invoices.
+ *
+ * The net is shown as a positive when it is owed and as a negative when it is
+ * recoverable, because "a credit coming back" and "a bill to pay" are not the
+ * same number with a sign flipped.
+ */
+export const taxSummary = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, { from, to }): Promise<TaxSummary> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null)
+      return {
+        from,
+        to,
+        outputTax: 0,
+        inputTax: 0,
+        net: 0,
+        salesCount: 0,
+        purchaseCount: 0,
+        rows: [],
+        empty: true,
+      };
+
+    const sales = await ctx.db
+      .query("sales")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const purchases = await ctx.db
+      .query("purchases")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+
+    const inWindow = sales.filter((s) => s.soldAt >= from && s.soldAt <= to);
+    const bought = purchases.filter(
+      (p) => p.purchasedAt >= from && p.purchasedAt <= to,
+    );
+    const bucket = bucketFor(Math.round((to - from) / 86_400_000));
+    const periods = new Map<string, TaxPeriodRow>();
+    const rowFor = (at: number) => {
+      const p = periodKey(at, bucket);
+      const row = periods.get(p.key) ?? {
+        key: p.key,
+        label: p.label,
+        from: p.from,
+        to: p.to,
+        output: 0,
+        input: 0,
+        net: 0,
+      };
+      periods.set(p.key, row);
+      return row;
+    };
+
+    let outputTax = 0;
+    for (const s of inWindow) {
+      const t = s.taxAmount ?? 0;
+      outputTax += t;
+      rowFor(s.soldAt).output += t;
+    }
+    let inputTax = 0;
+    for (const p of bought) {
+      const t = p.taxAmount ?? 0;
+      inputTax += t;
+      rowFor(p.purchasedAt).input += t;
+    }
+
+    const rows = Array.from(periods.values())
+      .sort((a, b) => a.from - b.from)
+      .map((r) => ({
+        ...r,
+        output: round(r.output),
+        input: round(r.input),
+        net: round(r.output - r.input),
+      }));
+
+    const out = round(outputTax);
+    const inp = round(inputTax);
+    return {
+      from,
+      to,
+      outputTax: out,
+      inputTax: inp,
+      net: round(out - inp),
+      salesCount: inWindow.length,
+      purchaseCount: bought.length,
+      rows,
+      empty: rows.length === 0,
+    };
+  },
+});
+
+/* ── sales by project ──────────────────────────────────────────────── */
+
+export type ProjectSalesRow = {
+  key: string;
+  label: string;
+  code: string;
+  invoices: number;
+  qty: number;
+  value: number;
+  total: number;
+  paid: number;
+  outstanding: number;
+  share: number;
+};
+
+/**
+ * Sales gathered under the project their product belongs to.
+ *
+ * A product carries its project, not the invoice, so this is the only reading
+ * that answers "what did this project earn" — grouping invoices would credit a
+ * project with everything on a mixed bill. Standalone products are collected
+ * under "No project" rather than dropped.
+ */
+export const salesByProject = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, { from, to }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null)
+      return { from, to, rows: [] as ProjectSalesRow[], total: 0, empty: true };
+
+    const goods = await ctx.db
+      .query("finishedGoods")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const projectOf = new Map(goods.map((g) => [g._id, g] as const));
+
+    const invoices = (
+      await ctx.db
+        .query("sales")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect()
+    ).filter((s) => s.soldAt >= from && s.soldAt <= to);
+
+    const rows = new Map<string, ProjectSalesRow>();
+    for (const inv of invoices) {
+      const paid = inv.amountPaid ?? (inv.isPaid === true ? inv.total : 0);
+      for (const line of inv.lines) {
+        const g = projectOf.get(line.productId);
+        const name = g?.projectName?.trim() || "No project";
+        const key = g?.projectName?.trim() || "—";
+        const row = rows.get(key) ?? {
+          key,
+          label: name,
+          code: g?.projectCode ?? "",
+          invoices: 0,
+          qty: 0,
+          value: 0,
+          total: 0,
+          paid: 0,
+          outstanding: 0,
+          share: 0,
+        };
+        const amount = line.qty * line.unitPrice;
+        row.invoices += 1;
+        row.qty += line.qty;
+        row.value += amount;
+        row.total += amount;
+        row.paid += amount * (inv.total > 0 ? paid / inv.total : 0);
+        if (!row.code && g?.projectCode) row.code = g.projectCode;
+        rows.set(key, row);
+      }
+    }
+
+    const list = Array.from(rows.values());
+    const total = round(list.reduce((s, r) => s + r.total, 0));
+    const out = list
+      .map((r) => ({
+        ...r,
+        qty: round(r.qty),
+        value: round(r.value),
+        total: round(r.total),
+        paid: round(r.paid),
+        outstanding: round(r.total - r.paid),
+        share: total === 0 ? 0 : round((r.total / total) * 100),
+      }))
+      .sort((a, b) => b.total - a.total);
+    return { from, to, rows: out, total, empty: out.length === 0 };
+  },
+});
+
+/* ── quotation conversion ──────────────────────────────────────────── */
+
+export type QuoteRow = {
+  _id: Id<"quotations">;
+  number: string;
+  at: number;
+  party: string;
+  total: number;
+  status: string;
+  validUntil?: number;
+  expired: boolean;
+  converted: boolean;
+  convertedAs?: Id<"sales">;
+  convertedAt?: number;
+};
+
+/**
+ * What was quoted against what was actually won.
+ *
+ * A quote counts as converted when the sales bill it became is on the record,
+ * which is a fact the quote carries rather than something this report infers
+ * from matching names and totals. Expiry is read at the moment of asking, so a
+ * quote that lapsed after the period still shows as lapsed today.
+ */
+export const quotationConversion = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, { from, to }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null)
+      return {
+        from,
+        to,
+        rows: [] as QuoteRow[],
+        quoted: 0,
+        won: 0,
+        wonValue: 0,
+        rate: 0,
+        lostValue: 0,
+        expired: 0,
+        empty: true,
+      };
+
+    const all = (
+      await ctx.db
+        .query("quotations")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect()
+    ).filter((q) => q.quotedAt >= from && q.quotedAt <= to);
+    const asAt = Date.now();
+
+    const rows: QuoteRow[] = all
+      .map((q) => ({
+        _id: q._id,
+        number: q.number,
+        at: q.quotedAt,
+        party: partyName(q.customerId, q.customerName),
+        total: round(q.total),
+        status: q.status ?? "draft",
+        validUntil: q.validUntil,
+        expired: q.validUntil !== undefined && q.validUntil < asAt,
+        converted: q.invoicedAs !== undefined,
+        convertedAs: q.invoicedAs,
+        convertedAt: q.invoicedAt,
+      }))
+      .sort((a, b) => b.at - a.at);
+
+    const quoted = round(rows.reduce((s, r) => s + r.total, 0));
+    const wonRows = rows.filter((r) => r.converted);
+    const wonValue = round(wonRows.reduce((s, r) => s + r.total, 0));
+    return {
+      from,
+      to,
+      rows,
+      quoted,
+      won: wonRows.length,
+      wonValue,
+      rate: rows.length === 0 ? 0 : round((wonRows.length / rows.length) * 100),
+      lostValue: round(quoted - wonValue),
+      expired: rows.filter((r) => r.expired && !r.converted).length,
+      empty: rows.length === 0,
+    };
+  },
+});
+
+/* ── purchases by category ─────────────────────────────────────────── */
+
+export type CategorySpendRow = {
+  key: string;
+  label: string;
+  sub: string;
+  bills: number;
+  qty: number;
+  value: number;
+  tax: number;
+  share: number;
+};
+
+/**
+ * What was bought, gathered by the material's category rather than by the
+ * material itself. Spend that is not on any one item still matters — this is
+ * the view that shows which part of the business the money went to.
+ */
+export const purchasesByCategory = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, { from, to }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null)
+      return { from, to, rows: [] as CategorySpendRow[], total: 0, tax: 0, empty: true };
+
+    const materials = await ctx.db
+      .query("rawMaterials")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const of = new Map(materials.map((m) => [m._id, m] as const));
+
+    const bills = (
+      await ctx.db
+        .query("purchases")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect()
+    ).filter((p) => p.purchasedAt >= from && p.purchasedAt <= to);
+
+    const rows = new Map<string, CategorySpendRow>();
+    for (const bill of bills) {
+      for (const line of bill.lines) {
+        const m = of.get(line.materialId);
+        const category = m?.category?.trim() || "Uncategorised";
+        const row = rows.get(category) ?? {
+          key: category,
+          label: category,
+          sub: m?.subCategory?.trim() ?? "",
+          bills: 0,
+          qty: 0,
+          value: 0,
+          tax: 0,
+          share: 0,
+        };
+        const amount = line.qty * line.unitCost;
+        const rate = line.taxPct ?? bill.taxPct ?? 0;
+        row.bills += 1;
+        row.qty += line.qty;
+        row.value += amount;
+        row.tax += amount * (rate / 100);
+        if (!row.sub && m?.subCategory) row.sub = m.subCategory;
+        rows.set(category, row);
+      }
+    }
+
+    const list = Array.from(rows.values());
+    const total = round(list.reduce((s, r) => s + r.value, 0));
+    const out = list
+      .map((r) => ({
+        ...r,
+        qty: round(r.qty),
+        value: round(r.value),
+        tax: round(r.tax),
+        share: total === 0 ? 0 : round((r.value / total) * 100),
+      }))
+      .sort((a, b) => b.value - a.value);
+    return {
+      from,
+      to,
+      rows: out,
+      total,
+      tax: round(out.reduce((s, r) => s + r.tax, 0)),
+      empty: out.length === 0,
+    };
+  },
+});
+
+/* ── low stock ─────────────────────────────────────────────────────── */
+
+export type LowStockRow = {
+  key: string;
+  name: string;
+  code: string;
+  kind: "material" | "product";
+  unit: string;
+  stock: number;
+  minStock: number;
+  reorderLevel: number;
+  /** The level the item is measured against — reorder if set, else min. */
+  threshold: number;
+  /** How much is needed to get back to the threshold. */
+  shortfall: number;
+  /** 0–100: how far below the threshold the item has fallen. */
+  severity: number;
+  rate: number;
+  /** What it would cost to buy or make the shortfall back. */
+  value: number;
+};
+
+/**
+ * What is at or below its reorder level, materials and products together.
+ *
+ * This is a state, not a period — stock on a shelf has a level today whatever
+ * the period control says — so it takes no dates and reads the same figures the
+ * materials and products lists show. An item with neither level set is left
+ * out rather than guessed at, because a report that invents a threshold would
+ * nag about things nobody asked to track.
+ */
+export const lowStock = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null)
+      return { rows: [] as LowStockRow[], out: 0, value: 0, empty: true };
+
+    const materials = await ctx.db
+      .query("rawMaterials")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const goods = await ctx.db
+      .query("finishedGoods")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+
+    const build = (
+      kind: "material" | "product",
+      doc: {
+        _id: string;
+        name: string;
+        code?: string;
+        unit?: string;
+        stock?: number;
+        minStock?: number;
+        reorderLevel?: number;
+      },
+      rate: number,
+    ): LowStockRow | null => {
+      const stock = doc.stock ?? 0;
+      const minStock = doc.minStock ?? 0;
+      const reorderLevel = doc.reorderLevel ?? 0;
+      const threshold = reorderLevel > 0 ? reorderLevel : minStock;
+      if (threshold <= 0) return null;
+      if (stock > threshold) return null;
+      const shortfall = round(threshold - stock);
+      return {
+        key: doc._id,
+        name: doc.name,
+        code: doc.code ?? "",
+        kind,
+        unit: doc.unit ?? "",
+        stock: round(stock),
+        minStock,
+        reorderLevel,
+        threshold,
+        shortfall,
+        severity:
+          threshold === 0
+            ? 100
+            : Math.round(Math.min(100, ((threshold - stock) / threshold) * 100)),
+        rate,
+        value: round(shortfall * rate),
+      };
+    };
+
+    const rows: LowStockRow[] = [];
+    for (const m of materials) {
+      const row = build("material", m, m.pricePerUnit ?? 0);
+      if (row) rows.push(row);
+    }
+    for (const g of goods) {
+      const row = build("product", g, 0);
+      if (row) rows.push(row);
+    }
+    rows.sort(
+      (a, b) => b.severity - a.severity || a.name.localeCompare(b.name),
+    );
+    return {
+      rows,
+      out: rows.filter((r) => r.stock <= 0).length,
+      value: round(rows.reduce((s, r) => s + r.value, 0)),
+      empty: rows.length === 0,
+    };
+  },
+});

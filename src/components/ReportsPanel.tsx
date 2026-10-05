@@ -7,11 +7,18 @@ import {
   Boxes,
   CalendarDays,
   Check,
+  Clock,
   Download,
   FileBarChart,
+  FileText,
+  Folder,
+  Landmark,
   Package,
+  Percent,
   Receipt,
   ShoppingCart,
+  Tags,
+  TrendingDown,
   TrendingUp,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -408,13 +415,25 @@ export default function ReportsPanel() {
 
 /* ── financial ────────────────────────────────────────────────────── */
 
-type FinTab = "trial" | "position" | "pl" | "day";
+type FinTab =
+  | "trial"
+  | "position"
+  | "pl"
+  | "day"
+  | "cash"
+  | "receivable"
+  | "payable"
+  | "tax";
 
 const FIN_TABS: readonly PageTab<FinTab>[] = [
   { id: "trial", label: "Trial balance", icon: BookOpen },
   { id: "position", label: "Balance sheet", icon: FileBarChart },
   { id: "pl", label: "Profit & loss", icon: TrendingUp },
   { id: "day", label: "Day book", icon: CalendarDays },
+  { id: "cash", label: "Cash flow", icon: Landmark },
+  { id: "receivable", label: "Receivables", icon: Clock },
+  { id: "payable", label: "Payables", icon: Clock },
+  { id: "tax", label: "Tax summary", icon: Percent },
 ];
 
 const GAIN = "text-emerald-600 dark:text-emerald-400";
@@ -434,6 +453,10 @@ function FinancialReports({ range }: { range: Range }) {
       {tab === "position" && <BalanceSheet range={range} />}
       {tab === "pl" && <ProfitAndLoss range={range} />}
       {tab === "day" && <DayBook range={range} />}
+      {tab === "cash" && <CashFlowReport range={range} />}
+      {tab === "receivable" && <AgeingReport side="receivable" />}
+      {tab === "payable" && <AgeingReport side="payable" />}
+      {tab === "tax" && <TaxSummaryReport range={range} />}
     </div>
   );
 }
@@ -1470,19 +1493,29 @@ function DocumentReports({
   words,
   analysis,
   range,
+  extras,
+  renderExtra,
 }: {
   tabs: readonly PageTab<DocTab>[];
   words: DocWords;
   analysis: DocAnalysis | undefined;
   range: Range;
+  /**
+   * Report kinds that are not one of the four shared groupings — sales by
+   * project, say, which reads the product rather than the bill. They sit in
+   * the same row of tabs and are handed back to the area that owns them.
+   */
+  extras?: readonly PageTab<string>[];
+  renderExtra?: (id: string) => React.ReactNode;
 }) {
-  const [tab, setTab] = useState<DocTab>("item");
+  const [tab, setTab] = useState<string>("item");
   const { format: money } = useWorkspaceCurrency();
+  const allTabs: readonly PageTab<string>[] = [...tabs, ...(extras ?? [])];
 
   if (analysis === undefined) {
     return (
       <div className="space-y-4">
-        <SubTabs tabs={tabs} value={tab} onChange={setTab} label="Reports" />
+        <SubTabs tabs={allTabs} value={tab} onChange={setTab} label="Reports" />
         <Empty>Reading the register…</Empty>
       </div>
     );
@@ -1490,10 +1523,16 @@ function DocumentReports({
 
   const docs = analysis.item.reduce((s, r) => s + r.invoices, 0);
 
+  const builtIn = tabs.some((t) => t.id === tab);
+
   return (
     <div className="space-y-4">
-      <SubTabs tabs={tabs} value={tab} onChange={setTab} label="Reports" />
+      <SubTabs tabs={allTabs} value={tab} onChange={setTab} label="Reports" />
 
+      {!builtIn && renderExtra?.(tab)}
+
+      {builtIn && (
+      <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Tile
           label="Billed"
@@ -1563,6 +1602,8 @@ function DocumentReports({
           words={words}
           money={money}
         />
+      )}
+      </>
       )}
     </div>
   );
