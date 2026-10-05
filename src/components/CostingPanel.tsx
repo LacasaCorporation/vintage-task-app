@@ -453,6 +453,35 @@ export default function CostingPanel({
     [materials, money],
   );
 
+  /**
+   * What the picked material will cost on the sheet, shown before it is added
+   * so a wrong pick or a wrong quantity is caught here rather than three rows
+   * down. Priced the same way the server prices it: the material's own
+   * purchase rate, and the line's tax is that rate applied to qty × rate.
+   */
+  const materialPreview = useMemo(() => {
+    const m = materials.find((x) => x._id === addingMaterialId);
+    if (m === undefined) return null;
+    const qty = Number(materialQty);
+    const safeQty = Number.isFinite(qty) && qty > 0 ? qty : 0;
+    const rate = m.pricePerUnit;
+    const taxPct = cleanRate(m.purchaseTaxPct);
+    const amount = safeQty * rate;
+    const tax = amount * (taxPct / 100);
+    return {
+      material: m,
+      qty: safeQty,
+      qtyValid: Number.isFinite(qty) && qty > 0,
+      rate,
+      taxPct,
+      amount,
+      tax,
+      total: amount + tax,
+      stock: m.stock ?? 0,
+      short: (m.stock ?? 0) < safeQty,
+    };
+  }, [materials, addingMaterialId, materialQty]);
+
   // Collapse duplicate rows (same description/price/unit/tax/type) once per sheet open.
   useEffect(() => {
     if (!activeFg || items === undefined || items.length < 2) return;
@@ -1446,6 +1475,86 @@ export default function CostingPanel({
                 >
                   <Plus className="size-3.5" />
                 </Button>
+
+                {/* the picked material, priced exactly as it will land on the
+                    sheet — caught here rather than after it is added */}
+                {materialPreview !== null && (
+                  <div
+                    className="flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg border border-primary/25 bg-primary/[0.04] px-2.5 py-1 text-[11px]"
+                    aria-live="polite"
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-xs font-semibold">
+                        {materialPreview.material.name}
+                      </span>
+                      {materialPreview.material.code && (
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {materialPreview.material.code}
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-muted-foreground">
+                      Unit{" "}
+                      <span className="font-medium text-foreground">
+                        {materialPreview.material.unit}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Stock{" "}
+                      <span
+                        className={cn(
+                          "font-medium tabular-nums",
+                          materialPreview.short
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-foreground",
+                        )}
+                        title={
+                          materialPreview.short
+                            ? `Only ${materialPreview.stock.toLocaleString()} on hand — this line needs ${materialPreview.qty.toLocaleString()}`
+                            : `${materialPreview.stock.toLocaleString()} on hand`
+                        }
+                      >
+                        {materialPreview.stock.toLocaleString()}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Qty{" "}
+                      <span className="font-medium text-foreground tabular-nums">
+                        {materialPreview.qty.toLocaleString()}
+                      </span>
+                      {!materialPreview.qtyValid && (
+                        <span className="text-amber-600 dark:text-amber-400">
+                          {" "}
+                          — must be more than zero
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-muted-foreground">
+                      Rate{" "}
+                      <span className="font-medium text-foreground tabular-nums">
+                        {money(materialPreview.rate)}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Tax{" "}
+                      <span className="font-medium text-foreground tabular-nums">
+                        {materialPreview.taxPct}% ({money(materialPreview.tax)})
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Amount{" "}
+                      <span className="font-medium text-foreground tabular-nums">
+                        {money(materialPreview.amount)}
+                      </span>
+                    </span>
+                    <span className="text-foreground">
+                      Total{" "}
+                      <span className="font-semibold tabular-nums">
+                        {money(materialPreview.total)}
+                      </span>
+                    </span>
+                  </div>
+                )}
 
                 {materials.length === 0 && (
                   <button
