@@ -366,6 +366,37 @@ export default function CostingPanel({
    * shows the derived per-unit figure instead of fighting the user.
    */
   const [customAmount, setCustomAmount] = useState("");
+  /** Unit for a cost line — hours, days, trips, boxes. */
+  const [customUnit, setCustomUnit] = useState("");
+
+  /**
+   * The cost line being typed, priced exactly as the server will store it, so
+   * every figure in the row is the figure the sheet will get. A typed amount
+   * wins over the rate and is spread back over the quantity, which is what
+   * makes subtotal, tax and total here agree with the saved row.
+   */
+  const costPreview = useMemo(() => {
+    const qty = Number(customQty);
+    const safeQty = Number.isFinite(qty) && qty > 0 ? qty : 0;
+    const typed = customAmount.trim() === "" ? null : Number(customAmount);
+    const usingAmount = typed !== null && Number.isFinite(typed);
+    const rate = usingAmount ? typed : Number(customPrice);
+    const subtotal = usingAmount ? typed : safeQty * rate;
+    const taxPct = cleanRate(Number(customTax));
+    const tax = subtotal * (taxPct / 100);
+    return {
+      qty: safeQty,
+      qtyValid: Number.isFinite(qty) && qty > 0,
+      rateValid: Number.isFinite(rate) && rate >= 0,
+      usingAmount,
+      /** what the sheet stores: always a per-unit rate */
+      unitPrice: usingAmount && safeQty > 0 ? subtotal / safeQty : rate,
+      subtotal: Number.isFinite(subtotal) ? subtotal : 0,
+      taxPct,
+      tax: Number.isFinite(tax) ? tax : 0,
+      total: (Number.isFinite(subtotal) ? subtotal : 0) + (Number.isFinite(tax) ? tax : 0),
+    };
+  }, [customQty, customPrice, customAmount, customTax]);
 
   // Draft state — edits stay local until "Save" is pressed.
   const [drafts, setDrafts] = useState<
@@ -886,11 +917,13 @@ export default function CostingPanel({
         unitPrice,
         taxPct: Number.isFinite(Number(customTax)) ? Number(customTax) : 0,
         kind: customKind,
+        unit: customUnit.trim() || undefined,
       });
       setCustomLabel("");
       setCustomQty("1");
       setCustomPrice("0");
       setCustomAmount("");
+      setCustomUnit("");
       setCustomTax("0");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
@@ -1368,6 +1401,14 @@ export default function CostingPanel({
                 onChange={(e) => setCustomQty(e.target.value)}
                 aria-label="Cost line quantity"
                 title="How many — hours, days, trips or units"
+                className="h-7 w-14 shrink-0 rounded-lg text-xs"
+              />
+              <Input
+                value={customUnit}
+                onChange={(e) => setCustomUnit(e.target.value)}
+                placeholder="Unit"
+                aria-label="Cost line unit"
+                title="Unit this line is measured in — hrs, days, trips…"
                 className="h-7 w-16 shrink-0 rounded-lg text-xs"
               />
               <Input
@@ -1390,9 +1431,9 @@ export default function CostingPanel({
                 step="any"
                 value={customAmount}
                 onChange={(e) => setCustomAmount(e.target.value)}
-                placeholder="Amount"
-                aria-label="Cost line total amount"
-                title="Type a total instead of a rate — the rate is worked out from the quantity"
+                placeholder="Subtotal"
+                aria-label="Cost line subtotal"
+                title="Type a subtotal instead of a rate — the rate is worked out from the quantity"
                 className="h-7 w-24 shrink-0 rounded-lg text-xs"
               />
               <div className="relative shrink-0">
@@ -1405,19 +1446,33 @@ export default function CostingPanel({
                   onChange={(e) => setCustomTax(e.target.value)}
                   aria-label="Cost line tax percent"
                   title={`Tax on this line — the firm default is ${defaultTax?.taxPct ?? 0}%`}
-                  className="h-7 w-16 shrink-0 rounded-lg pr-4 text-xs tabular-nums"
+                  className="h-7 w-14 shrink-0 rounded-lg pr-4 text-xs tabular-nums"
                 />
                 <Percent
                   className="pointer-events-none absolute top-1/2 right-1 size-2.5 -translate-y-1/2 text-muted-foreground/70"
                   aria-hidden
                 />
               </div>
+              {/* tax amount and total are worked out of the row, not typed —
+                  they are here so the line can be checked before it is added */}
+              <span
+                className="w-20 shrink-0 pr-1 text-right text-xs text-muted-foreground tabular-nums"
+                title="Tax on this subtotal"
+              >
+                {money(costPreview.tax)}
+              </span>
+              <span
+                className="w-24 shrink-0 pr-1 text-right text-xs font-semibold tabular-nums"
+                title="Subtotal + tax — what this line will cost"
+              >
+                {money(costPreview.total)}
+              </span>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 className="size-7 shrink-0 rounded-lg"
-                disabled={items === undefined}
+                disabled={items === undefined || !costPreview.qtyValid || !costPreview.rateValid}
                 onClick={() =>
                   guardProduction(
                     `Adding a ${customKind === "custom" ? "custom" : customKind} line`,

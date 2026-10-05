@@ -2010,8 +2010,13 @@ export const addFgItem = mutation({
     kind: v.optional(
       v.union(v.literal("labour"), v.literal("expense"), v.literal("custom")),
     ),
+    /** For a cost line: hours, days, trips, boxes… Materials take their own. */
+    unit: v.optional(v.string()),
   },
-  handler: async (ctx, { fgId, materialId, label, qty, unitPrice, taxPct, kind }) => {
+  handler: async (
+    ctx,
+    { fgId, materialId, label, qty, unitPrice, taxPct, kind, unit },
+  ) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(fgId);
@@ -2068,6 +2073,7 @@ export const addFgItem = mutation({
       qty,
       unitPrice: unitPrice ?? 0,
       taxPct: ratePct(taxPct) ?? 0,
+      unit: unit?.trim().slice(0, MAX_NAME_LENGTH) || undefined,
     });
   },
 });
@@ -2085,6 +2091,8 @@ export const updateItem = mutation({
     kind: v.optional(
       v.union(v.literal("labour"), v.literal("expense"), v.literal("custom")),
     ),
+    /** Unit for a cost line — hours, days, trips… */
+    unit: v.optional(v.string()),
   },
   handler: async (ctx, { id, ...patch }) => {
     const userId = await scopeUserId(ctx);
@@ -2100,6 +2108,11 @@ export const updateItem = mutation({
       const clean = patch.label.trim();
       if (clean.length === 0) throw new Error("Give the line a description.");
       patch.label = clean.slice(0, MAX_NAME_LENGTH);
+    }
+    // trimmed and capped the same way a new line's unit is, so a unit can
+    // never be padded past the field it lives in
+    if (patch.unit !== undefined) {
+      patch.unit = patch.unit.trim().slice(0, MAX_NAME_LENGTH) || undefined;
     }
     await ctx.db.patch(id, patch);
     // changing the qty of a line on a product that is in production moves the
