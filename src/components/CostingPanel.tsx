@@ -1314,7 +1314,7 @@ export default function CostingPanel({
               {/* cost line — labour, expenses and other non-material costs */}
               <div className="flex flex-wrap items-center gap-1 px-2 py-1.5">
               <span
-                className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+                className="flex shrink-0 items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
                 title="Add labour, transport, packaging or any other cost"
               >
                 <Plus className="size-3" />
@@ -1358,7 +1358,7 @@ export default function CostingPanel({
                       : "e.g. Packaging…"
                 }
                 aria-label="Cost line name"
-                className="h-7 w-36 rounded-lg text-xs"
+                className="h-7 min-w-[10rem] flex-1 rounded-lg text-xs"
               />
               <Input
                 type="number"
@@ -1368,7 +1368,7 @@ export default function CostingPanel({
                 onChange={(e) => setCustomQty(e.target.value)}
                 aria-label="Cost line quantity"
                 title="How many — hours, days, trips or units"
-                className="h-7 w-12 rounded-lg text-xs"
+                className="h-7 w-16 shrink-0 rounded-lg text-xs"
               />
               <Input
                 type="number"
@@ -1382,7 +1382,7 @@ export default function CostingPanel({
                 }}
                 aria-label="Cost line rate"
                 title="Rate per unit of quantity"
-                className="h-7 w-14 rounded-lg text-xs"
+                className="h-7 w-20 shrink-0 rounded-lg text-xs"
               />
               <Input
                 type="number"
@@ -1393,9 +1393,9 @@ export default function CostingPanel({
                 placeholder="Amount"
                 aria-label="Cost line total amount"
                 title="Type a total instead of a rate — the rate is worked out from the quantity"
-                className="h-7 w-16 rounded-lg text-xs"
+                className="h-7 w-24 shrink-0 rounded-lg text-xs"
               />
-              <div className="relative">
+              <div className="relative shrink-0">
                 <Input
                   type="number"
                   min="0"
@@ -1405,7 +1405,7 @@ export default function CostingPanel({
                   onChange={(e) => setCustomTax(e.target.value)}
                   aria-label="Cost line tax percent"
                   title={`Tax on this line — the firm default is ${defaultTax?.taxPct ?? 0}%`}
-                  className="h-7 w-12 rounded-lg pr-4 text-xs tabular-nums"
+                  className="h-7 w-16 shrink-0 rounded-lg pr-4 text-xs tabular-nums"
                 />
                 <Percent
                   className="pointer-events-none absolute top-1/2 right-1 size-2.5 -translate-y-1/2 text-muted-foreground/70"
@@ -1433,7 +1433,7 @@ export default function CostingPanel({
               {/* material line — raw materials from the master price list */}
               <div className="flex flex-wrap items-center gap-1 border-t bg-muted/25 px-2 py-1.5">
                 <span
-                  className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+                  className="flex shrink-0 items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
                   title="Add a raw material from the master price list"
                 >
                   <Package className="size-3" />
@@ -1462,7 +1462,7 @@ export default function CostingPanel({
                   value={materialQty}
                   onChange={(e) => setMaterialQty(e.target.value)}
                   aria-label="Material quantity"
-                  className="h-7 w-14 rounded-lg text-xs"
+                  className="h-7 w-16 shrink-0 rounded-lg text-xs"
                 />
                 <Button
                   type="button"
