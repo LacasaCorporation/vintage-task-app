@@ -276,6 +276,7 @@ export default function PrimaryNav({
         </div>
       )}
 
+      {canViewSales && (
         <div>
           <div
             className={cn(
