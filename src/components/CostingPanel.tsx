@@ -352,8 +352,13 @@ export default function CostingPanel({
   const [customLabel, setCustomLabel] = useState("");
   const [customQty, setCustomQty] = useState("1");
   const [customPrice, setCustomPrice] = useState("0");
-  /** Tax on the custom line being added. Defaults to the firm rate. */
-  const [customTax, setCustomTax] = useState("0");
+  /**
+   * Tax on the cost line being added. Left at-1 it has not been touched yet,
+   * so the field shows the firm default until the user types their own rate.
+   */
+  const [customTax, setCustomTax] = useState("-1");
+  /** The firm default rate, so an untouched tax box is a choice, not a gap. */
+  const defaultTax = useQuery(api.purchases.postingDefaults);
   /**
    * What the new non-material line is: labour, an overhead expense, or a
    * plain custom line. Chosen at the same place the name is typed, so the
@@ -365,7 +370,6 @@ export default function CostingPanel({
    * entered; once an amount is typed it drives the line and the rate field
    * shows the derived per-unit figure instead of fighting the user.
    */
-  const [customAmount, setCustomAmount] = useState("");
   /** Unit for a cost line — hours, days, trips, boxes. */
   const [customUnit, setCustomUnit] = useState("");
 
@@ -378,25 +382,28 @@ export default function CostingPanel({
   const costPreview = useMemo(() => {
     const qty = Number(customQty);
     const safeQty = Number.isFinite(qty) && qty > 0 ? qty : 0;
-    const typed = customAmount.trim() === "" ? null : Number(customAmount);
-    const usingAmount = typed !== null && Number.isFinite(typed);
-    const rate = usingAmount ? typed : Number(customPrice);
-    const subtotal = usingAmount ? typed : safeQty * rate;
-    const taxPct = cleanRate(Number(customTax));
+    const rate = Number(customPrice);
+    // subtotal is worked out, never typed: it is simply qty x rate
+    const subtotal = safeQty * rate;
+    // the tax box opens on the firm's default rate and only follows the user's
+    // own once they have typed one
+    const typedTax = Number(customTax);
+    const taxPct = customTax.trim() === "" || typedTax < 0
+      ? cleanRate(defaultTax?.taxPct ?? 0)
+      : cleanRate(typedTax);
     const tax = subtotal * (taxPct / 100);
     return {
       qty: safeQty,
       qtyValid: Number.isFinite(qty) && qty > 0,
       rateValid: Number.isFinite(rate) && rate >= 0,
-      usingAmount,
-      /** what the sheet stores: always a per-unit rate */
-      unitPrice: usingAmount && safeQty > 0 ? subtotal / safeQty : rate,
+      /** what the sheet stores: the rate exactly as typed */
+      unitPrice: rate,
       subtotal: Number.isFinite(subtotal) ? subtotal : 0,
       taxPct,
       tax: Number.isFinite(tax) ? tax : 0,
       total: (Number.isFinite(subtotal) ? subtotal : 0) + (Number.isFinite(tax) ? tax : 0),
     };
-  }, [customQty, customPrice, customAmount, customTax]);
+  }, [customQty, customPrice, customTax, defaultTax?.taxPct]);
 
   // Draft state — edits stay local until "Save" is pressed.
   const [drafts, setDrafts] = useState<
@@ -689,9 +696,6 @@ export default function CostingPanel({
     return out;
   }, [pricedRows, rows, materials]);
 
-  /** The firm default rate, so a blank on a custom line is a choice, not a gap. */
-  const defaultTax = useQuery(api.purchases.postingDefaults);
-
   const saveSheet = async () => {
     if (!activeFg) return;
     const run = async () => {
@@ -887,20 +891,10 @@ export default function CostingPanel({
   const addCustomRow = async () => {
     if (!activeFg) return;
     const qty = Number(customQty);
-    // a typed amount wins over the rate: it is what the line actually costs,
-    // and the stored rate is derived from it so the maths downstream is right
-    const typedAmount = customAmount.trim() === "" ? null : Number(customAmount);
-    const usingAmount = typedAmount !== null && Number.isFinite(typedAmount);
-    // a typed amount is the whole line, so it is spread over the quantity to
-    // give a rate; a typed rate is already per-unit and is stored as it stands
-    const rate = usingAmount ? Number(customAmount) : Number(customPrice);
-    const unitPrice = usingAmount && qty > 0 ? rate / qty : rate;
+    // the rate is the only thing typed; subtotal and tax are worked out from it
+    const rate = Number(customPrice);
     if (!Number.isFinite(qty) || qty <= 0) {
       toast.error("Quantity must be greater than zero.");
-      return;
-    }
-    if (typedAmount !== null && (!Number.isFinite(typedAmount) || typedAmount < 0)) {
-      toast.error("Amount can't be negative.");
       return;
     }
     if (!Number.isFinite(rate) || rate < 0) {
@@ -912,19 +906,19 @@ export default function CostingPanel({
         fgId: activeFg._id,
         label: customLabel.trim() || COST_KINDS.find((k) => k.kind === customKind)!.label,
         qty,
-        // the sheet stores a rate, never a total, so a line entered by amount
-        // is spread back over its quantity here
-        unitPrice,
-        taxPct: Number.isFinite(Number(customTax)) ? Number(customTax) : 0,
+        // the sheet stores a rate, never a total
+        unitPrice: rate,
+        // an untouched tax box saves the firm default, not a silent zero
+        taxPct: costPreview.taxPct,
         kind: customKind,
         unit: customUnit.trim() || undefined,
       });
       setCustomLabel("");
       setCustomQty("1");
       setCustomPrice("0");
-      setCustomAmount("");
       setCustomUnit("");
-      setCustomTax("0");
+      // back to "follow the firm default" for the next line
+      setCustomTax("-1");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
     }
@@ -1416,36 +1410,38 @@ export default function CostingPanel({
                 min="0"
                 step="any"
                 value={customPrice}
-                onChange={(e) => {
-                  setCustomPrice(e.target.value);
-                  // typing a rate clears any amount so the two never disagree
-                  setCustomAmount("");
-                }}
+                onChange={(e) => setCustomPrice(e.target.value)}
                 aria-label="Cost line rate"
                 title="Rate per unit of quantity"
                 className="h-7 w-20 shrink-0 rounded-lg text-xs"
               />
-              <Input
-                type="number"
-                min="0"
-                step="any"
-                value={customAmount}
-                onChange={(e) => setCustomAmount(e.target.value)}
-                placeholder="Subtotal"
+              {/* subtotal is qty x rate, worked out here rather than typed, so
+                  it can never disagree with the two fields it comes from */}
+              <span
+                className="flex h-7 w-24 shrink-0 items-center justify-end rounded-lg border border-dashed bg-muted/30 px-2 text-xs text-muted-foreground tabular-nums"
+                title="Quantity × rate — worked out for you"
                 aria-label="Cost line subtotal"
-                title="Type a subtotal instead of a rate — the rate is worked out from the quantity"
-                className="h-7 w-24 shrink-0 rounded-lg text-xs"
-              />
+              >
+                {money(costPreview.subtotal)}
+              </span>
               <div className="relative shrink-0">
                 <Input
                   type="number"
                   min="0"
                   max="100"
                   step="any"
-                  value={customTax}
+                  value={customTax === "" || Number(customTax) < 0 ? "" : customTax}
+                  placeholder={String(costPreview.taxPct)}
                   onChange={(e) => setCustomTax(e.target.value)}
+                  onFocus={() => {
+                    // first focus adopts the firm default as a real value, so
+                    // what is saved is never the placeholder
+                    if (customTax === "" || Number(customTax) < 0) {
+                      setCustomTax(String(costPreview.taxPct));
+                    }
+                  }}
                   aria-label="Cost line tax percent"
-                  title={`Tax on this line — the firm default is ${defaultTax?.taxPct ?? 0}%`}
+                  title={`Tax on this line — the firm default is ${costPreview.taxPct}%`}
                   className="h-7 w-14 shrink-0 rounded-lg pr-4 text-xs tabular-nums"
                 />
                 <Percent

@@ -23,6 +23,7 @@ import {
   PROJECT_STATUS_START,
 } from "../lib/project-statuses";
 import { currencySymbol } from "../lib/currency";
+import { defaultTaxPct } from "./accountingDefaults";
 import { isProductDone, productsOfJob } from "./jobs";
 import { requireUnusedMaterial, requireUnusedProduct } from "./usage";
 
@@ -2072,7 +2073,12 @@ export const addFgItem = mutation({
       label: clean.slice(0, MAX_NAME_LENGTH),
       qty,
       unitPrice: unitPrice ?? 0,
-      taxPct: ratePct(taxPct) ?? 0,
+      taxPct:
+        ratePct(taxPct) ??
+        // a cost line saved without a rate takes the firm's default, never a
+        // silent zero that would quietly under-cost the recipe
+        ratePct(await defaultTaxPct(ctx, userId)) ??
+        0,
       unit: unit?.trim().slice(0, MAX_NAME_LENGTH) || undefined,
     });
   },
