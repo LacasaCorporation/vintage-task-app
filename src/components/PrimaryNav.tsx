@@ -173,29 +173,28 @@ export default function PrimaryNav({
             )}
           />
           <span className="text-sm text-foreground/85">Planning</span>
-        </button>
-        <div className="ml-2 border-l border-border/60">
-          <NavRow
-            label="Tasks"
-            Icon={CheckSquare}
-            active={section === "tasks"}
-            onClick={() => onSelectSection("tasks")}
-          />
-          <NavRow
-            label="Notes"
-            Icon={NotebookPen}
-            active={section === "notes"}
-            onClick={() => onSelectSection("notes")}
-          />
-          <NavRow
-            label="Projects"
-            Icon={Folder}
-            active={inCosting && (view?.kind === "projects" || view === null)}
-            n={projectCount}
-            onClick={() => onSelectView({ kind: "projects" })}
-          />
+        </button>          <div className="ml-2 border-l border-border/60 pl-1">
+            <NavRow
+              label="Tasks"
+              Icon={CheckSquare}
+              active={section === "tasks"}
+              onClick={() => onSelectSection("tasks")}
+            />
+            <NavRow
+              label="Notes"
+              Icon={NotebookPen}
+              active={section === "notes"}
+              onClick={() => onSelectSection("notes")}
+            />
+            <NavRow
+              Icon={Folder}
+              label="Projects"
+              active={inCosting && (view?.kind === "projects" || view === null)}
+              n={projectCount}
+              onClick={() => onSelectView({ kind: "projects" })}
+            />
+          </div>
         </div>
-      </div>
 
       <div className="my-2 h-px bg-border/60" />
 
