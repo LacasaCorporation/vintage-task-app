@@ -1005,6 +1005,21 @@ const PURCHASE_TABS: readonly PageTab<DocTab>[] = [
   { id: "unpaid", label: "Unpaid", icon: AlertTriangle },
 ];
 
+/**
+ * The report kinds that are not one of the four shared groupings. They are
+ * declared apart from the shared row because they read different tables — a
+ * sale by project reads the product, and a purchase by category reads the
+ * material — so neither can reuse the tables the four groupings share.
+ */
+const SALES_EXTRAS: readonly PageTab<string>[] = [
+  { id: "project", label: "By project", icon: Folder },
+  { id: "quotes", label: "Quotations", icon: FileText },
+];
+
+const PURCHASE_EXTRAS: readonly PageTab<string>[] = [
+  { id: "category", label: "By category", icon: Tags },
+];
+
 type GroupRow = {
   key: string;
   label: string;
@@ -1636,6 +1651,12 @@ function SalesReports({ range }: { range: Range }) {
       words={SALES_WORDS}
       analysis={analysis}
       range={range}
+      extras={SALES_EXTRAS}
+      renderExtra={(id) => {
+        if (id === "project") return <SalesByProject range={range} />;
+        if (id === "quotes") return <QuotationConversion range={range} />;
+        return null;
+      }}
     />
   );
 }
@@ -1665,17 +1686,22 @@ function PurchaseReports({ range }: { range: Range }) {
       words={PURCHASE_WORDS}
       analysis={analysis}
       range={range}
+      extras={PURCHASE_EXTRAS}
+      renderExtra={(id) =>
+        id === "category" ? <PurchasesByCategory range={range} /> : null
+      }
     />
   );
 }
 
 /* ── stock ────────────────────────────────────────────────────────── */
 
-type StockTab = "valuation" | "movement";
+type StockTab = "valuation" | "movement" | "low";
 
 const STOCK_TABS: readonly PageTab<StockTab>[] = [
   { id: "valuation", label: "Valuation", icon: Package },
   { id: "movement", label: "Movement", icon: Boxes },
+  { id: "low", label: "Low stock", icon: TrendingDown },
 ];
 
 type ValuationRow = {
@@ -2136,7 +2162,9 @@ function StockReports({ range }: { range: Range }) {
         </Proof>
       )}
 
-      {tab === "valuation" ? (
+      {tab === "low" ? (
+        <LowStockReport />
+      ) : tab === "valuation" ? (
         <>
           <div className="grid gap-4 xl:grid-cols-2">
             <ValuationTable
@@ -2179,6 +2207,1005 @@ function StockReports({ range }: { range: Range }) {
           range={range}
         />
       )}
+    </div>
+  );
+}
+
+/* ── cash flow ────────────────────────────────────────────────────── */
+
+function CashFlowReport({ range }: { range: Range }) {
+  const { format: money } = useWorkspaceCurrency();
+  const data = useQuery(api.reports.cashFlow, {
+    from: range.from,
+    to: range.to,
+  });
+  const rows = data?.rows ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Tile
+          label="Money in"
+          value={money(data?.totalIn ?? 0)}
+          tone="text-emerald-600 dark:text-emerald-400"
+          hint={range.label}
+        />
+        <Tile
+          label="Money out"
+          value={money(data?.totalOut ?? 0)}
+          tone="text-rose-600 dark:text-rose-400"
+          hint={range.label}
+        />
+        <Tile
+          label="Net movement"
+          value={money(data?.net ?? 0)}
+          tone={(data?.net ?? 0) >= 0 ? GAIN : LOSS}
+          hint="What the cash and bank did"
+        />
+        <Tile
+          label="Balance at the end"
+          value={money(data?.closing ?? 0)}
+          hint={`Opening was ${money(data?.opening ?? 0)}`}
+        />
+      </div>
+
+      <Proof ok={(data?.net ?? 0) >= 0}>
+        {(data?.net ?? 0) >= 0 ? (
+          <>
+            The cash and bank accounts took {money(data?.totalIn ?? 0)} and
+            parted with {money(data?.totalOut ?? 0)} between{" "}
+            {dayLabel(range.from)} and {dayLabel(range.to)}, leaving a balance
+            of {money(data?.closing ?? 0)}.
+          </>
+        ) : (
+          <>
+            More left the cash and bank accounts than reached them by{" "}
+            {money(Math.abs(data?.net ?? 0))}. The balance moved from{" "}
+            {money(data?.opening ?? 0)} to {money(data?.closing ?? 0)}.
+          </>
+        )}
+      </Proof>
+
+      <Panel
+        title="Cash flow"
+        count={`${rows.length} periods · ${range.label}`}
+        actions={
+          <CsvButton
+            what="cash flow"
+            onClick={() =>
+              downloadCsv("cash-flow.csv", [
+                ["Period", "From", "In", "Out", "Net", "Balance"],
+                ...rows.map((r) => [
+                  r.label,
+                  toInput(r.from),
+                  num(r.inflow),
+                  num(r.outflow),
+                  num(r.net),
+                  num(r.running),
+                ]),
+              ])
+            }
+          />
+        }
+      >
+        {rows.length === 0 ? (
+          <Empty>No cash moved in this period.</Empty>
+        ) : (
+          <TableWrap>
+            <thead>
+              <tr className={HEAD}>
+                <th className="px-3 py-2">Period</th>
+                <th className={TH_R}>In</th>
+                <th className={TH_R}>Out</th>
+                <th className={TH_R}>Net</th>
+                <th className={TH_R}>Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className={ROW}>
+                  <td className={CELL_LEFT}>{r.label}</td>
+                  <td className={cn(CELL, GAIN)}>{money(r.inflow)}</td>
+                  <td className={cn(CELL, LOSS)}>{money(r.outflow)}</td>
+                  <td className={cn(CELL, r.net >= 0 ? GAIN : LOSS)}>
+                    {money(r.net)}
+                  </td>
+                  <td className={CELL}>{money(r.running)}</td>
+                </tr>
+              ))}
+              <tr className={TOTAL}>
+                <td className={CELL_LEFT}>Totals</td>
+                <td className={cn(CELL, GAIN)}>{money(data?.totalIn ?? 0)}</td>
+                <td className={cn(CELL, LOSS)}>{money(data?.totalOut ?? 0)}</td>
+                <td className={cn(CELL, (data?.net ?? 0) >= 0 ? GAIN : LOSS)}>
+                  {money(data?.net ?? 0)}
+                </td>
+                <td className={CELL}>{money(data?.closing ?? 0)}</td>
+              </tr>
+            </tbody>
+          </TableWrap>
+        )}
+      </Panel>
+
+      <p className="text-[11px] text-muted-foreground">
+        Only the accounts Settings names as cash and bank are counted, and a
+        posting that touches neither is left out — raising an invoice is not
+        money in, and receiving payment for it is. In and out are kept apart
+        rather than netted, so a period that took a great deal and paid a great
+        deal does not read as a quiet one. The opening figure is everything
+        posted to those accounts before the period began, which is what makes
+        the balance column a real balance rather than a running total.
+      </p>
+    </div>
+  );
+}
+
+/* ── ageing ───────────────────────────────────────────────────────── */
+
+const AGE_COLUMNS = [
+  { key: "current", label: "Not due" },
+  { key: "d30", label: "1–30" },
+  { key: "d60", label: "31–60" },
+  { key: "d90", label: "61–90" },
+  { key: "older", label: "90+" },
+] as const;
+
+/**
+ * Who owes the firm, or who it owes, split by how late the money is. One
+ * component draws both because a receivable and a payable are the same fact
+ * read in opposite directions — only the party and the wording differ.
+ */
+function AgeingReport({ side }: { side: "receivable" | "payable" }) {
+  const { format: money } = useWorkspaceCurrency();
+  const data = useQuery(api.reports.agedBalances, { side });
+  const rows = data?.rows ?? [];
+  const totals = data?.totals;
+  const owed = side === "receivable";
+  const late = (totals?.d30 ?? 0) + (totals?.d60 ?? 0) + (totals?.d90 ?? 0) + (totals?.older ?? 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Tile
+          label={owed ? "Owed to the firm" : "The firm owes"}
+          value={money(totals?.total ?? 0)}
+          tone={owed ? "text-sky-600 dark:text-sky-400" : "text-amber-600 dark:text-amber-400"}
+          hint={`${rows.length} ${owed ? "customers" : "suppliers"}`}
+        />
+        <Tile
+          label="Not yet due"
+          value={money(totals?.current ?? 0)}
+          hint="Still inside its terms"
+        />
+        <Tile
+          label="Past due"
+          value={money(late)}
+          tone={late > 0 ? LOSS : GAIN}
+          hint="Everything that has run late"
+        />
+        <Tile
+          label="Over 90 days"
+          value={money(totals?.older ?? 0)}
+          tone={(totals?.older ?? 0) > 0 ? LOSS : "text-muted-foreground"}
+          hint="The oldest quartile"
+        />
+      </div>
+
+      {rows.length === 0 ? (
+        <Proof ok>
+          Nothing is outstanding {owed ? "to the firm" : "from the firm"} —
+          every {owed ? "invoice" : "bill"} on the register is settled.
+        </Proof>
+      ) : (
+        <Proof ok={late === 0}>
+          {late === 0 ? (
+            <>
+              {money(totals?.total ?? 0)} is outstanding across {rows.length}{" "}
+              {owed ? "customers" : "suppliers"}, and none of it is past its
+              due date.
+            </>
+          ) : (
+            <>
+              {money(late)} of the {money(totals?.total ?? 0)} outstanding is
+              past due, {money(totals?.older ?? 0)} of it by more than 90 days.
+            </>
+          )}
+        </Proof>
+      )}
+
+      <Panel
+        title={owed ? "Receivables ageing" : "Payables ageing"}
+        count={`${rows.length} ${owed ? "customers" : "suppliers"} · as at ${AS_AT_LABEL}`}
+        actions={
+          <CsvButton
+            what={owed ? "receivables ageing" : "payables ageing"}
+            onClick={() =>
+              downloadCsv(
+                owed ? "receivables-ageing.csv" : "payables-ageing.csv",
+                [
+                  [
+                    owed ? "Customer" : "Supplier",
+                    "Documents",
+                    "Not due",
+                    "1-30",
+                    "31-60",
+                    "61-90",
+                    "90+",
+                    "Total",
+                    "Oldest (days)",
+                  ],
+                  ...rows.map((r) => [
+                    r.label,
+                    r.items,
+                    num(r.current),
+                    num(r.d30),
+                    num(r.d60),
+                    num(r.d90),
+                    num(r.older),
+                    num(r.total),
+                    r.oldestDays,
+                  ]),
+                ],
+              )
+            }
+          />
+        }
+      >
+        {rows.length === 0 ? (
+          <Empty>
+            Nothing outstanding — every {owed ? "invoice" : "bill"} is settled.
+          </Empty>
+        ) : (
+          <TableWrap>
+            <thead>
+              <tr className={HEAD}>
+                <th className="px-3 py-2">{owed ? "Customer" : "Supplier"}</th>
+                {AGE_COLUMNS.map((c) => (
+                  <th key={c.key} className={TH_R}>
+                    {c.label}
+                  </th>
+                ))}
+                <th className={TH_R}>Total</th>
+                <th className={TH_R}>Oldest</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className={ROW}>
+                  <td className={CELL_LEFT}>
+                    <span className="font-medium">{r.label}</span>
+                    <span className="ml-2 text-[11px] text-muted-foreground">
+                      {r.items} {r.items === 1 ? "document" : "documents"}
+                    </span>
+                  </td>
+                  {AGE_COLUMNS.map((c) => (
+                    <td
+                      key={c.key}
+                      className={cn(
+                        CELL,
+                        c.key !== "current" && r[c.key] > 0 && LOSS,
+                      )}
+                    >
+                      {r[c.key] === 0 ? "—" : money(r[c.key])}
+                    </td>
+                  ))}
+                  <td className={cn(CELL, "font-medium")}>{money(r.total)}</td>
+                  <td className={cn(CELL, r.oldestDays > 30 && LOSS)}>
+                    {r.oldestDays <= 0 ? "—" : `${r.oldestDays}d`}
+                  </td>
+                </tr>
+              ))}
+              {totals && (
+                <tr className={TOTAL}>
+                  <td className={CELL_LEFT}>Totals</td>
+                  {AGE_COLUMNS.map((c) => (
+                    <td key={c.key} className={CELL}>
+                      {money(totals[c.key])}
+                    </td>
+                  ))}
+                  <td className={CELL}>{money(totals.total)}</td>
+                  <td className={CELL} />
+                </tr>
+              )}
+            </tbody>
+          </TableWrap>
+        )}
+      </Panel>
+
+      <p className="text-[11px] text-muted-foreground">
+        Ageing is a state rather than a period, so this report ignores the
+        period control: an invoice that went unpaid last year is still unpaid
+        today, and hiding it behind a date filter is how a bad debt goes
+        unnoticed. Each document is aged against its due date, or against the
+        day it was raised when no terms were agreed, and a document appears
+        only while something is still owed on it.
+      </p>
+    </div>
+  );
+}
+
+/* ── tax ──────────────────────────────────────────────────────────── */
+
+function TaxSummaryReport({ range }: { range: Range }) {
+  const { format: money } = useWorkspaceCurrency();
+  const data = useQuery(api.reports.taxSummary, {
+    from: range.from,
+    to: range.to,
+  });
+  const rows = data?.rows ?? [];
+  const net = data?.net ?? 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Tile
+          label="Tax charged on sales"
+          value={money(data?.outputTax ?? 0)}
+          tone="text-sky-600 dark:text-sky-400"
+          hint={`${data?.salesCount ?? 0} invoices · ${range.label}`}
+        />
+        <Tile
+          label="Tax paid on purchases"
+          value={money(data?.inputTax ?? 0)}
+          tone="text-amber-600 dark:text-amber-400"
+          hint={`${data?.purchaseCount ?? 0} bills · ${range.label}`}
+        />
+        <Tile
+          label={net >= 0 ? "Net payable" : "Net recoverable"}
+          value={money(Math.abs(net))}
+          tone={net >= 0 ? LOSS : GAIN}
+          hint={net >= 0 ? "Owed on this period" : "A credit coming back"}
+        />
+        <Tile
+          label="Periods with activity"
+          value={String(rows.length)}
+          hint="Bucketed like the sales timeline"
+        />
+      </div>
+
+      <Proof ok={rows.length > 0}>
+        {rows.length === 0 ? (
+          <>
+            No tax was charged or paid between {dayLabel(range.from)} and{" "}
+            {dayLabel(range.to)}.
+          </>
+        ) : net >= 0 ? (
+          <>
+            Tax charged on sales came to {money(data?.outputTax ?? 0)} against{" "}
+            {money(data?.inputTax ?? 0)} paid on purchases, leaving{" "}
+            {money(net)} to account for.
+          </>
+        ) : (
+          <>
+            Tax paid on purchases came to {money(data?.inputTax ?? 0)} against{" "}
+            {money(data?.outputTax ?? 0)} charged on sales, leaving{" "}
+            {money(Math.abs(net))} recoverable.
+          </>
+        )}
+      </Proof>
+
+      <Panel
+        title="Tax summary"
+        count={`${rows.length} periods · ${range.label}`}
+        actions={
+          <CsvButton
+            what="tax summary"
+            onClick={() =>
+              downloadCsv("tax-summary.csv", [
+                ["Period", "From", "Output tax", "Input tax", "Net"],
+                ...rows.map((r) => [
+                  r.label,
+                  toInput(r.from),
+                  num(r.output),
+                  num(r.input),
+                  num(r.net),
+                ]),
+              ])
+            }
+          />
+        }
+      >
+        {rows.length === 0 ? (
+          <Empty>No tax was charged or paid in this period.</Empty>
+        ) : (
+          <TableWrap>
+            <thead>
+              <tr className={HEAD}>
+                <th className="px-3 py-2">Period</th>
+                <th className={TH_R}>Output tax</th>
+                <th className={TH_R}>Input tax</th>
+                <th className={TH_R}>Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className={ROW}>
+                  <td className={CELL_LEFT}>{r.label}</td>
+                  <td className={cn(CELL, "text-sky-600 dark:text-sky-400")}>
+                    {money(r.output)}
+                  </td>
+                  <td className={cn(CELL, "text-amber-600 dark:text-amber-400")}>
+                    {money(r.input)}
+                  </td>
+                  <td className={cn(CELL, r.net >= 0 ? LOSS : GAIN)}>
+                    {money(r.net)}
+                  </td>
+                </tr>
+              ))}
+              <tr className={TOTAL}>
+                <td className={CELL_LEFT}>Totals</td>
+                <td className={CELL}>{money(data?.outputTax ?? 0)}</td>
+                <td className={CELL}>{money(data?.inputTax ?? 0)}</td>
+                <td className={cn(CELL, net >= 0 ? LOSS : GAIN)}>
+                  {money(net)}
+                </td>
+              </tr>
+            </tbody>
+          </TableWrap>
+        )}
+      </Panel>
+
+      <p className="text-[11px] text-muted-foreground">
+        Every figure here is the tax the documents themselves summed, the same
+        number that was posted to the ledger and printed on the invoice — not a
+        rate re-applied afterwards, which is how a report ends up disagreeing
+        with the paperwork it is meant to explain. A positive net is what the
+        period owes; a negative one is a credit recoverable, shown as its own
+        figure rather than as a bill with a minus in front of it.
+      </p>
+    </div>
+  );
+}
+
+/* ── sales by project ─────────────────────────────────────────────── */
+
+function SalesByProject({ range }: { range: Range }) {
+  const { format: money } = useWorkspaceCurrency();
+  const data = useQuery(api.reports.salesByProject, {
+    from: range.from,
+    to: range.to,
+  });
+  const rows = data?.rows ?? [];
+  const best = rows[0];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Tile
+          label="Sold by project"
+          value={money(data?.total ?? 0)}
+          hint={range.label}
+        />
+        <Tile
+          label="Projects with sales"
+          value={String(rows.filter((r) => r.key !== "—").length)}
+          hint="Standalone products aside"
+        />
+        <Tile
+          label="Largest project"
+          value={best ? money(best.total) : money(0)}
+          tone="text-sky-600 dark:text-sky-400"
+          hint={best ? best.label : "Nothing sold yet"}
+        />
+        <Tile
+          label="Standalone products"
+          value={money(rows.find((r) => r.key === "—")?.total ?? 0)}
+          tone="text-muted-foreground"
+          hint="Not attached to a project"
+        />
+      </div>
+
+      {rows.length === 0 ? (
+        <Proof ok={false}>
+          Nothing was sold between {dayLabel(range.from)} and{" "}
+          {dayLabel(range.to)}.
+        </Proof>
+      ) : (
+        <Proof ok>
+          {rows.length} {rows.length === 1 ? "group" : "groups"} of products
+          account for {money(data?.total ?? 0)} of sales in this period.
+        </Proof>
+      )}
+
+      <Panel
+        title="Sales by project"
+        count={`${rows.length} groups · ${range.label}`}
+        actions={
+          <CsvButton
+            what="sales by project"
+            onClick={() =>
+              downloadCsv("sales-by-project.csv", [
+                ["Project", "Code", "Lines", "Qty", "Line value", "Paid", "Outstanding", "Share %"],
+                ...rows.map((r) => [
+                  r.label,
+                  r.code,
+                  r.invoices,
+                  num(r.qty),
+                  num(r.value),
+                  num(r.paid),
+                  num(r.outstanding),
+                  num(r.share),
+                ]),
+              ])
+            }
+          />
+        }
+      >
+        {rows.length === 0 ? (
+          <Empty>No sales in this period.</Empty>
+        ) : (
+          <TableWrap>
+            <thead>
+              <tr className={HEAD}>
+                <th className="px-3 py-2">Project</th>
+                <th className={TH_R}>Lines</th>
+                <th className={TH_R}>Qty</th>
+                <th className={TH_R}>Value</th>
+                <th className={TH_R}>Paid</th>
+                <th className={TH_R}>Outstanding</th>
+                <th className={cn(TH_R, "w-32")}>Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className={ROW}>
+                  <td className={CELL_LEFT}>
+                    <span className="font-medium">{r.label}</span>
+                    {r.code && (
+                      <span className="ml-2 text-[11px] text-muted-foreground">
+                        {r.code}
+                      </span>
+                    )}
+                  </td>
+                  <td className={CELL}>{r.invoices}</td>
+                  <td className={CELL}>{r.qty}</td>
+                  <td className={CELL}>{money(r.value)}</td>
+                  <td className={cn(CELL, GAIN)}>{money(r.paid)}</td>
+                  <td className={cn(CELL, r.outstanding > 0 && LOSS)}>
+                    {r.outstanding === 0 ? "—" : money(r.outstanding)}
+                  </td>
+                  <td className={CELL}>
+                    <div className="flex items-center gap-2">
+                      <Bar pct={r.share} tone="bg-sky-500" />
+                      <span className="w-10 shrink-0 text-right">
+                        {r.share.toFixed(0)}%
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              <tr className={TOTAL}>
+                <td className={CELL_LEFT}>Totals</td>
+                <td className={CELL} />
+                <td className={CELL} />
+                <td className={CELL}>{money(data?.total ?? 0)}</td>
+                <td className={CELL} />
+                <td className={CELL} />
+                <td className={CELL} />
+              </tr>
+            </tbody>
+          </TableWrap>
+        )}
+      </Panel>
+
+      <p className="text-[11px] text-muted-foreground">
+        A project lives on the product, not on the invoice, so this reading
+        gathers each line under the project its product belongs to — the only
+        way to answer “what did this project earn” without crediting a project
+        with everything on a mixed bill. Products attached to no project are
+        collected together rather than dropped, and paid is apportioned across
+        the lines of a part-paid invoice in proportion to what each line was
+        worth.
+      </p>
+    </div>
+  );
+}
+
+/* ── quotations ───────────────────────────────────────────────────── */
+
+function QuotationConversion({ range }: { range: Range }) {
+  const { format: money } = useWorkspaceCurrency();
+  const data = useQuery(api.reports.quotationConversion, {
+    from: range.from,
+    to: range.to,
+  });
+  const rows = data?.rows ?? [];
+  const rate = data?.rate ?? 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Tile
+          label="Quoted"
+          value={money(data?.quoted ?? 0)}
+          hint={`${rows.length} quotes · ${range.label}`}
+        />
+        <Tile
+          label="Won"
+          value={money(data?.wonValue ?? 0)}
+          tone="text-emerald-600 dark:text-emerald-400"
+          hint={`${data?.won ?? 0} became invoices`}
+        />
+        <Tile
+          label="Conversion"
+          value={`${rate.toFixed(0)}%`}
+          tone={rate >= 50 ? GAIN : rate > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}
+          hint="By number of quotes"
+        />
+        <Tile
+          label="Lapsed"
+          value={String(data?.expired ?? 0)}
+          tone={(data?.expired ?? 0) > 0 ? LOSS : "text-muted-foreground"}
+          hint="Past their valid-until date"
+        />
+      </div>
+
+      {rows.length === 0 ? (
+        <Proof ok={false}>
+          No quotations were raised between {dayLabel(range.from)} and{" "}
+          {dayLabel(range.to)}.
+        </Proof>
+      ) : (
+        <Proof ok={rate >= 50}>
+          {data?.won ?? 0} of {rows.length} quotes became invoices, worth{" "}
+          {money(data?.wonValue ?? 0)} of the {money(data?.quoted ?? 0)} quoted.
+          {rate < 50 &&
+            ` ${money(data?.lostValue ?? 0)} of the offer did not turn into a sale.`}
+        </Proof>
+      )}
+
+      <Panel
+        title="Quotations"
+        count={`${rows.length} quotes · ${range.label}`}
+        actions={
+          <CsvButton
+            what="quotations"
+            onClick={() =>
+              downloadCsv("quotations.csv", [
+                ["Number", "Date", "Customer", "Value", "Status", "Converted", "Invoiced on"],
+                ...rows.map((r) => [
+                  r.number,
+                  toInput(r.at),
+                  r.party,
+                  num(r.total),
+                  r.status,
+                  r.converted ? "yes" : "no",
+                  r.convertedAt ? toInput(r.convertedAt) : "",
+                ]),
+              ])
+            }
+          />
+        }
+      >
+        {rows.length === 0 ? (
+          <Empty>No quotations in this period.</Empty>
+        ) : (
+          <TableWrap>
+            <thead>
+              <tr className={HEAD}>
+                <th className="px-3 py-2">Quote</th>
+                <th className="px-3 py-2">Customer</th>
+                <th className="px-3 py-2">Status</th>
+                <th className={TH_R}>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r._id} className={ROW}>
+                  <td className={CELL_LEFT}>
+                    <span className="font-medium">{r.number}</span>
+                    <span className="ml-2 text-[11px] text-muted-foreground">
+                      {dayLabel(r.at)}
+                    </span>
+                  </td>
+                  <td className={CELL_LEFT}>{r.party}</td>
+                  <td className={CELL_LEFT}>
+                    {r.converted ? (
+                      <span className={cn("font-medium", GAIN)}>
+                        Invoiced
+                        {r.convertedAt ? ` ${dayLabel(r.convertedAt)}` : ""}
+                      </span>
+                    ) : r.expired ? (
+                      <span className={LOSS}>Lapsed</span>
+                    ) : (
+                      <span className="text-muted-foreground capitalize">
+                        {r.status}
+                      </span>
+                    )}
+                  </td>
+                  <td className={CELL}>{money(r.total)}</td>
+                </tr>
+              ))}
+              <tr className={TOTAL}>
+                <td className={CELL_LEFT}>Totals</td>
+                <td className={CELL} />
+                <td className={CELL} />
+                <td className={CELL}>{money(data?.quoted ?? 0)}</td>
+              </tr>
+            </tbody>
+          </TableWrap>
+        )}
+      </Panel>
+
+      <p className="text-[11px] text-muted-foreground">
+        A quote counts as won only when the sales bill it became is on the
+        record — that link is written when the quote is converted, rather than
+        guessed here by matching names and totals, which is how a report
+        invents a sale nobody made. Lapse is read against today's date, so a
+        quote that ran out after the period still shows as lapsed now.
+      </p>
+    </div>
+  );
+}
+
+/* ── purchases by category ────────────────────────────────────────── */
+
+function PurchasesByCategory({ range }: { range: Range }) {
+  const { format: money } = useWorkspaceCurrency();
+  const data = useQuery(api.reports.purchasesByCategory, {
+    from: range.from,
+    to: range.to,
+  });
+  const rows = data?.rows ?? [];
+  const top = rows[0];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Tile
+          label="Spent"
+          value={money(data?.total ?? 0)}
+          tone="text-amber-600 dark:text-amber-400"
+          hint={`${rows.length} categories · ${range.label}`}
+        />
+        <Tile label="Tax on it" value={money(data?.tax ?? 0)} hint="As billed" />
+        <Tile
+          label="Biggest category"
+          value={top ? money(top.value) : money(0)}
+          hint={top ? top.label : "Nothing bought yet"}
+        />
+        <Tile
+          label="Uncategorised"
+          value={money(rows.find((r) => r.key === "Uncategorised")?.value ?? 0)}
+          tone="text-muted-foreground"
+          hint="Materials with no category set"
+        />
+      </div>
+
+      {rows.length === 0 ? (
+        <Proof ok={false}>
+          Nothing was bought between {dayLabel(range.from)} and{" "}
+          {dayLabel(range.to)}.
+        </Proof>
+      ) : (
+        <Proof ok>
+          {rows.length} {rows.length === 1 ? "category" : "categories"} account
+          for {money(data?.total ?? 0)} of purchases in this period.
+        </Proof>
+      )}
+
+      <Panel
+        title="Purchases by category"
+        count={`${rows.length} categories · ${range.label}`}
+        actions={
+          <CsvButton
+            what="purchases by category"
+            onClick={() =>
+              downloadCsv("purchases-by-category.csv", [
+                ["Category", "Lines", "Qty", "Value", "Tax", "Share %"],
+                ...rows.map((r) => [
+                  r.label,
+                  r.bills,
+                  num(r.qty),
+                  num(r.value),
+                  num(r.tax),
+                  num(r.share),
+                ]),
+              ])
+            }
+          />
+        }
+      >
+        {rows.length === 0 ? (
+          <Empty>No purchases in this period.</Empty>
+        ) : (
+          <TableWrap>
+            <thead>
+              <tr className={HEAD}>
+                <th className="px-3 py-2">Category</th>
+                <th className={TH_R}>Lines</th>
+                <th className={TH_R}>Qty</th>
+                <th className={TH_R}>Value</th>
+                <th className={TH_R}>Tax</th>
+                <th className={cn(TH_R, "w-32")}>Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className={ROW}>
+                  <td className={CELL_LEFT}>
+                    <span className="font-medium">{r.label}</span>
+                  </td>
+                  <td className={CELL}>{r.bills}</td>
+                  <td className={CELL}>{r.qty}</td>
+                  <td className={CELL}>{money(r.value)}</td>
+                  <td className={CELL}>
+                    {r.tax === 0 ? "—" : money(r.tax)}
+                  </td>
+                  <td className={CELL}>
+                    <div className="flex items-center gap-2">
+                      <Bar pct={r.share} tone="bg-amber-500" />
+                      <span className="w-10 shrink-0 text-right">
+                        {r.share.toFixed(0)}%
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              <tr className={TOTAL}>
+                <td className={CELL_LEFT}>Totals</td>
+                <td className={CELL} />
+                <td className={CELL} />
+                <td className={CELL}>{money(data?.total ?? 0)}</td>
+                <td className={CELL}>{money(data?.tax ?? 0)}</td>
+                <td className={CELL} />
+              </tr>
+            </tbody>
+          </TableWrap>
+        )}
+      </Panel>
+
+      <p className="text-[11px] text-muted-foreground">
+        Purchases are gathered by the category on the material that was bought,
+        not by the material itself, because the question this answers is which
+        part of the business the money went to rather than which single item
+        went up. Anything whose material carries no category is collected under
+        Uncategorised and left visible rather than quietly dropped.
+      </p>
+    </div>
+  );
+}
+
+/* ── low stock ────────────────────────────────────────────────────── */
+
+function LowStockReport() {
+  const { format: money } = useWorkspaceCurrency();
+  const data = useQuery(api.reports.lowStock);
+  const rows = data?.rows ?? [];
+  const materials = rows.filter((r) => r.kind === "material");
+  const products = rows.filter((r) => r.kind === "product");
+  const out = data?.out ?? 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Tile
+          label="Below the line"
+          value={String(rows.length)}
+          tone={rows.length > 0 ? LOSS : GAIN}
+          hint="Materials and products together"
+        />
+        <Tile
+          label="Nothing left"
+          value={String(out)}
+          tone={out > 0 ? LOSS : "text-muted-foreground"}
+          hint="At or under zero on hand"
+        />
+        <Tile
+          label="Raw materials"
+          value={String(materials.length)}
+          tone="text-amber-600 dark:text-amber-400"
+          hint={`${products.length} finished ${products.length === 1 ? "product" : "products"}`}
+        />
+        <Tile
+          label="Cost to restock"
+          value={money(data?.value ?? 0)}
+          hint="Materials at their catalogue rate"
+        />
+      </div>
+
+      {rows.length === 0 ? (
+        <Proof ok>
+          Nothing is at or below its reorder level — every item that carries a
+          level is above it.
+        </Proof>
+      ) : (
+        <Proof ok={false}>
+          {rows.length} {rows.length === 1 ? "item is" : "items are"} at or
+          below the level worth acting on, {out} of them with nothing on hand at
+          all. Restocking the materials would cost about{" "}
+          {money(data?.value ?? 0)}.
+        </Proof>
+      )}
+
+      <Panel
+        title="Low stock"
+        count={`${rows.length} items · as at ${AS_AT_LABEL}`}
+        actions={
+          <CsvButton
+            what="low stock"
+            onClick={() =>
+              downloadCsv("low-stock.csv", [
+                ["Kind", "Code", "Name", "Unit", "On hand", "Min", "Reorder", "Shortfall", "Rate", "Value"],
+                ...rows.map((r) => [
+                  r.kind,
+                  r.code,
+                  r.name,
+                  r.unit,
+                  num(r.stock),
+                  num(r.minStock),
+                  num(r.reorderLevel),
+                  num(r.shortfall),
+                  num(r.rate),
+                  num(r.value),
+                ]),
+              ])
+            }
+          />
+        }
+      >
+        {rows.length === 0 ? (
+          <Empty>Nothing is short. Every stocked item is above its level.</Empty>
+        ) : (
+          <TableWrap>
+            <thead>
+              <tr className={HEAD}>
+                <th className="px-3 py-2">Item</th>
+                <th className="px-3 py-2">Kind</th>
+                <th className={TH_R}>On hand</th>
+                <th className={TH_R}>Min</th>
+                <th className={TH_R}>Reorder at</th>
+                <th className={TH_R}>Short by</th>
+                <th className={cn(TH_R, "w-32")}>Below</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className={ROW}>
+                  <td className={CELL_LEFT}>
+                    <span className="font-medium">{r.name}</span>
+                    {r.code && (
+                      <span className="ml-2 text-[11px] text-muted-foreground">
+                        {r.code}
+                      </span>
+                    )}
+                  </td>
+                  <td className={CELL_LEFT}>
+                    <span className="text-[11px] text-muted-foreground capitalize">
+                      {r.kind}
+                    </span>
+                  </td>
+                  <td className={cn(CELL, r.stock <= 0 && "font-medium " + LOSS)}>
+                    {r.stock} {r.unit}
+                  </td>
+                  <td className={CELL}>{r.minStock || "—"}</td>
+                  <td className={CELL}>{r.reorderLevel || "—"}</td>
+                  <td className={cn(CELL, LOSS)}>
+                    {r.shortfall} {r.unit}
+                  </td>
+                  <td className={CELL}>
+                    <div className="flex items-center gap-2">
+                      <Bar pct={r.severity} tone="bg-rose-500" />
+                      <span className="w-10 shrink-0 text-right">
+                        {r.severity}%
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </TableWrap>
+        )}
+      </Panel>
+
+      <p className="text-[11px] text-muted-foreground">
+        A level is the floor a thing should not go under: an item is measured
+        against its reorder level when one is set, and against its minimum
+        otherwise. An item with neither is left out of this report rather than
+        guessed at, because a level nobody set is not a shortage. This is a
+        state rather than a period, so it reads the same figures the materials
+        and products lists show, whatever the period control says.
+      </p>
     </div>
   );
 }
