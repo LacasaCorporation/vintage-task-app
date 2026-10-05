@@ -359,17 +359,14 @@ export default function CostingPanel({
   const [customTax, setCustomTax] = useState("-1");
   /** The firm default rate, so an untouched tax box is a choice, not a gap. */
   const defaultTax = useQuery(api.purchases.postingDefaults);
+  /** Managed units of measure — the same master list materials pick from. */
+  const costUnits = useQuery(api.costing.listUnits);
   /**
    * What the new non-material line is: labour, an overhead expense, or a
    * plain custom line. Chosen at the same place the name is typed, so the
    * recipe never mixes a wage into a carton of glue by accident.
    */
   const [customKind, setCustomKind] = useState<CostLineKind>("labour");
-  /**
-   * Typed amount for a labour/expense line. Left blank the rate is used as
-   * entered; once an amount is typed it drives the line and the rate field
-   * shows the derived per-unit figure instead of fighting the user.
-   */
   /** Unit for a cost line — hours, days, trips, boxes. */
   const [customUnit, setCustomUnit] = useState("");
 
@@ -1397,14 +1394,67 @@ export default function CostingPanel({
                 title="How many — hours, days, trips or units"
                 className="h-7 w-14 shrink-0 rounded-lg text-xs"
               />
-              <Input
-                value={customUnit}
-                onChange={(e) => setCustomUnit(e.target.value)}
-                placeholder="Unit"
-                aria-label="Cost line unit"
-                title="Unit this line is measured in — hrs, days, trips…"
-                className="h-7 w-16 shrink-0 rounded-lg text-xs"
-              />
+              {/* unit comes from the managed master list, the same one materials use, so
+              a costing sheet never spells one unit two ways */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Cost line unit"
+                    title={
+                      customUnit
+                        ? `Measured in ${customUnit} — click to change`
+                        : "Pick the unit this line is measured in"
+                    }
+                    className="flex h-7 w-20 shrink-0 items-center justify-between gap-1 rounded-lg border bg-transparent px-2 text-left text-xs hover:bg-accent"
+                  >
+                    <span
+                      className={cn(
+                        "truncate",
+                        customUnit === "" && "text-muted-foreground",
+                      )}
+                    >
+                      {customUnit === "" ? "Unit" : customUnit}
+                    </span>
+                    <ChevronDown className="size-3 shrink-0 opacity-60" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-52">
+                  {(costUnits ?? []).length === 0 ? (
+                    <DropdownMenuItem
+                      disabled
+                      className="text-[11px] text-muted-foreground"
+                    >
+                      No units set up yet — add them under Master data.
+                    </DropdownMenuItem>
+                  ) : (
+                    (costUnits ?? []).map((u) => (
+                      <DropdownMenuItem
+                        key={u._id}
+                        onSelect={() => {
+                          // a blank abbreviation falls back to the full name,
+                          // the same way UnitDetails reads these records
+                          const short = u.abbreviation?.trim();
+                          setCustomUnit(
+                            short !== undefined && short !== "" ? short : u.name,
+                          );
+                        }}
+                        title={u.fullName ?? u.name}
+                      >
+                        {u.abbreviation ?? u.name}
+                      </DropdownMenuItem>
+                    ))
+                  )}
+                  {customUnit !== "" && (
+                    <DropdownMenuItem
+                      onSelect={() => setCustomUnit("")}
+                      className="text-muted-foreground"
+                    >
+                      Clear unit
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Input
                 type="number"
                 min="0"
