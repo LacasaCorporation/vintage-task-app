@@ -173,18 +173,26 @@ export default function PrimaryNav({
             )}
           />
           <span className="text-sm text-foreground/85">Planning</span>
-        </button>          <div className="ml-2 border-l border-border/60 pl-1">
-            <NavRow
-              label="Tasks"
-              Icon={CheckSquare}
-              active={section === "tasks"}
-              onClick={() => onSelectSection("tasks")}
-            />
-            <NavRow
-              label="Notes"
-              Icon={NotebookPen}
-              active={section === "notes"}
-              onClick={() => onSelectSection("notes")}
+        </button>
+        <div className="ml-2 border-l border-border/60 pl-1">
+          <NavRow
+            label="Tasks"
+            Icon={CheckSquare}
+            active={section === "tasks"}
+            onClick={() => onSelectSection("tasks")}
+          />
+          <NavRow
+            label="Notes"
+            Icon={NotebookPen}
+            active={section === "notes"}
+            onClick={() => onSelectSection("notes")}
+          />
+          <NavRow
+            label="Projects"
+            Icon={Folder}
+            active={inCosting && (view?.kind === "projects" || view === null)}
+            n={projectCount}
+            onClick={() => onSelectView({ kind: "projects" })}
           />
         </div>
       </div>
@@ -276,6 +284,7 @@ export default function PrimaryNav({
         </div>
       )}
 
+      {canViewSales && (
         <div>
           <div
             className={cn(
