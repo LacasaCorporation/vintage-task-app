@@ -117,6 +117,7 @@ export default function PrimaryNav({
   // collapsed by default: the two stock lists are a second step, not the
   // place the sidebar starts
   const [inventoryOpen, setInventoryOpen] = useState(false);
+  const [planningOpen, setPlanningOpen] = useState(false);
   // the Accounts drill-down opens on its own whenever you are inside it
   const [accountsExpanded, setAccountsExpanded] = useState(false);
   const inCosting = section === "costing";
@@ -156,18 +157,45 @@ export default function PrimaryNav({
 
   return (
     <div className="flex flex-col gap-0.5">
-      <NavRow
-        label="Tasks"
-        Icon={CheckSquare}
-        active={section === "tasks"}
-        onClick={() => onSelectSection("tasks")}
-      />
-      <NavRow
-        label="Notes"
-        Icon={NotebookPen}
-        active={section === "notes"}
-        onClick={() => onSelectSection("notes")}
-      />
+      <button
+        type="button"
+        onClick={() => setPlanningOpen((v) => !v)}
+        aria-expanded={planningOpen}
+        title={planningOpen ? "Hide planning" : "Show planning"}
+        className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent"
+      >
+        <ChevronDown
+          className={cn(
+            "size-3 shrink-0 text-muted-foreground/60 transition-transform",
+            !planningOpen && "-rotate-90",
+          )}
+        />
+        <span className="text-sm text-foreground/85">Planning</span>
+      </button>
+
+      {planningOpen && (
+        <div className="ml-5 border-l border-border/60 pl-1">
+          <NavRow
+            label="Tasks"
+            Icon={CheckSquare}
+            active={section === "tasks"}
+            onClick={() => onSelectSection("tasks")}
+          />
+          <NavRow
+            label="Notes"
+            Icon={NotebookPen}
+            active={section === "notes"}
+            onClick={() => onSelectSection("notes")}
+          />
+          <NavRow
+            label="Projects"
+            Icon={Folder}
+            active={inCosting && (view?.kind === "projects" || view === null)}
+            n={projectCount}
+            onClick={() => onSelectView({ kind: "projects" })}
+          />
+        </div>
+      )}
 
       <div className="my-2 h-px bg-border/60" />
 
