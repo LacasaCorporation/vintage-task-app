@@ -58,6 +58,43 @@ const ProductForm = lazy(() => import("@/components/ProductForm"));
 const ActivePanel = lazy(() => import("@/components/ActivePanel"));
 
 /** A quiet placeholder for the moment a working area is being fetched. */
+
+/**
+ * A costing line that is not a raw material. Labour and overhead are kept
+ * apart because a recipe quotes them separately from the goods that come out
+ * of stock — and because labour is very often tax-exempt while freight is not.
+ */
+type CostLineKind = "labour" | "expense" | "custom";
+
+const COST_KINDS: {
+  kind: CostLineKind;
+  label: string;
+  hint: string;
+  /** Tailwind classes for the badge in the grid. */
+  badge: string;
+}[] = [
+  {
+    kind: "labour",
+    label: "Labour",
+    hint: "Wages, piecework, overtime — time put into making this",
+    badge: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+  },
+  {
+    kind: "expense",
+    label: "Expense",
+    hint: "Freight, power, rent, consumables — money spent to make this",
+    badge: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  },
+  {
+    kind: "custom",
+    label: "Custom",
+    hint: "Any other cost that is not a raw material",
+    badge: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  },
+];
+
+const costKindMeta = (kind: string | undefined) =>
+  COST_KINDS.find((k) => k.kind === kind) ?? COST_KINDS[2];
 function AreaLoading({ label }: { label: string }) {
   return (
     <p className="py-16 text-center text-sm text-muted-foreground">
@@ -317,6 +354,18 @@ export default function CostingPanel({
   const [customPrice, setCustomPrice] = useState("0");
   /** Tax on the custom line being added. Defaults to the firm rate. */
   const [customTax, setCustomTax] = useState("0");
+  /**
+   * What the new non-material line is: labour, an overhead expense, or a
+   * plain custom line. Chosen at the same place the name is typed, so the
+   * recipe never mixes a wage into a carton of glue by accident.
+   */
+  const [customKind, setCustomKind] = useState<CostLineKind>("labour");
+  /**
+   * Typed amount for a labour/expense line. Left blank the rate is used as
+   * entered; once an amount is typed it drives the line and the rate field
+   * shows the derived per-unit figure instead of fighting the user.
+   */
+  const [customAmount, setCustomAmount] = useState("");
 
   // Draft state — edits stay local until "Save" is pressed.
   const [drafts, setDrafts] = useState<
@@ -404,12 +453,19 @@ export default function CostingPanel({
     [materials, money],
   );
 
-  // Collapse duplicate rows (same description/price/unit) once per sheet open.
+  // Collapse duplicate rows (same description/price/unit/tax/type) once per sheet open.
   useEffect(() => {
     if (!activeFg || items === undefined || items.length < 2) return;
     if (mergedOnceFor.current === activeFg._id) return;
-    const hasDupes = new Set(items.map((i) => `${i.label}::${i.unitPrice}::${i.unit ?? ""}`)).size
-      !== items.length;
+    // kind is part of the identity: a labour line and an expense line that share a
+    // name are two different costs, not a duplicate
+    const hasDupes =
+      new Set(
+        items.map(
+          (i) =>
+            `${i.label}::${i.unitPrice}::${i.unit ?? ""}::${i.taxPct ?? 0}::${i.kind ?? ""}`,
+        ),
+      ).size !== items.length;
     if (!hasDupes) {
       mergedOnceFor.current = activeFg._id;
       return;
@@ -498,6 +554,20 @@ export default function CostingPanel({
     const priced = priceTaxedLines(pricedRows, 0);
     const cost = priced.grand;
     const markup = cost * (markupPct / 100);
+    // labour and overhead are split out of the same total so the recipe can be
+    // read as "materials + labour + expenses" without re-adding the rows
+    const byKind = { material: 0, labour: 0, expense: 0, custom: 0 };
+    pricedRows.forEach((line, i) => {
+      const row = rows[i];
+      if (row === undefined) return;
+      const bucket =
+        row.materialId !== undefined
+          ? "material"
+          : row.kind === "labour" || row.kind === "expense" || row.kind === "custom"
+            ? row.kind
+            : "custom";
+      byKind[bucket] += line.qty * line.unitPrice * (1 + cleanRate(line.taxPct) / 100);
+    });
     return {
       subtotal: priced.subtotal,
       tax: priced.tax,
@@ -505,8 +575,12 @@ export default function CostingPanel({
       markup,
       grand: cost + markup,
       blendedTax: blendedRate(priced.net, priced.tax),
+      materials: byKind.material,
+      labour: byKind.labour,
+      expenses: byKind.expense,
+      other: byKind.custom,
     };
-  }, [pricedRows, markupPct]);
+  }, [pricedRows, markupPct, rows]);
 
   /**
    * What the sheet is trying to tell the user before they save it: a line
@@ -643,6 +717,7 @@ export default function CostingPanel({
     qty: number;
     unitPrice: number;
     taxPct?: number;
+    kind?: string;
   }) => {
     if (!activeFg) return;
     const result = await promptMulti({
@@ -705,8 +780,27 @@ export default function CostingPanel({
       qty: number;
       unitPrice: number;
       taxPct?: number;
+      kind?: string;
     },
   ) => guardProduction("Editing a line", () => void handleEditRow(row));
+
+  /** Reclassify a cost line as labour / expense / custom, straight from its badge. */
+  const setRowKind = async (row: { _id: Id<"costingItems"> }, kind: CostLineKind) => {
+    const run = async () => {
+      try {
+        await updateItem({ id: row._id, kind });
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Couldn't change the cost type.",
+        );
+      }
+    };
+    if (activeFg?.productionStartedAt !== undefined) {
+      setPendingEdit({ label: "Changing the cost type", run });
+      return;
+    }
+    await run();
+  };
 
   const addMaterialRow = async () => {
     if (!activeFg || !addingMaterialId) return;
@@ -733,26 +827,41 @@ export default function CostingPanel({
   const addCustomRow = async () => {
     if (!activeFg) return;
     const qty = Number(customQty);
-    const price = Number(customPrice);
+    // a typed amount wins over the rate: it is what the line actually costs,
+    // and the stored rate is derived from it so the maths downstream is right
+    const typedAmount = customAmount.trim() === "" ? null : Number(customAmount);
+    const usingAmount = typedAmount !== null && Number.isFinite(typedAmount);
+    // a typed amount is the whole line, so it is spread over the quantity to
+    // give a rate; a typed rate is already per-unit and is stored as it stands
+    const rate = usingAmount ? Number(customAmount) : Number(customPrice);
+    const unitPrice = usingAmount && qty > 0 ? rate / qty : rate;
     if (!Number.isFinite(qty) || qty <= 0) {
       toast.error("Quantity must be greater than zero.");
       return;
     }
-    if (!Number.isFinite(price) || price < 0) {
-      toast.error("Price can't be negative.");
+    if (typedAmount !== null && (!Number.isFinite(typedAmount) || typedAmount < 0)) {
+      toast.error("Amount can't be negative.");
+      return;
+    }
+    if (!Number.isFinite(rate) || rate < 0) {
+      toast.error("Rate can't be negative.");
       return;
     }
     try {
       await addFgItem({
         fgId: activeFg._id,
-        label: customLabel.trim() || "Custom line",
+        label: customLabel.trim() || COST_KINDS.find((k) => k.kind === customKind)!.label,
         qty,
-        unitPrice: price,
+        // the sheet stores a rate, never a total, so a line entered by amount
+        // is spread back over its quantity here
+        unitPrice,
         taxPct: Number.isFinite(Number(customTax)) ? Number(customTax) : 0,
+        kind: customKind,
       });
       setCustomLabel("");
       setCustomQty("1");
       setCustomPrice("0");
+      setCustomAmount("");
       setCustomTax("0");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
@@ -771,6 +880,7 @@ export default function CostingPanel({
         `Amount (${currencyCode})`,
         `Tax (${currencyCode})`,
         `Total (${currencyCode})`,
+        "Type",
       ].join(","),
       ...pricedRows.map((l, i) => {
         const r = rows[i];
@@ -785,13 +895,17 @@ export default function CostingPanel({
           amount.toFixed(2),
           tax.toFixed(2),
           (amount + tax).toFixed(2),
+          // a raw material is left blank; labour/expense say what they are
+          r?.materialId === undefined && r?.kind !== undefined
+            ? costKindMeta(r.kind).label
+            : "",
         ].join(",");
       }),
-      `"Sub total",,,,,,,"${totals.subtotal.toFixed(2)}",`,
-      `"Total tax",,,,,,,"${totals.tax.toFixed(2)}",`,
-      `"Total cost",,,,,,,"${totals.cost.toFixed(2)}",`,
-      `"Margin (${markupPct}%)",,,,,,,"${totals.markup.toFixed(2)}",`,
-      `"SALES PRICE",,,,,,,"${totals.grand.toFixed(2)}",`,
+      `"Sub total",,,,,,,,"${totals.subtotal.toFixed(2)}",`,
+      `"Total tax",,,,,,,,"${totals.tax.toFixed(2)}",`,
+      `"Total cost",,,,,,,,"${totals.cost.toFixed(2)}",`,
+      `"Margin (${markupPct}%)",,,,,,,,"${totals.markup.toFixed(2)}",`,
+      `"SALES PRICE",,,,,,,,"${totals.grand.toFixed(2)}",`,
     ];
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -830,6 +944,11 @@ export default function CostingPanel({
           <td>${escapeHtml(r?.label ?? "")}</td>
           <td class="num">${l.qty.toLocaleString()}</td>
           <td class="muted">${escapeHtml(r?.unit ?? "—")}</td>
+          <td class="muted">${
+            r?.materialId === undefined && r?.kind !== undefined
+              ? escapeHtml(costKindMeta(r.kind).label)
+              : ""
+          }</td>
           ${withAmounts ? `<td class="num">${format(l.unitPrice)}</td>
           <td class="num">${cleanRate(l.taxPct)}%</td>
           <td class="num">${format(amount)}</td>
@@ -890,7 +1009,7 @@ export default function CostingPanel({
   </div>
   <table>
     <thead>
-      <tr><th class="num">#</th><th>Description</th><th class="num">Qty</th><th>Unit</th>${withAmounts ? `<th class="num">Unit price</th><th class="num">Tax %</th><th class="num">Amount</th><th class="num">Tax</th><th class="num">Total</th>` : ""}</tr>
+      <tr><th class="num">#</th><th>Description</th><th class="num">Qty</th><th>Unit</th><th>Type</th>${withAmounts ? `<th class="num">Unit price</th><th class="num">Tax %</th><th class="num">Amount</th><th class="num">Tax</th><th class="num">Total</th>` : ""}</tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>
@@ -901,6 +1020,13 @@ export default function CostingPanel({
     <tr><td class="lbl">Total cost</td><td class="val">${money(totals.cost)}</td></tr>
     <tr><td class="lbl">Margin (${markupPct}%)</td><td class="val">+${money(totals.markup)}</td></tr>
     <tr class="grand"><td class="lbl">Sales price</td><td class="val">${money(totals.grand)}</td></tr>
+    ${
+      totals.labour > 0 || totals.expenses > 0 || totals.other > 0
+        ? `<tr><td class="lbl">of which materials</td><td class="val">${money(totals.materials)}</td></tr>
+    <tr><td class="lbl">of which labour</td><td class="val">${money(totals.labour)}</td></tr>
+    <tr><td class="lbl">of which expenses</td><td class="val">${money(totals.expenses)}</td></tr>`
+        : ""
+    }
   </table>` : ""}
   ${activeFg.note ? `<p class="note">${escapeHtml(activeFg.note)}</p>` : ""}
   <script>window.onload = function () { window.print(); };</script>
@@ -1206,14 +1332,47 @@ export default function CostingPanel({
                 title="Add labour, transport, packaging or any other cost"
               >
                 <Plus className="size-3" />
-                Custom
+                Cost
               </span>
+              {/* the kind is chosen right where the name is, so labour never
+                  lands on a sheet as an anonymous custom line */}
+              <div
+                className="flex shrink-0 overflow-hidden rounded-lg border"
+                role="radiogroup"
+                aria-label="Cost type"
+              >
+                {COST_KINDS.map((k, i) => (
+                  <button
+                    key={k.kind}
+                    type="button"
+                    role="radio"
+                    aria-checked={customKind === k.kind}
+                    title={k.hint}
+                    onClick={() => setCustomKind(k.kind)}
+                    className={cn(
+                      "h-7 px-2 text-[11px] font-medium transition-colors",
+                      i > 0 && "border-l",
+                      customKind === k.kind
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-card text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {k.label}
+                  </button>
+                ))}
+              </div>
               <Input
                 value={customLabel}
                 onChange={(e) => setCustomLabel(e.target.value)}
-                placeholder="e.g. Labor, Transport…"
-                aria-label="Custom line label"
-                className="h-7 w-32 rounded-lg text-xs"
+                placeholder={
+                  customKind === "labour"
+                    ? "e.g. Cutting, Stitching…"
+                    : customKind === "expense"
+                      ? "e.g. Freight, Power…"
+                      : "e.g. Packaging…"
+                }
+                aria-label="Cost line name"
+                className="h-7 w-36 rounded-lg text-xs"
               />
               <Input
                 type="number"
@@ -1221,7 +1380,8 @@ export default function CostingPanel({
                 step="any"
                 value={customQty}
                 onChange={(e) => setCustomQty(e.target.value)}
-                aria-label="Custom line quantity"
+                aria-label="Cost line quantity"
+                title="How many — hours, days, trips or units"
                 className="h-7 w-12 rounded-lg text-xs"
               />
               <Input
@@ -1229,9 +1389,25 @@ export default function CostingPanel({
                 min="0"
                 step="any"
                 value={customPrice}
-                onChange={(e) => setCustomPrice(e.target.value)}
-                aria-label="Custom line unit price"
+                onChange={(e) => {
+                  setCustomPrice(e.target.value);
+                  // typing a rate clears any amount so the two never disagree
+                  setCustomAmount("");
+                }}
+                aria-label="Cost line rate"
+                title="Rate per unit of quantity"
                 className="h-7 w-14 rounded-lg text-xs"
+              />
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={customAmount}
+                onChange={(e) => setCustomAmount(e.target.value)}
+                placeholder="Amount"
+                aria-label="Cost line total amount"
+                title="Type a total instead of a rate — the rate is worked out from the quantity"
+                className="h-7 w-16 rounded-lg text-xs"
               />
               <div className="relative">
                 <Input
@@ -1241,8 +1417,8 @@ export default function CostingPanel({
                   step="any"
                   value={customTax}
                   onChange={(e) => setCustomTax(e.target.value)}
-                  aria-label="Custom line tax percent"
-                  title={`Tax on this custom line — the firm default is ${defaultTax?.taxPct ?? 0}%`}
+                  aria-label="Cost line tax percent"
+                  title={`Tax on this line — the firm default is ${defaultTax?.taxPct ?? 0}%`}
                   className="h-7 w-12 rounded-lg pr-4 text-xs tabular-nums"
                 />
                 <Percent
@@ -1256,8 +1432,13 @@ export default function CostingPanel({
                 variant="outline"
                 className="size-7 shrink-0 rounded-lg"
                 disabled={items === undefined}
-                onClick={() => guardProduction("Adding a custom line", () => void addCustomRow())}
-                title="Add this custom line to the sheet"
+                onClick={() =>
+                  guardProduction(
+                    `Adding a ${customKind === "custom" ? "custom" : customKind} line`,
+                    () => void addCustomRow(),
+                  )
+                }
+                title={`Add this ${customKind === "custom" ? "custom" : customKind} line to the sheet`}
               >
                 <Plus className="size-3.5" />
               </Button>
@@ -1342,6 +1523,12 @@ export default function CostingPanel({
                         row.materialId !== undefined
                           ? materials.find((x) => x._id === row.materialId)
                           : undefined;
+                      // labour/expense lines are badged so the recipe reads as
+                      // "materials + labour + overhead" at a glance
+                      const kindMeta =
+                        row.materialId === undefined && row.kind !== undefined
+                          ? costKindMeta(row.kind)
+                          : null;
                       const short =
                         material !== undefined && (material.stock ?? 0) < qty;
                       return (
@@ -1362,6 +1549,48 @@ export default function CostingPanel({
                               <span className="truncate text-xs font-medium">
                                 {row.label}
                               </span>
+                              {kindMeta !== null && canEdit && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        "shrink-0 rounded px-1 py-px text-[9px] font-semibold tracking-wide uppercase transition-opacity hover:opacity-80",
+                                        kindMeta.badge,
+                                      )}
+                                      title={`${kindMeta.hint} — click to change the type`}
+                                      aria-label={`Cost type: ${kindMeta.label}. Change it`}
+                                    >
+                                      {kindMeta.label}
+                                    </button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="start" className="w-56">
+                                    {COST_KINDS.map((k) => (
+                                      <DropdownMenuItem
+                                        key={k.kind}
+                                        onSelect={() => void setRowKind(row, k.kind)}
+                                        className="flex flex-col items-start gap-0.5"
+                                      >
+                                        <span className="font-medium">{k.label}</span>
+                                        <span className="text-[11px] text-muted-foreground">
+                                          {k.hint}
+                                        </span>
+                                      </DropdownMenuItem>
+                                    ))}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
+                              {kindMeta !== null && !canEdit && (
+                                <span
+                                  className={cn(
+                                    "shrink-0 rounded px-1 py-px text-[9px] font-semibold tracking-wide uppercase",
+                                    kindMeta.badge,
+                                  )}
+                                  title={kindMeta.hint}
+                                >
+                                  {kindMeta.label}
+                                </span>
+                              )}
                               {material !== undefined && (
                                 <span
                                   className={cn(
@@ -1470,6 +1699,7 @@ export default function CostingPanel({
                                       ...(row.materialId !== undefined
                                         ? { materialId: row.materialId }
                                         : {}),
+                                      ...(row.kind !== undefined ? { kind: row.kind } : {}),
                                     }).catch(() =>
                                       toast.error("Couldn't duplicate the line."),
                                     ),
@@ -1604,6 +1834,51 @@ export default function CostingPanel({
               />
             </div>
           )}
+
+          {/* the same total, split the way the sheet was entered — materials
+              against labour against overhead, so a costing can be reviewed
+              without picking through the rows */}
+          {rows.length > 0 &&
+            (totals.labour > 0 || totals.expenses > 0 || totals.other > 0) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-card px-3 py-1.5 text-[11px] shadow-sm">
+                <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+                  Cost split
+                </span>
+                <span className="text-muted-foreground">
+                  Materials{" "}
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {money(totals.materials)}
+                  </span>
+                </span>
+                {totals.labour > 0 && (
+                  <span className="text-muted-foreground">
+                    Labour{" "}
+                    <span className="font-semibold text-violet-700 tabular-nums dark:text-violet-300">
+                      {money(totals.labour)}
+                    </span>
+                  </span>
+                )}
+                {totals.expenses > 0 && (
+                  <span className="text-muted-foreground">
+                    Expenses{" "}
+                    <span className="font-semibold text-amber-700 tabular-nums dark:text-amber-300">
+                      {money(totals.expenses)}
+                    </span>
+                  </span>
+                )}
+                {totals.other > 0 && (
+                  <span className="text-muted-foreground">
+                    Other{" "}
+                    <span className="font-semibold text-sky-700 tabular-nums dark:text-sky-300">
+                      {money(totals.other)}
+                    </span>
+                  </span>
+                )}
+                <span className="ml-auto text-muted-foreground/80">
+                  all figures include that line's tax
+                </span>
+              </div>
+            )}
 
           {rows.length > 0 && (
             <div className="mt-1.5 flex items-center justify-end gap-1.5">

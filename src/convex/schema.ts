@@ -1306,6 +1306,15 @@ const schema = defineSchema(
       sheetId: v.optional(v.id("costingSheets")), // legacy sheets
       fgId: v.optional(v.id("finishedGoods")), // lines of an FG product
       materialId: v.optional(v.id("rawMaterials")), // set for raw-material lines
+      /**
+       * What kind of cost this line is. Left off it is a raw material (or a
+       * plain custom line, as every sheet written before this field existed).
+       * Labour and overhead are kept apart because a recipe quotes them
+       * separately from the goods that come out of stock.
+       */
+      kind: v.optional(
+        v.union(v.literal("labour"), v.literal("expense"), v.literal("custom")),
+      ),
       label: v.string(), // material name or custom line label
       qty: v.number(),
       unitPrice: v.number(), // copied from material but editable

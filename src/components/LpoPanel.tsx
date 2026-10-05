@@ -1143,7 +1143,7 @@ export default function LpoPanel({
                                 </Button>
                               </>
                             )}
-                          {canEdit && (
+                          {canEdit && editable && (
                             <button
                               type="button"
                               aria-label={`Edit ${l.number}`}

@@ -2006,8 +2006,12 @@ export const addFgItem = mutation({
     qty: v.number(),
     unitPrice: v.optional(v.number()),
     taxPct: v.optional(v.number()),
+    /** `labour` / `expense` for a cost that is not a raw material. */
+    kind: v.optional(
+      v.union(v.literal("labour"), v.literal("expense"), v.literal("custom")),
+    ),
   },
-  handler: async (ctx, { fgId, materialId, label, qty, unitPrice, taxPct }) => {
+  handler: async (ctx, { fgId, materialId, label, qty, unitPrice, taxPct, kind }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(fgId);
@@ -2059,6 +2063,7 @@ export const addFgItem = mutation({
     return await ctx.db.insert("costingItems", {
       ownerId: userId,
       fgId,
+      kind,
       label: clean.slice(0, MAX_NAME_LENGTH),
       qty,
       unitPrice: unitPrice ?? 0,
@@ -2076,6 +2081,10 @@ export const updateItem = mutation({
     unitPrice: v.optional(v.number()),
     /** Tax on this line alone; 0 stores as 0, so "exempt" stays explicit. */
     taxPct: v.optional(v.number()),
+    /** Reclassify a line as labour / expense / plain custom. */
+    kind: v.optional(
+      v.union(v.literal("labour"), v.literal("expense"), v.literal("custom")),
+    ),
   },
   handler: async (ctx, { id, ...patch }) => {
     const userId = await scopeUserId(ctx);
@@ -2141,7 +2150,7 @@ export const mergeFgDuplicateItems = mutation({
       .collect();
     const groups = new Map<string, typeof items>();
     for (const it of items) {
-      const key = `${it.label}::${it.unitPrice}::${it.unit ?? ""}::${it.taxPct ?? 0}`;
+      const key = `${it.label}::${it.unitPrice}::${it.unit ?? ""}::${it.taxPct ?? 0}::${it.kind ?? ""}`;
       const list = groups.get(key) ?? [];
       list.push(it);
       groups.set(key, list);
