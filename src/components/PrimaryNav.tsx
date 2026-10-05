@@ -4,8 +4,6 @@ import {
   Boxes,
   CheckSquare,
   ChevronDown,
-  CircleDot,
-  CircleSlash,
   FileBarChart,
   Folder,
   Layers,
@@ -91,8 +89,6 @@ export default function PrimaryNav({
   materials,
   purchaseCount,
   projectCount,
-  activeCount,
-  inactiveCount,
   salesCount,
   accountCount,
   onSelectSection,
@@ -109,10 +105,6 @@ export default function PrimaryNav({
   purchaseCount: number;
   /** How many projects exist — the Projects row counts them and nothing else. */
   projectCount: number;
-  /** How many things carry the Active mark, across all four kinds. */
-  activeCount: number;
-  /** How many have had it taken off and are hidden from the lists. */
-  inactiveCount: number;
   salesCount: number;
   accountCount: number;
   onSelectSection: (section: PrimarySection) => void;
@@ -270,26 +262,7 @@ export default function PrimaryNav({
         n={projectCount}
         onClick={() => onSelectView({ kind: "projects" })}
       />
-      <NavRow
-        label="Active"
-        Icon={CircleDot}
-        active={inCosting && view?.kind === "active"}
-        n={activeCount}
-        onClick={() =>
-          onSelectView(
-            // the row is the switch: pressing it while the Active list is open
-            // turns the mark off across the workspace and shows what that hid
-            view?.kind === "active" ? { kind: "inactive" } : { kind: "active" },
-          )
-        }
-      />
-      <NavRow
-        label="Inactive"
-        Icon={CircleSlash}
-        active={inCosting && view?.kind === "inactive"}
-        n={inactiveCount}
-        onClick={() => onSelectView({ kind: "inactive" })}
-      />
+
       {canViewSales && (
         <div>
           <div

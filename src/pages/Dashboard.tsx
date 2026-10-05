@@ -470,14 +470,6 @@ export default function Dashboard() {
   const finishedGoods = useQuery(api.costing.listFinishedGoods);
   const projects = useQuery(api.costing.listProjects);
   const allJobs = useQuery(api.jobs.listJobs);
-  // The badges need only the two totals, so one light query serves them; the
-  // full Active/Inactive lists are read by ActivePanel when it is opened.
-  const activeCounts = useQuery(api.active.activeCounts);
-  /** The one sidebar row that counts every kind carrying the Active mark. */
-  const activeCount = activeCounts?.active ?? 0;
-  /** Its counterpart: what the mark being off has hidden from the lists. */
-  const inactiveCount = activeCounts?.inactive ?? 0;
-  const addFgM = useMutation(api.costing.addFinishedGood);
   const addProjectM = useMutation(api.costing.addProject);
   const updateProjectM = useMutation(api.costing.updateProject);
   const removeProjectM = useMutation(api.costing.removeProject);
@@ -648,42 +640,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleNewFg = async (projectName: string) => {
-    const cleanProject = projectName.trim();
-    if (!cleanProject || cleanProject === "new") {
-      // Opened from the Projects tab: create the project entity itself.
-      await handleNewProject();
-      return;
-    }
-    const name = await prompt({
-      title: `New product under “${cleanProject}”`,
-      label: "Product name",
-      placeholder: "Product",
-      initial: "Product",
-      required: true,
-      confirmLabel: "Create",
-    });
-    if (name === null) return;
-    await createFg(cleanProject, name.trim());
-  };
-
-  const createFg = async (cleanProject: string, cleanName: string) => {
-    if (!cleanProject) {
-      toast.error("Give the project a name.");
-      return;
-    }
-    if (!cleanName) {
-      toast.error("Give the product a name.");
-      return;
-    }
-    try {
-      const id = await addFgM({ projectName: cleanProject, name: cleanName });
-      setCostingView({ kind: "fg", fgId: id });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't create the product.");
-    }
-  };
-
   // ── Shell chrome ────────────────────────────────────────────────────
   const firstName = user?.name?.trim().split(" ")[0] ?? "";
   // Who am I: the provisioned username when there is one, otherwise the
@@ -766,8 +722,6 @@ export default function Dashboard() {
             materials={materials ?? []}
             purchaseCount={purchases?.length ?? 0}
             projectCount={projects?.length ?? 0}
-            activeCount={activeCount}
-            inactiveCount={inactiveCount}
             salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
             accountCount={ledgerAccounts?.length ?? 0}
             onSelectSection={handleSelectSection}
@@ -894,8 +848,6 @@ export default function Dashboard() {
                 materials={materials ?? []}
                 purchaseCount={purchases?.length ?? 0}
                 projectCount={projects?.length ?? 0}
-                activeCount={activeCount}
-                inactiveCount={inactiveCount}
                 salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
                 accountCount={ledgerAccounts?.length ?? 0}
                 onSelectSection={handleSelectSection}
