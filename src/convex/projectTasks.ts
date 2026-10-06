@@ -454,6 +454,8 @@ export const update = mutation({
     id: v.string(),
     name: v.optional(v.string()),
     notes: v.optional(v.string()),
+    startAt: v.optional(v.number()),
+    clearStart: v.optional(v.boolean()),
     dueAt: v.optional(v.number()),
     clearDue: v.optional(v.boolean()),
     priority: v.optional(
@@ -476,6 +478,8 @@ export const update = mutation({
     const { orgId, userId, node } = await requireNode(ctx, args.kind, args.id);
     const rights = await rightsFor(ctx, args.kind, node, orgId, userId);
     const touchesOptions =
+      args.startAt !== undefined ||
+      args.clearStart === true ||
       args.dueAt !== undefined ||
       args.clearDue === true ||
       args.priority !== undefined ||
@@ -513,6 +517,8 @@ export const update = mutation({
       if (args.kind === "product") patch.note = notes || undefined;
       else patch.description = notes || undefined;
     }
+    if (args.clearStart === true) patch.startAt = undefined;
+    else if (args.startAt !== undefined) patch.startAt = args.startAt;
     if (args.clearDue === true) patch.dueAt = undefined;
     else if (args.dueAt !== undefined) patch.dueAt = args.dueAt;
     if (args.clearPriority === true) patch.priority = undefined;

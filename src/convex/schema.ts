@@ -1154,6 +1154,9 @@ const schema = defineSchema(
       // marked active by hand — a working mark of its own, separate from status
       isActive: v.optional(v.boolean()),
       activeAt: v.optional(v.number()),
+      // its own planned start on the timeline; unset means the plan starts
+      // with the job (or with the day the product was created)
+      startAt: v.optional(v.number()),
       // its own due date & priority on the flagged board (defaults copied
       // from the parent job when the product is flagged)
       dueAt: v.optional(v.number()),
@@ -1211,6 +1214,7 @@ const schema = defineSchema(
       code: v.optional(v.string()), // auto code, e.g. JB0001
       description: v.optional(v.string()),
       assignee: v.optional(v.string()), // person responsible
+      startAt: v.optional(v.number()), // planned start timestamp (ms)
       dueAt: v.optional(v.number()), // deadline timestamp (ms)
       status: v.optional(
         v.union(
@@ -1263,6 +1267,7 @@ const schema = defineSchema(
       description: v.optional(v.string()),
       client: v.optional(v.string()), // customer / stakeholder
       assignee: v.optional(v.string()), // person responsible
+      startAt: v.optional(v.number()), // planned start timestamp (ms)
       dueAt: v.optional(v.number()), // deadline timestamp (ms)
       status: v.optional(
         v.union(

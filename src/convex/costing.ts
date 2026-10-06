@@ -950,6 +950,7 @@ export const addProject = mutation({
     description: v.optional(v.string()),
     client: v.optional(v.string()),
     assignee: v.optional(v.string()),
+    startAt: v.optional(v.number()),
     dueAt: v.optional(v.number()),
     status: v.optional(v.string()),
     priority: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
@@ -971,6 +972,7 @@ export const addProject = mutation({
       description: opts.description?.trim().slice(0, 2000) || undefined,
       client: opts.client?.trim().slice(0, 120) || undefined,
       assignee: opts.assignee?.trim().slice(0, 120) || undefined,
+      startAt: opts.startAt,
       dueAt: opts.dueAt,
       status:
         status && (PROJECT_STATUSES as readonly string[]).includes(status)
@@ -990,7 +992,12 @@ export const updateProject = mutation({
     description: v.optional(v.string()),
     client: v.optional(v.string()),
     assignee: v.optional(v.string()),
+    startAt: v.optional(v.number()),
     dueAt: v.optional(v.number()),
+    // A date left out is not touched, so unsetting one is said out loud —
+    // the same clearDue flag projectTasks.update already takes.
+    clearStart: v.optional(v.boolean()),
+    clearDue: v.optional(v.boolean()),
     status: v.optional(v.string()),
     priority: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
     budget: v.optional(v.number()),
@@ -1013,13 +1020,16 @@ export const updateProject = mutation({
       clean.client = patch.client.trim().slice(0, 120) || undefined;
     if (patch.assignee !== undefined)
       clean.assignee = patch.assignee.trim().slice(0, 120) || undefined;
-    if (patch.dueAt !== undefined) clean.dueAt = patch.dueAt;
     if (patch.status !== undefined) {
       const status = patch.status.trim() as ProjectStatus;
       clean.status =
         (PROJECT_STATUSES as readonly string[]).includes(status) ? status : undefined;
     }
     if (patch.priority !== undefined) clean.priority = patch.priority;
+    if (patch.startAt !== undefined) clean.startAt = patch.startAt;
+    if (patch.dueAt !== undefined) clean.dueAt = patch.dueAt;
+    if (patch.clearStart === true) clean.startAt = undefined;
+    if (patch.clearDue === true) clean.dueAt = undefined;
     if (patch.budget !== undefined)
       clean.budget = patch.budget >= 0 ? patch.budget : undefined;
     await ctx.db.patch(id, clean);
@@ -1269,7 +1279,12 @@ export const updateFinishedGood = mutation({
     salesTaxPct: v.optional(v.number()),
     minStock: v.optional(v.number()),
     reorderLevel: v.optional(v.number()),
+    startAt: v.optional(v.number()), // planned start (timeline)
     dueAt: v.optional(v.number()), // per-product due date (flagged board)
+    // A date left out is not touched, so unsetting one is said out loud —
+    // the same clearDue flag projectTasks.update already takes.
+    clearStart: v.optional(v.boolean()),
+    clearDue: v.optional(v.boolean()),
     priority: v.optional(
       v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
     ),
@@ -1283,7 +1298,7 @@ export const updateFinishedGood = mutation({
     ),
     clearRecurrence: v.optional(v.boolean()),
   },
-  handler: async (ctx, { id, clearRecurrence, ...patch }) => {
+  handler: async (ctx, { id, clearRecurrence, clearStart, clearDue, ...patch }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(id);
@@ -1354,6 +1369,10 @@ export const updateFinishedGood = mutation({
       patch.currency =
         patch.currency.trim().slice(0, 4) ||
         currencySymbol((await getSettings(ctx, userId))?.currency);
+    // a cleared date is stored as absent, so the product falls back to the
+    // dates its job and project were planned for
+    if (clearStart === true) patch.startAt = undefined;
+    if (clearDue === true) patch.dueAt = undefined;
     if (clearRecurrence === true) patch.recurrence = undefined;
     await ctx.db.patch(id, patch);
     await clearStaleProductFlag(ctx, userId, id, jobIdsOf(fg));

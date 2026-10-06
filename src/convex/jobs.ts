@@ -168,6 +168,7 @@ export const addJob = mutation({
     name: v.string(),
     description: v.optional(v.string()),
     assignee: v.optional(v.string()),
+    startAt: v.optional(v.number()),
     dueAt: v.optional(v.number()),
     status: v.optional(v.string()),
     priority: v.optional(
@@ -190,6 +191,7 @@ export const addJob = mutation({
       code,
       description: opts.description?.trim().slice(0, 2000) || undefined,
       assignee: opts.assignee?.trim().slice(0, 120) || undefined,
+      startAt: opts.startAt,
       dueAt: opts.dueAt,
       status: normalizeStatus(opts.status) ?? "planning",
       priority: opts.priority,
@@ -204,7 +206,12 @@ export const updateJob = mutation({
     name: v.optional(v.string()),
     description: v.optional(v.string()),
     assignee: v.optional(v.string()),
+    startAt: v.optional(v.number()),
     dueAt: v.optional(v.number()),
+    // A date left out is not touched, so unsetting one is said out loud —
+    // the same clearDue flag projectTasks.update already takes.
+    clearStart: v.optional(v.boolean()),
+    clearDue: v.optional(v.boolean()),
     status: v.optional(v.string()),
     priority: v.optional(
       v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
@@ -226,7 +233,10 @@ export const updateJob = mutation({
       clean.description = patch.description.trim().slice(0, 2000) || undefined;
     if (patch.assignee !== undefined)
       clean.assignee = patch.assignee.trim().slice(0, 120) || undefined;
+    if (patch.startAt !== undefined) clean.startAt = patch.startAt;
     if (patch.dueAt !== undefined) clean.dueAt = patch.dueAt;
+    if (patch.clearStart === true) clean.startAt = undefined;
+    if (patch.clearDue === true) clean.dueAt = undefined;
     if (patch.status !== undefined) {
       const next = normalizeStatus(patch.status);
       // "completed" is earned by finishing every product under the job, so

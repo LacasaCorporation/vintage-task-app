@@ -1829,6 +1829,31 @@ export function FlaggedDetail({
               </p>
 
               <div className="mt-4">
+                <DetailRow icon={CalendarDays} label="Start date">
+                  <input
+                    type="datetime-local"
+                    value={
+                      selProject.startAt !== undefined
+                        ? toLocalInput(new Date(selProject.startAt))
+                        : ""
+                    }
+                    onChange={(e) =>
+                      void patchProject({
+                        startAt: e.target.value
+                          ? new Date(e.target.value).getTime()
+                          : undefined,
+                        clearStart: e.target.value === "",
+                      })
+                    }
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {selProject.startAt !== undefined
+                      ? "When this project is planned to start"
+                      : "Not set — the Gantt runs it from the day it was created"}
+                  </p>
+                </DetailRow>
+
                 <DetailRow icon={CalendarDays} label="Due date">
                   <input
                     type="datetime-local"
@@ -1842,6 +1867,7 @@ export function FlaggedDetail({
                         dueAt: e.target.value
                           ? new Date(e.target.value).getTime()
                           : undefined,
+                        clearDue: e.target.value === "",
                       })
                     }
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
@@ -2052,11 +2078,29 @@ export function FlaggedDetail({
 
               <div className="mt-4">
                 <DetailRow icon={CalendarDays} label="Start date">
-                  <p className="rounded-lg border bg-card px-2.5 py-1.5 text-sm">
-                    {formatDueLabel(job.flaggedAt ?? job.startedAt ?? job._creationTime)}
-                  </p>
+                  <input
+                    type="datetime-local"
+                    value={
+                      job.startAt !== undefined
+                        ? toLocalInput(new Date(job.startAt))
+                        : ""
+                    }
+                    onChange={(e) =>
+                      void patchJob({
+                        startAt: e.target.value
+                          ? new Date(e.target.value).getTime()
+                          : undefined,
+                        clearStart: e.target.value === "",
+                      })
+                    }
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    Date this job was added to Projects
+                    {job.startAt !== undefined
+                      ? "When this job is planned to start"
+                      : `Not set — the Gantt runs it from ${formatDueLabel(
+                          job.flaggedAt ?? job.startedAt ?? job._creationTime,
+                        )}, when it was added to Projects`}
                   </p>
                 </DetailRow>
 
@@ -2067,6 +2111,7 @@ export function FlaggedDetail({
                     onChange={(e) =>
                       void patchJob({
                         dueAt: e.target.value ? new Date(e.target.value).getTime() : undefined,
+                        clearDue: e.target.value === "",
                       })
                     }
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
@@ -2153,11 +2198,29 @@ export function FlaggedDetail({
 
               <div className="mt-4">
                 <DetailRow icon={CalendarDays} label="Start date">
-                  <p className="rounded-lg border bg-card px-2.5 py-1.5 text-sm">
-                    {formatDueLabel(fg.flaggedAt ?? fg._creationTime)}
-                  </p>
+                  <input
+                    type="datetime-local"
+                    value={
+                      fg.startAt !== undefined
+                        ? toLocalInput(new Date(fg.startAt))
+                        : ""
+                    }
+                    onChange={(e) =>
+                      void patchFg({
+                        startAt: e.target.value
+                          ? new Date(e.target.value).getTime()
+                          : undefined,
+                        clearStart: e.target.value === "",
+                      })
+                    }
+                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+                  />
                   <p className="mt-1 text-[11px] text-muted-foreground">
-                    Date this product was added to Projects
+                    {fg.startAt !== undefined
+                      ? "When this product is planned to start"
+                      : `Not set — the Gantt runs it from ${formatDueLabel(
+                          fg.flaggedAt ?? fg._creationTime,
+                        )}, when it was added to Projects`}
                   </p>
                 </DetailRow>
 
@@ -2168,6 +2231,7 @@ export function FlaggedDetail({
                     onChange={(e) =>
                       void patchFg({
                         dueAt: e.target.value ? new Date(e.target.value).getTime() : undefined,
+                        clearDue: e.target.value === "",
                       })
                     }
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"

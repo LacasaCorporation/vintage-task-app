@@ -16,6 +16,7 @@ import {
   Folder,
   GripVertical,
   MoveHorizontal,
+  Package,
   SquareKanban,
   TriangleAlert,
 } from "lucide-react";
@@ -81,6 +82,7 @@ export const VIEWS_BY_FILTER: Record<string, { view: WorkspaceView; label: strin
     { view: "list", label: "Product list", icon: "list" },
     { view: "board", label: "Board view", icon: "board" },
     { view: "report", label: "Production report", icon: "report" },
+    { view: "gantt", label: "Production timeline", icon: "gantt" },
   ],
 };
 
@@ -1021,14 +1023,42 @@ export function ProjectKanban({
 const DAY_MS = 86_400_000;
 /** Wide enough for a name and its counts; matches the sticky label column. */
 const GANTT_LABEL_W = 244;
-/** Wide enough for the two due chips, which wrap when they need to. */
-const GANTT_DUE_W = 132;
+/**
+ * The two editable date columns along the right edge. Narrow enough that the
+ * chart still gets most of the width on a laptop, wide enough for a date.
+ */
+const GANTT_START_W = 112;
+const GANTT_END_W = 112;
+/** Both date columns together — the chrome the chart itself is not drawn in. */
+const GANTT_DATE_W = GANTT_START_W + GANTT_END_W;
 
 /** Midnight of a day, so a bar never drifts across a daylight-saving shift. */
 function dayStart(ms: number): number {
   const date = new Date(ms);
   date.setHours(0, 0, 0, 0);
   return date.getTime();
+}
+
+/**
+ * A date input's own `YYYY-MM-DD` value for a timestamp, in the reader's
+ * zone — `toISOString` would shift the day across midnight for most of the
+ * world, which is exactly the bug a date-only field has to avoid.
+ */
+function dateInputValue(ms: number): string {
+  const date = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/**
+ * A date input's value back as a timestamp at local midnight. A date-only
+ * string parses as UTC, so the time is spelled out to keep it on the day it
+ * was typed in.
+ */
+function dateInputTime(value: string): number | null {
+  if (value === "") return null;
+  const at = new Date(`${value}T00:00:00`).getTime();
+  return Number.isNaN(at) ? null : at;
 }
 
 function monthStart(ms: number): number {
@@ -1190,14 +1220,22 @@ type GanttRow = {
   key: string;
   projectId?: Id<"projects">;
   jobId?: Id<"projectJobs">;
+  fgId?: Id<"finishedGoods">;
   name: string;
   code?: string;
-  /** 0 for the level the filter is on, 1 for a project's jobs */
-  depth: 0 | 1;
+  /** 0 for the level the filter is on, 1 for its children, 2 for a product */
+  depth: 0 | 1 | 2;
+  /** The day the bar starts: the planned start, or the day it was created. */
   start: number;
+  /** The day the bar ends — the start again when nothing dates the line. */
   end: number;
-  /** the end is the parent project's due date, not the job's own */
-  inherited?: boolean;
+  /** False when neither the line nor its parents carry an end date. */
+  endKnown: boolean;
+  /** The day the line was created; where a cleared start falls back to. */
+  fallbackStart: number;
+  /** The line's own stored dates — undefined means it is inheriting one. */
+  ownStart?: number;
+  ownEnd?: number;
   status: string;
   done: boolean;
   meta?: string;
@@ -1205,9 +1243,13 @@ type GanttRow = {
   progress?: { done: number; total: number };
 };
 
+/** Which part of a bar a drag has hold of. */
+type GanttGrip = "move" | "start" | "end";
+
 /** A bar being dragged along the timeline. */
 type GanttDrag = {
   key: string;
+  grip: GanttGrip;
   startX: number;
   /**
    * Pixels per day in the track that was grabbed, measured on pointerdown: the
@@ -1219,28 +1261,51 @@ type GanttDrag = {
   days: number;
 };
 
-/** A row the timeline cannot draw, listed underneath instead. */
+/**
+ * The dates a drag lands on. The body of a bar carries both dates along; an
+ * edge carries only its own, and neither end can be dragged past the other, so
+ * a line can never be turned inside out.
+ */
+function draggedDates(
+  base: { start: number; end: number },
+  days: number,
+  grip: GanttGrip,
+): { start: number; end: number } {
+  const shift = days * DAY_MS;
+  if (grip === "move")
+    return { start: base.start + shift, end: base.end + shift };
+  if (grip === "start")
+    return { start: Math.min(base.start + shift, base.end), end: base.end };
+  return { start: base.start, end: Math.max(base.end + shift, base.start) };
+}
+
+/**
+ * A write in flight: the dates it sets (null = unset that date) and the dates
+ * to keep drawing until the stored row agrees with them.
+ */
 type GanttPending = {
   key: string;
-  projectId?: Id<"projects">;
-  jobId?: Id<"projectJobs">;
-  name: string;
-  meta?: string;
+  startAt: number | null;
+  dueAt: number | null;
+  shown: { start: number; end: number };
 };
 
 /**
- * Projects or Jobs filter — Gantt view: one bar per project (or job) from the
- * day it was created to the day it is due, with a milestone at the due date.
+ * Projects, Jobs or Products filter — Gantt view: one bar per line of the
+ * project → job → product hierarchy, drawn from the day it is planned to
+ * start to the day it is due, with a milestone at the end.
  *
- * Only a due date can end a bar, so anything still without one is listed below
- * the chart rather than drawn at a made-up width — planning starts by giving it
- * a date. A job with no due date of its own inherits the project's, the same
- * way its due chips already do, and its milestone is drawn hollow to say so.
+ * Either date is the line's own when it has one and otherwise inherited the
+ * way its due chips already are — a job with no dates of its own is planned
+ * against its project, a product against its job — and a line with no start of
+ * its own is drawn from the day it was created. A line nothing dates at all is
+ * still listed, with an empty End column, rather than left off the chart.
  *
- * Rescheduling is done by dragging a bar to the day it should land on (arrow
- * keys do the same a day at a time), which writes the existing `dueAt` through
- * `updateProject` / `updateJob` — a bar only ever moves its end date, because
- * its start is the day the work was created and that cannot be moved.
+ * Rescheduling is a drag: the body of a bar moves the whole line, an edge
+ * moves just that date, and both write `startAt` / `dueAt` through
+ * `updateProject` / `updateJob` / `updateFinishedGood`. The arrow keys do the
+ * same a day at a time, and the two columns at the right set either date
+ * exactly.
  */
 export function ProjectGantt({
   mode,
@@ -1254,7 +1319,7 @@ export function ProjectGantt({
   onSelect,
   canEdit = true,
 }: {
-  mode: "projects" | "jobs";
+  mode: "projects" | "jobs" | "products";
   projects: Doc<"projects">[];
   jobs: JobDoc[];
   fgs: FgDoc[];
@@ -1272,13 +1337,12 @@ export function ProjectGantt({
   );
   const updateProjectM = useMutation(api.costing.updateProject);
   const updateJobM = useMutation(api.jobs.updateJob);
+  const updateFgM = useMutation(api.costing.updateFinishedGood);
   const [drag, setDrag] = useState<GanttDrag | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  // the date a row is going to have, held until the write comes back so a
-  // dragged bar never snaps to its old place while the round trip is in flight
-  const [pendingEnd, setPendingEnd] = useState<{ key: string; end: number } | null>(
-    null,
-  );
+  // the dates a row is being written to, held until the stored row agrees —
+  // so a dragged bar never snaps back mid-round-trip
+  const [pending, setPending] = useState<GanttPending | null>(null);
   // null until the reader picks a scale, so the chart can open on the one that
   // suits the work it is actually showing
   const [zoom, setZoom] = useState<GanttZoom | null>(null);
@@ -1287,20 +1351,87 @@ export function ProjectGantt({
   // overdue rings stay put while the page is open
   const [today] = useState(() => dayStart(Date.now()));
 
-  const { rows, unscheduled } = useMemo(() => {
+  const { rows, undated } = useMemo(() => {
     const charted: GanttRow[] = [];
-    const pending: GanttPending[] = [];
+    let missing = 0;
     const keep = (status: string, done: boolean) =>
       matchesStatusFilter(statusFilter ?? "all", status, done);
     const plural = (count: number, noun: string) =>
       `${count} ${noun}${count === 1 ? "" : "s"}`;
+    const jobOf = (fg: FgDoc) =>
+      jobs.find((job) => job._id === fg.jobId) ??
+      jobs.find((job) => (fg.jobIds ?? []).includes(job._id));
+    const projectOf = (job: JobDoc | undefined, fg?: FgDoc) =>
+      job !== undefined
+        ? projects.find((project) => project._id === job.projectId)
+        : projects.find((project) => project.name === fg?.projectName);
+
+    /**
+     * A product line. Its dates are its own, else its job's, else its project's
+     * — the same order its due chips already resolve them in.
+     */
+    const productRow = (
+      fg: FgDoc,
+      depth: 0 | 1 | 2,
+      job: JobDoc | undefined,
+      project: Doc<"projects"> | undefined,
+      context?: string,
+    ): GanttRow => {
+      const status = fgProjectStatus(fg, projectStatuses);
+      const done = status === PROJECT_STATUS_FINISH;
+      const fallbackStart = fg._creationTime;
+      const start =
+        fg.startAt ?? job?.startAt ?? job?._creationTime ?? fallbackStart;
+      const end = fg.dueAt ?? job?.dueAt ?? project?.dueAt;
+      const batch =
+        fg.qty !== undefined
+          ? `${fg.qty}${fg.unit !== undefined ? ` ${fg.unit}` : ""}`
+          : undefined;
+      const meta = [context, batch]
+        .filter((part) => part !== undefined)
+        .join(" · ");
+      return {
+        key: `f:${fg._id}`,
+        fgId: fg._id,
+        name: fg.name,
+        code: fg.code,
+        depth,
+        start,
+        end: end ?? start,
+        endKnown: end !== undefined,
+        fallbackStart,
+        ownStart: fg.startAt,
+        ownEnd: fg.dueAt,
+        status,
+        done,
+        meta: meta.length > 0 ? meta : undefined,
+      };
+    };
+
+    if (mode === "products") {
+      for (const fg of sortFgs(fgs, sortMode)) {
+        const job = jobOf(fg);
+        const project = projectOf(job, fg);
+        const row = productRow(
+          fg,
+          0,
+          job,
+          project,
+          job?.name ?? project?.name,
+        );
+        if (!keep(row.status, row.done)) continue;
+        if (!row.endKnown) missing += 1;
+        charted.push(row);
+      }
+      return { rows: charted, undated: missing };
+    }
 
     if (mode === "jobs") {
       for (const job of sortJobs(jobs, sortMode)) {
         const status = jobProjectStatus(job, projectStatuses);
         const done = status === PROJECT_STATUS_FINISH;
         if (!keep(status, done)) continue;
-        const project = projects.find((entry) => entry._id === job.projectId);
+        const project = projectOf(job);
         const products = productsOfJob(fgs, job._id);
         const finished = products.filter((product) => product.isCompleted).length;
         const meta = [
@@ -1309,25 +1440,34 @@ export function ProjectGantt({
         ]
           .filter((part) => part !== undefined)
           .join(" · ");
-        if (job.dueAt === undefined) {
-          pending.push({ key: `j:${job._id}`, jobId: job._id, name: job.name, meta });
-          continue;
-        }
+        const fallbackStart = job._creationTime;
+        const end = job.dueAt ?? project?.dueAt;
+        if (end === undefined) missing += 1;
         charted.push({
           key: `j:${job._id}`,
           jobId: job._id,
           name: job.name,
           code: job.code,
           depth: 0,
-          start: job._creationTime,
-          end: job.dueAt,
+          start: job.startAt ?? fallbackStart,
+          end: end ?? job.startAt ?? fallbackStart,
+          endKnown: end !== undefined,
+          fallbackStart,
+          ownStart: job.startAt,
+          ownEnd: job.dueAt,
           status,
           done,
           meta,
           progress: { done: finished, total: products.length },
         });
+        for (const product of sortFgs(products, sortMode)) {
+          const row = productRow(product, 1, job, project);
+          if (!keep(row.status, row.done)) continue;
+          if (!row.endKnown) missing += 1;
+          charted.push(row);
+        }
       }
-      return { rows: charted, unscheduled: pending };
+      return { rows: charted, undated: missing };
     }
 
     for (const project of projects) {
@@ -1344,23 +1484,20 @@ export function ProjectGantt({
       );
       const finished = products.filter((product) => product.isCompleted).length;
       const meta = `${plural(projectJobs.length, "job")} · ${plural(products.length, "product")}`;
-      if (project.dueAt === undefined) {
-        pending.push({
-          key: `p:${project._id}`,
-          projectId: project._id,
-          name: project.name,
-          meta,
-        });
-        continue;
-      }
+      const fallbackStart = project._creationTime;
+      if (project.dueAt === undefined) missing += 1;
       charted.push({
         key: `p:${project._id}`,
         projectId: project._id,
         name: project.name,
         code: project.code,
         depth: 0,
-        start: project._creationTime,
-        end: project.dueAt,
+        start: project.startAt ?? fallbackStart,
+        end: project.dueAt ?? project.startAt ?? fallbackStart,
+        endKnown: project.dueAt !== undefined,
+        fallbackStart,
+        ownStart: project.startAt,
+        ownEnd: project.dueAt,
         status,
         done,
         meta,
@@ -1370,21 +1507,26 @@ export function ProjectGantt({
         const jobStatus = jobProjectStatus(job, projectStatuses);
         const jobDone = jobStatus === PROJECT_STATUS_FINISH;
         if (!keep(jobStatus, jobDone)) continue;
-        // a job with no due date of its own is planned against the project's
-        const end = job.dueAt ?? project.dueAt;
+        // a job with no dates of its own is planned against its project
+        const jobFallback = job._creationTime;
+        const jobEnd = job.dueAt ?? project.dueAt;
         const jobProducts = productsOfJob(fgs, job._id);
         const jobFinished = jobProducts.filter(
           (product) => product.isCompleted,
         ).length;
+        if (jobEnd === undefined) missing += 1;
         charted.push({
           key: `j:${job._id}`,
           jobId: job._id,
           name: job.name,
           code: job.code,
           depth: 1,
-          start: job._creationTime,
-          end,
-          inherited: job.dueAt === undefined,
+          start: job.startAt ?? jobFallback,
+          end: jobEnd ?? job.startAt ?? jobFallback,
+          endKnown: jobEnd !== undefined,
+          fallbackStart: jobFallback,
+          ownStart: job.startAt,
+          ownEnd: job.dueAt,
           status: jobStatus,
           done: jobDone,
           meta:
@@ -1393,9 +1535,15 @@ export function ProjectGantt({
               : undefined,
           progress: { done: jobFinished, total: jobProducts.length },
         });
+        for (const product of sortFgs(jobProducts, sortMode)) {
+          const row = productRow(product, 2, job, project);
+          if (!keep(row.status, row.done)) continue;
+          if (!row.endKnown) missing += 1;
+          charted.push(row);
+        }
       }
     }
-    return { rows: charted, unscheduled: pending };
+    return { rows: charted, undated: missing };
   }, [mode, projects, jobs, fgs, projectStatuses, statusFilter, sortMode]);
 
   // the days the chart has to cover, before any scale is chosen: everything on
@@ -1466,18 +1614,20 @@ export function ProjectGantt({
 
   /**
    * Put today in the middle of the viewport, whatever the scale. The track is
-   * everything between the frozen name column and the due column.
+   * everything between the frozen name column and the date columns.
    */
   const scrollToToday = () => {
     const el = scrollerRef.current;
     if (el === null) return;
-    const track = el.scrollWidth - GANTT_LABEL_W - GANTT_DUE_W;
+    const track = el.scrollWidth - GANTT_LABEL_W - GANTT_DATE_W;
     const at = (timeline.pct(today) / 100) * track;
     // the browser clamps the far end for us
     el.scrollLeft = Math.max(at + GANTT_LABEL_W - el.clientWidth / 2, 0);
   };
 
-  const late = rows.filter((row) => !row.done && row.end < today).length;
+  const late = rows.filter(
+    (row) => !row.done && row.endKnown && row.end < today,
+  ).length;
   // below ~2px a day a stripe is noise, so the shading is left off
   const weekend =
     timeline.pxPerDay >= 2
@@ -1485,36 +1635,65 @@ export function ProjectGantt({
       : null;
 
   /**
-   * The date a row has been dragged to, while that is still worth showing.
+   * The dates a row is drawn with while a write is in flight.
    *
-   * Once the write lands the stored date and the server's are the same, so the
-   * override stops applying on its own — there is nothing to clean up and no
-   * second render to schedule, and a bar can never be left sitting on a date
+   * The override expires on its own: as soon as the stored row carries exactly
+   * what was written it stops applying, so there is nothing to clean up and no
+   * second render to schedule — and a bar can never be left sitting on dates
    * the server refused.
    */
-  const overrideFor = (row: GanttRow): number | null => {
-    if (pendingEnd === null || pendingEnd.key !== row.key) return null;
-    return row.end === pendingEnd.end ? null : pendingEnd.end;
+  const overrideFor = (row: GanttRow): { start: number; end: number } | null => {
+    if (pending === null || pending.key !== row.key) return null;
+    const stored =
+      (row.ownStart ?? null) === pending.startAt &&
+      (row.ownEnd ?? null) === pending.dueAt;
+    return stored ? null : pending.shown;
   };
 
+  /** The dates a line is drawn with right now, whatever is in flight. */
+  const datesOf = (row: GanttRow) =>
+    overrideFor(row) ?? { start: dayStart(row.start), end: dayStart(row.end) };
+
   /**
-   * Move a line by whole days and write it back. Each press of an arrow key
-   * counts from the date already on screen rather than the stored one, so a
-   * run of them adds up instead of each one landing on the same day.
+   * Write a line's dates to whichever record owns them, holding the written
+   * dates on screen until the stored row agrees. A date that is not named is
+   * left alone; naming it as a clear removes it.
    */
-  const reschedule = async (row: GanttRow, days: number) => {
-    const base = overrideFor(row) ?? dayStart(row.end);
-    // a bar can never end before the day the work itself was created
-    const end = Math.max(base + days * DAY_MS, dayStart(row.start));
-    if (end === base) return;
-    setPendingEnd({ key: row.key, end });
+  const apply = async (
+    row: GanttRow,
+    next: {
+      startAt?: number;
+      dueAt?: number;
+      clearStart?: boolean;
+      clearDue?: boolean;
+    },
+  ) => {
+    const current = datesOf(row);
+    setPending({
+      key: row.key,
+      startAt:
+        next.clearStart === true ? null : (next.startAt ?? row.ownStart ?? null),
+      dueAt: next.clearDue === true ? null : (next.dueAt ?? row.ownEnd ?? null),
+      shown: {
+        start:
+          next.clearStart === true
+            ? dayStart(row.fallbackStart)
+            : dayStart(next.startAt ?? current.start),
+        end:
+          next.clearDue === true
+            ? current.end
+            : dayStart(next.dueAt ?? current.end),
+      },
+    });
     setBusyKey(row.key);
     try {
-      if (row.jobId !== undefined) await updateJobM({ id: row.jobId, dueAt: end });
+      if (row.fgId !== undefined) await updateFgM({ id: row.fgId, ...next });
+      else if (row.jobId !== undefined)
+        await updateJobM({ id: row.jobId, ...next });
       else if (row.projectId !== undefined)
-        await updateProjectM({ id: row.projectId, dueAt: end });
+        await updateProjectM({ id: row.projectId, ...next });
     } catch (error) {
-      setPendingEnd(null);
+      setPending(null);
       toast.error(
         error instanceof Error ? error.message : "Couldn't reschedule that line.",
       );
@@ -1523,15 +1702,65 @@ export function ProjectGantt({
     }
   };
 
-  if (rows.length === 0 && unscheduled.length === 0) {
+  /**
+   * Move a line, or one end of it, by whole days. Each press of an arrow key
+   * counts from the date already on screen rather than the stored one, so a
+   * run of them adds up instead of each one landing on the same day.
+   */
+  const reschedule = async (row: GanttRow, days: number, grip: GanttGrip) => {
+    const { start: from, end: to } = datesOf(row);
+    const shift = days * DAY_MS;
+    // moving takes both dates along; an edge moves only its own, and neither
+    // can be pulled past the other
+    const start =
+      grip === "end" ? from : grip === "move" ? from + shift : Math.min(from + shift, to);
+    const end =
+      grip === "start" ? to : grip === "move" ? to + shift : Math.max(to + shift, from);
+    if (start === from && end === to) return;
+    await apply(row, { startAt: start, dueAt: end });
+  };
+
+  /**
+   * Set one date exactly, from the columns on the right. Emptying an input
+   * removes that date, so the line goes back to the one it inherited.
+   */
+  const setDate = async (
+    row: GanttRow,
+    which: "start" | "end",
+    value: string,
+  ) => {
+    const at = dateInputTime(value);
+    const { start, end } = datesOf(row);
+    if (which === "start") {
+      if (at === null) {
+        // nothing of its own to remove — it already runs off its creation day
+        if (row.ownStart === undefined) return;
+        await apply(row, { clearStart: true });
+        return;
+      }
+      // a start after the end pulls the end out with it
+      await apply(row, at > end ? { startAt: at, dueAt: at } : { startAt: at });
+      return;
+    }
+    if (at === null) {
+      if (row.ownEnd === undefined) return;
+      await apply(row, { clearDue: true });
+      return;
+    }
+    await apply(row, at < start ? { startAt: at, dueAt: at } : { dueAt: at });
+  };
+
+  if (rows.length === 0) {
     return (
       <div className="px-6 py-10 text-center">
         <ChartGantt className="mx-auto size-7 text-muted-foreground/40" />
         <p className="mt-2 text-sm font-medium">Nothing to schedule yet</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          {mode === "jobs"
-            ? "Flag a job in the Projects page and it lands on this timeline."
-            : "Flag work under a project and the project lands on this timeline."}
+          {mode === "products"
+            ? "Add a product and it lands on this timeline."
+            : mode === "jobs"
+              ? "Flag a job in the Projects page and it lands on this timeline."
+              : "Flag work under a project and the project lands on this timeline."}
         </p>
       </div>
     );
@@ -1541,8 +1770,7 @@ export function ProjectGantt({
 
   return (
     <div>
-      {rows.length > 0 ? (
-        <>
+      <>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-card p-0.5">
               {GANTT_ZOOMS.map((entry) => (
@@ -1619,9 +1847,9 @@ export function ProjectGantt({
             {canEdit && (
               <span className="ml-auto inline-flex items-center gap-1">
                 <MoveHorizontal className="size-3" />
-                Drag a bar to change its due date
+                Drag a bar to move it, or an edge to change its start or end
                 <span className="text-muted-foreground/60">
-                  · arrow keys move a day
+                  · ← → move a day, ↑ ↓ resize, ⌥ for the start
                 </span>
               </span>
             )}
@@ -1630,7 +1858,7 @@ export function ProjectGantt({
           <div className="overflow-x-auto" ref={scrollerRef}>
             <div
               style={{
-                minWidth: timeline.trackWidth + GANTT_LABEL_W + GANTT_DUE_W,
+                minWidth: timeline.trackWidth + GANTT_LABEL_W + GANTT_DATE_W,
               }}
             >
               {/* month header */}
@@ -1639,7 +1867,7 @@ export function ProjectGantt({
                   className="sticky left-0 z-20 flex shrink-0 items-center border-r border-border/60 bg-card px-3"
                   style={{ width: GANTT_LABEL_W }}
                 >
-                  {mode === "jobs" ? "Job" : "Project"}
+                  {mode === "jobs" ? "Job" : mode === "products" ? "Product" : "Project"}
                 </div>
                 <div className="relative flex-1">
                   {timeline.bands.map((band) => (
@@ -1656,10 +1884,16 @@ export function ProjectGantt({
                   ))}
                 </div>
                 <div
-                  className="flex shrink-0 items-center justify-end border-l border-border/60 bg-card pr-3"
-                  style={{ width: GANTT_DUE_W }}
+                  className="flex shrink-0 items-center border-l border-border/60 bg-card px-2"
+                  style={{ width: GANTT_START_W }}
                 >
-                  Due
+                  Start
+                </div>
+                <div
+                  className="flex shrink-0 items-center border-l border-border/60 bg-card px-2"
+                  style={{ width: GANTT_END_W }}
+                >
+                  End
                 </div>
               </div>
 
@@ -1672,7 +1906,7 @@ export function ProjectGantt({
                     className="pointer-events-none absolute inset-y-0"
                     style={{
                       left: GANTT_LABEL_W,
-                      right: GANTT_DUE_W,
+                      right: GANTT_DATE_W,
                       backgroundImage: weekend,
                     }}
                   />
@@ -1682,31 +1916,49 @@ export function ProjectGantt({
                   const accent = statusAccent(statusIndex, projectStatuses.length);
                   const ink = statusInk(statusIndex, projectStatuses.length);
                   const dragging = drag !== null && drag.key === row.key;
-                  const override = overrideFor(row);
-                  // the day the bar is currently planned for: the server's, or
-                  // the one the reader has just dragged it to
-                  const scheduledEnd = override ?? dayStart(row.end);
-                  const preview = dragging
-                    ? Math.max(
-                        scheduledEnd + drag.days * DAY_MS,
-                        dayStart(row.start),
-                      )
-                    : override;
-                  const end = preview ?? row.end;
-                  const from = timeline.pct(row.start);
+                  const planned = overrideFor(row);
+                  // the dates the line is drawn with: the stored ones, or the
+                  // ones being dragged or just written
+                  const base = planned ?? {
+                    start: dayStart(row.start),
+                    end: dayStart(row.end),
+                  };
+                  const dragged = dragging
+                    ? draggedDates(base, drag.days, drag.grip)
+                    : base;
+                  const start = dragged.start;
+                  const end = dragged.end;
+                  /** False only while nothing at all dates this line. */
+                  const hasEnd = row.endKnown || planned !== null;
+                  const from = timeline.pct(start);
                   const to = timeline.pct(end);
-                  const overdue = !row.done && end < today;
-                  // how long the work has been given: creation → due date
-                  const durationDays = Math.max(1, Math.round((end - row.start) / DAY_MS));
+                  const overdue = hasEnd && !row.done && end < today;
+                  // how long the line has been given: its start to its end
+                  const durationDays = Math.max(1, Math.round((end - start) / DAY_MS));
+                  const startPlanned = row.ownStart !== undefined;
+                  const endPlanned = row.ownEnd !== undefined;
                   const doneLabel =
                     row.progress !== undefined && row.progress.total > 0
                       ? `, ${row.progress.done}/${row.progress.total} products done`
                       : "";
+                  const datesLabel = hasEnd
+                    ? `${new Date(start).toLocaleDateString()} to ${new Date(end).toLocaleDateString()}`
+                    : "no end date yet";
                   const selected =
-                    row.jobId !== undefined
-                      ? selection?.kind === "job" && selection.id === row.jobId
-                      : selection?.kind === "project" &&
-                        selection.id === row.projectId;
+                    row.fgId !== undefined
+                      ? selection?.kind === "fg" && selection.id === row.fgId
+                      : row.jobId !== undefined
+                        ? selection?.kind === "job" && selection.id === row.jobId
+                        : selection?.kind === "project" &&
+                          selection.id === row.projectId;
+                  const openPanel = () => {
+                    if (row.fgId !== undefined)
+                      onSelect?.({ kind: "fg", id: row.fgId });
+                    else if (row.jobId !== undefined)
+                      onSelect?.({ kind: "job", id: row.jobId });
+                    else if (row.projectId !== undefined)
+                      onSelect?.({ kind: "project", id: row.projectId });
+                  };
                   return (
                     <div
                       key={row.key}
@@ -1720,7 +1972,15 @@ export function ProjectGantt({
                         className="sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-card px-3"
                         style={{ width: GANTT_LABEL_W }}
                       >
-                        {row.depth === 0 ? (
+                        {row.fgId !== undefined ? (
+                          <Package
+                            className={cn(
+                              "size-3 shrink-0 text-violet-500/80",
+                              row.depth === 1 && "ml-3",
+                              row.depth === 2 && "ml-6",
+                            )}
+                          />
+                        ) : row.depth === 0 ? (
                           <Folder
                             className={cn(
                               "size-3.5 shrink-0",
@@ -1733,12 +1993,7 @@ export function ProjectGantt({
                         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                           <button
                             type="button"
-                            onClick={() =>
-                              row.jobId !== undefined
-                                ? onSelect?.({ kind: "job", id: row.jobId })
-                                : row.projectId !== undefined &&
-                                  onSelect?.({ kind: "project", id: row.projectId })
-                            }
+                            onClick={openPanel}
                             title="Open this line's side panel"
                             className={cn(
                               "min-w-0 truncate text-left hover:underline",
@@ -1752,7 +2007,7 @@ export function ProjectGantt({
                           </button>                            <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
                             <span
                               className="shrink-0 tabular-nums"
-                              title={`${durationDays} day${durationDays === 1 ? "" : "s"} from creation to its due date`}
+                              title={`${durationDays} day${durationDays === 1 ? "" : "s"} between its start and its end`}
                             >
                               {durationDays}d
                             </span>
@@ -1767,118 +2022,223 @@ export function ProjectGantt({
                       </div>
 
                       <div className="relative flex-1">
-                        <span
-                          role={canEdit ? "button" : undefined}
-                          tabIndex={canEdit ? 0 : undefined}
-                          aria-label={
-                            canEdit
-                              ? `${row.name} — ${row.status}, due ${new Date(end).toLocaleDateString()}${doneLabel}. Press the left or right arrow key to reschedule it.`
-                              : `${row.name} — ${row.status}, due ${new Date(end).toLocaleDateString()}${doneLabel}`
-                          }
-                          onPointerDown={(event) => {
-                            if (!canEdit || busyKey !== null) return;
-                            const track = event.currentTarget.parentElement;
-                            const width = track?.getBoundingClientRect().width ?? 0;
-                            if (width <= 0 || timeline.days <= 0) return;
-                            // stops the drag from selecting the row's text
-                            event.preventDefault();
-                            event.currentTarget.setPointerCapture(event.pointerId);
-                            setDrag({
-                              key: row.key,
-                              startX: event.clientX,
-                              pxPerDay: width / timeline.days,
-                              days: 0,
-                            });
-                          }}
-                          onPointerMove={(event) => {
-                            if (drag === null || drag.key !== row.key) return;
-                            setDrag({
-                              ...drag,
-                              days: Math.round(
-                                (event.clientX - drag.startX) / drag.pxPerDay,
-                              ),
-                            });
-                          }}
-                          onPointerUp={(event) => {
-                            if (drag === null || drag.key !== row.key) return;
-                            event.currentTarget.releasePointerCapture(event.pointerId);
-                            const { days } = drag;
-                            setDrag(null);
-                            // a click that did not move the bar is left alone
-                            if (days !== 0) void reschedule(row, days);
-                          }}
-                          onPointerCancel={() => setDrag(null)}
-                          onKeyDown={(event) => {
-                            if (!canEdit) return;
-                            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
-                              return;
-                            event.preventDefault();
-                            const step = (event.shiftKey ? 7 : 1) * (event.key === "ArrowRight" ? 1 : -1);
-                            void reschedule(row, step);
-                          }}
-                          className={cn(
-                            "absolute top-1/2 h-2.5 -translate-y-1/2 rounded-full",
-                            accent,
-                            row.done && "opacity-40",
-                            overdue && "ring-1 ring-destructive/60",
-                            canEdit &&
-                              "cursor-grab touch-none active:cursor-grabbing",
-                            dragging && "ring-2 ring-primary/70",
-                            busyKey === row.key && "animate-pulse",
-                          )}
-                          style={{
-                            left: `${from}%`,
-                            width: `${Math.max(to - from, 0.6)}%`,
-                          }}
-                          title={
-                            canEdit
-                              ? `${row.status} — created ${new Date(row.start).toLocaleDateString()}, ${durationDays} day${durationDays === 1 ? "" : "s"}${doneLabel}. Drag to change the due date.`
-                              : `${row.status} — created ${new Date(row.start).toLocaleDateString()}, ${durationDays} day${durationDays === 1 ? "" : "s"}${doneLabel}${overdue ? ", overdue" : ""}`
-                          }
-                        >
-                          {/* how much of the line is already made, as an inlay
-                              on the bar rather than a second bar */}
-                          {row.progress !== undefined && row.progress.total > 0 && (
-                            <span
-                              aria-hidden
-                              className="absolute inset-y-0 left-0 rounded-full bg-black/25"
-                              style={{
-                                width: `${(row.progress.done / row.progress.total) * 100}%`,
-                              }}
-                            />
-                          )}
-                        </span>
-                        <Diamond
-                          className={cn(
-                            "absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 fill-card",
-                            ink,
-                            row.inherited && preview === null && "fill-transparent",
-                          )}
-                          style={{ left: `${to}%` }}
-                        />
-                        {/* the day being dragged to, following the bar */}
+                        {hasEnd ? (
+                          <span
+                            role={canEdit ? "button" : undefined}
+                            tabIndex={canEdit ? 0 : undefined}
+                            aria-label={
+                              canEdit
+                                ? `${row.name} — ${row.status}, ${datesLabel}${doneLabel}. Drag the bar to move the line, or an edge to change one date; the arrow keys move it a day at a time.`
+                                : `${row.name} — ${row.status}, ${datesLabel}${doneLabel}`
+                            }
+                            onPointerDown={(event) => {
+                              if (!canEdit || busyKey !== null) return;
+                              const track = event.currentTarget.parentElement;
+                              const width = track?.getBoundingClientRect().width ?? 0;
+                              if (width <= 0 || timeline.days <= 0) return;
+                              // which part of the bar was grabbed: an edge changes
+                              // one date, the body moves the whole line
+                              const bar = event.currentTarget.getBoundingClientRect();
+                              const edge = Math.min(10, bar.width / 3);
+                              const offset = event.clientX - bar.left;
+                              const grip: GanttGrip =
+                                offset <= edge
+                                  ? "start"
+                                  : offset >= bar.width - edge
+                                    ? "end"
+                                    : "move";
+                              // stops the drag from selecting the row's text
+                              event.preventDefault();
+                              event.currentTarget.setPointerCapture(event.pointerId);
+                              setDrag({
+                                key: row.key,
+                                grip,
+                                startX: event.clientX,
+                                pxPerDay: width / timeline.days,
+                                days: 0,
+                              });
+                            }}
+                            onPointerMove={(event) => {
+                              if (drag === null || drag.key !== row.key) return;
+                              setDrag({
+                                ...drag,
+                                days: Math.round(
+                                  (event.clientX - drag.startX) / drag.pxPerDay,
+                                ),
+                              });
+                            }}
+                            onPointerUp={(event) => {
+                              if (drag === null || drag.key !== row.key) return;
+                              event.currentTarget.releasePointerCapture(event.pointerId);
+                              const { days, grip } = drag;
+                              setDrag(null);
+                              // a click that did not move the bar is left alone
+                              if (days !== 0) void reschedule(row, days, grip);
+                            }}
+                            onPointerCancel={() => setDrag(null)}
+                            onKeyDown={(event) => {
+                              if (!canEdit) return;
+                              const step =
+                                (event.shiftKey ? 7 : 1) *
+                                (event.key === "ArrowDown" ||
+                                event.key === "ArrowLeft"
+                                  ? -1
+                                  : 1);
+                              if (
+                                event.key === "ArrowLeft" ||
+                                event.key === "ArrowRight"
+                              ) {
+                                event.preventDefault();
+                                void reschedule(row, step, "move");
+                                return;
+                              }
+                              if (
+                                event.key === "ArrowUp" ||
+                                event.key === "ArrowDown"
+                              ) {
+                                event.preventDefault();
+                                void reschedule(row, step, event.altKey ? "start" : "end");
+                              }
+                            }}
+                            className={cn(
+                              "group absolute top-1/2 h-2.5 -translate-y-1/2 rounded-full",
+                              accent,
+                              row.done && "opacity-40",
+                              overdue && "ring-1 ring-destructive/60",
+                              canEdit &&
+                                "cursor-grab touch-none active:cursor-grabbing",
+                              dragging && "ring-2 ring-primary/70",
+                              busyKey === row.key && "animate-pulse",
+                            )}
+                            style={{
+                              left: `${from}%`,
+                              width: `${Math.max(to - from, 0.6)}%`,
+                            }}
+                            title={
+                              canEdit
+                                ? `${row.status} — ${datesLabel}, ${durationDays} day${durationDays === 1 ? "" : "s"}${doneLabel}. Drag it to move the line, or an edge to change one date.`
+                                : `${row.status} — ${datesLabel}, ${durationDays} day${durationDays === 1 ? "" : "s"}${doneLabel}${overdue ? ", overdue" : ""}`
+                            }
+                          >
+                            {/* how much of the line is already made, as an inlay
+                                on the bar rather than a second bar */}
+                            {row.progress !== undefined && row.progress.total > 0 && (
+                              <span
+                                aria-hidden
+                                className="absolute inset-y-0 left-0 rounded-full bg-black/25"
+                                style={{
+                                  width: `${(row.progress.done / row.progress.total) * 100}%`,
+                                }}
+                              />
+                            )}
+                            {/* the two ends as handles: what the reader grabs to
+                                change one date without moving the other */}
+                            {canEdit && (
+                              <>
+                                <span
+                                  aria-hidden
+                                  className={cn(
+                                    "absolute inset-y-0 left-0 w-1.5 cursor-ew-resize rounded-l-full bg-black/30 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+                                    dragging && drag.grip === "start" && "opacity-100",
+                                  )}
+                                />
+                                <span
+                                  aria-hidden
+                                  className={cn(
+                                    "absolute inset-y-0 right-0 w-1.5 cursor-ew-resize rounded-r-full bg-black/30 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+                                    dragging && drag.grip === "end" && "opacity-100",
+                                  )}
+                                />
+                              </>
+                            )}
+                          </span>
+                        ) : (
+                          /* nothing dates this line: a stub where it starts, with
+                             the End column waiting to be filled in */
+                          <span
+                            aria-hidden
+                            className="absolute top-1/2 h-2.5 w-4 -translate-y-1/2 rounded-full border border-dashed border-muted-foreground/60"
+                            style={{ left: `${from}%` }}
+                            title="No end date yet — set one in the End column"
+                          />
+                        )}
+                        {hasEnd && (
+                          <Diamond
+                            className={cn(
+                              "absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 fill-card",
+                              ink,
+                              // hollow while the end is still its parent's
+                              !endPlanned && planned === null && "fill-transparent",
+                            )}
+                            style={{ left: `${to}%` }}
+                          />
+                        )}
+                        {/* the date being dragged to, following the end it moves */}
                         {drag !== null && dragging && (
                           <span
                             className={cn(
-                              "pointer-events-none absolute -top-1.5 z-20 -translate-x-1/2 rounded-md border bg-popover px-1.5 py-0.5 text-[10px] font-medium tabular-nums shadow-sm",
+                              "pointer-events-none absolute -top-1.5 z-20 -translate-x-1/2 rounded-md border bg-popover px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap tabular-nums shadow-sm",
                               drag.days === 0 && "text-muted-foreground",
                             )}
-                            style={{ left: `${to}%` }}
+                            style={{
+                              left: `${drag.grip === "start" ? from : to}%`,
+                            }}
                           >
+                            {drag.grip === "start" && "Start · "}
+                            {drag.grip === "end" && "End · "}
                             {drag.days === 0
-                              ? new Date(end).toLocaleDateString()
-                              : `${drag.days > 0 ? "+" : "−"}${Math.abs(drag.days)}d · ${new Date(end).toLocaleDateString()}`}
+                              ? new Date(drag.grip === "start" ? start : end).toLocaleDateString()
+                              : `${drag.days > 0 ? "+" : "−"}${Math.abs(drag.days)}d · ${new Date(drag.grip === "start" ? start : end).toLocaleDateString()}`}
                           </span>
                         )}
                       </div>
 
                       <div
-                        className="flex shrink-0 flex-wrap items-center justify-end gap-1 border-l border-border/60 bg-card pr-3 pl-2"
-                        style={{ width: GANTT_DUE_W }}
+                        className="flex shrink-0 items-center border-l border-border/60 bg-card px-1.5"
+                        style={{ width: GANTT_START_W }}
                       >
-                        <DueChips
-                          dueAt={end}
-                          inherited={row.inherited && preview === null}
+                        <input
+                          type="date"
+                          value={dateInputValue(start)}
+                          disabled={!canEdit || busyKey === row.key}
+                          onChange={(event) =>
+                            void setDate(row, "start", event.target.value)
+                          }
+                          aria-label={`${row.name} start date`}
+                          title={
+                            startPlanned
+                              ? "The day this line is planned to start"
+                              : "Running from the day it was created — set a start to plan it"
+                          }
+                          className={cn(
+                            "w-full rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[11px] tabular-nums outline-none hover:border-border focus:border-primary/40 focus:ring-2 focus:ring-primary/20 disabled:opacity-60",
+                            !startPlanned && "text-muted-foreground/80",
+                          )}
+                        />
+                      </div>
+                      <div
+                        className="flex shrink-0 items-center border-l border-border/60 bg-card px-1.5"
+                        style={{ width: GANTT_END_W }}
+                      >
+                        <input
+                          type="date"
+                          value={hasEnd ? dateInputValue(end) : ""}
+                          disabled={!canEdit || busyKey === row.key}
+                          onChange={(event) =>
+                            void setDate(row, "end", event.target.value)
+                          }
+                          aria-label={`${row.name} end date`}
+                          title={
+                            !hasEnd
+                              ? "No end date yet — set one to put this line on the timeline"
+                              : endPlanned
+                                ? "The day this line is due"
+                                : "Due when its parent is — set a date to plan it on its own"
+                          }
+                          className={cn(
+                            "w-full rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[11px] tabular-nums outline-none hover:border-border focus:border-primary/40 focus:ring-2 focus:ring-primary/20 disabled:opacity-60",
+                            !endPlanned && "text-muted-foreground/80",
+                          )}
                         />
                       </div>
                     </div>
@@ -1890,7 +2250,7 @@ export function ProjectGantt({
                 <div
                   aria-hidden
                   className="pointer-events-none absolute inset-y-0 z-10"
-                  style={{ left: GANTT_LABEL_W, right: GANTT_DUE_W }}
+                  style={{ left: GANTT_LABEL_W, right: GANTT_DATE_W }}
                 >
                   {timeline.bands.map((band) => (
                     <span
@@ -1907,48 +2267,15 @@ export function ProjectGantt({
               </div>
             </div>
           </div>
-        </>
-      ) : (
-        <p className="flex items-center gap-2 border-b border-border/60 px-3 py-3 text-xs text-muted-foreground">
-          <ChartGantt className="size-4 shrink-0 text-muted-foreground/50" />            Nothing here has a due date yet, so there is no bar to draw. Set one and
-          it moves onto the timeline.
-        </p>
-      )}
+      </>
 
-      {unscheduled.length > 0 && (
-        <div className="px-3 py-3">
-          <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-            <CalendarRange className="size-3.5" />
-            No due date
-            <span className="font-normal normal-case">({unscheduled.length})</span>
-          </p>
-          <ul className="mt-2 flex flex-wrap gap-1.5">
-            {unscheduled.map((row) => (
-              <li key={row.key}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    row.jobId !== undefined
-                      ? onSelect?.({ kind: "job", id: row.jobId })
-                      : row.projectId !== undefined &&
-                        onSelect?.({ kind: "project", id: row.projectId })
-                  }
-                  title={`Open “${row.name}” and give it a due date`}
-                  className="inline-flex max-w-72 items-center gap-1.5 rounded-full border border-dashed border-border px-2 py-0.5 text-[11px] transition-colors hover:border-primary/40 hover:bg-primary/10"
-                >
-                  <span className="min-w-0 truncate">{row.name}</span>
-                  {row.meta && (
-                    <span className="shrink-0 text-muted-foreground">{row.meta}</span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Open one and set a due date from its side panel to plan it on the
-            timeline.
-          </p>
-        </div>
+      {undated > 0 && (
+        <p className="flex items-center gap-1.5 border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
+          <CalendarRange className="size-3.5 shrink-0" />
+          {undated} line{undated === 1 ? "" : "s"} still
+          {undated === 1 ? " has" : " have"} no end date — set one in the End
+          column and the bar appears on the timeline.
+        </p>
       )}
     </div>
   );

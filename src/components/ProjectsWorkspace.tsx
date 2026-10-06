@@ -279,6 +279,21 @@ export default function ProjectsWorkspace({
               allJobs={jobs ?? []}
               projectStatuses={projectStatuses}
             />
+          ) : activeView === "gantt" ? (
+            /* one line per flagged product, flat — the same work the list and
+               the board show, read against a calendar instead of a column */
+            <ProjectGantt
+              mode="products"
+              projects={projects ?? []}
+              jobs={jobs ?? []}
+              fgs={fgs ?? []}
+              projectStatuses={projectStatuses}
+              statusFilter={status}
+              sortMode={sortMode}
+              selection={selection}
+              onSelect={onSelect}
+              canEdit={canEdit}
+            />
           ) : activeView === "board" ? (
             <div className="p-3">
               <FlaggedBoard

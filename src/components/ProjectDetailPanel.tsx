@@ -405,6 +405,33 @@ export default function ProjectDetailPanel({
               )}
             </Row>
 
+            {/* start date */}
+            <Row
+              icon={CalendarDays}
+              label="Start date"
+              locked={!mayOptions}
+              onClear={
+                doc.startAt !== undefined ? () => void patch({ clearStart: true }) : undefined
+              }
+            >
+              <input
+                type="datetime-local"
+                value={doc.startAt !== undefined ? toLocalInput(new Date(doc.startAt)) : ""}
+                onChange={(e) =>
+                  void patch({
+                    startAt: e.target.value ? new Date(e.target.value).getTime() : undefined,
+                    clearStart: e.target.value === "",
+                  })
+                }
+                className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+              />
+              {doc.startAt === undefined && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Not set — the Gantt runs it from the day it was created
+                </p>
+              )}
+            </Row>
+
             {/* due date */}
             <Row
               icon={CalendarDays}
