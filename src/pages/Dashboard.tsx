@@ -11,7 +11,7 @@ import HomeDashboard from "@/components/HomeDashboard";
 import PrimaryNav, { type PrimarySection } from "@/components/PrimaryNav";
 import type { CostingView } from "@/components/CostingSidebar";
 import { format } from "date-fns";
-import { LogOut, Menu, NotebookPen, Settings, X } from "lucide-react";
+import { LogOut, Menu, NotebookPen, PanelLeftClose, PanelLeftOpen, Settings, X } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -489,6 +489,31 @@ export default function Dashboard() {
     return { kind: "projects" };
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  /**
+   * The side panel can be put away to give the working area the full width.
+   * The choice is remembered, so the workspace opens the way it was left and
+   * the panel's own drill-downs (Planning, Purchase, …) keep their state — it
+   * is hidden, not unmounted.
+   */
+  const [navHidden, setNavHidden] = useState(() => {
+    try {
+      return window.localStorage.getItem("slate.navHidden") === "1";
+    } catch {
+      // storage can be unavailable (private mode, blocked cookies): the panel
+      // simply starts open and the choice lasts for this session
+      return false;
+    }
+  });
+  const toggleNav = () =>
+    setNavHidden((hidden) => {
+      const next = !hidden;
+      try {
+        window.localStorage.setItem("slate.navHidden", next ? "1" : "0");
+      } catch {
+        // remembered for this session only — the toggle still works
+      }
+      return next;
+    });
   type ProjectFields = {
     name: string;
     client: string;
@@ -708,16 +733,30 @@ export default function Dashboard() {
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       {/* ── Side menu ───────────────────────────────────────────────── */}
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto border-r border-border/60 bg-card/50 md:flex">
+      <aside
+        className={cn(
+          "sticky top-0 hidden h-screen w-64 shrink-0 flex-col overflow-y-auto border-r border-border/60 bg-card/50 md:flex",
+          navHidden && "md:hidden",
+        )}
+      >
         {/* brand */}
-        <div className="flex items-center gap-2.5 px-5 py-5">
+        <div className="flex items-center gap-2.5 py-5 pr-3 pl-5">
           <FirmMark logo={firmLogo} className="size-8" markClassName="size-4" />
           <span
-            className="min-w-0 truncate font-display text-lg font-semibold tracking-tight"
+            className="min-w-0 flex-1 truncate font-display text-lg font-semibold tracking-tight"
             title={brandName}
           >
             {brandName}
           </span>
+          <button
+            type="button"
+            onClick={toggleNav}
+            aria-label="Hide the side panel"
+            title="Hide the side panel"
+            className="grid size-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <PanelLeftClose className="size-4" />
+          </button>
         </div>
 
         {/* the one navigation list, then the drill-down for the open area */}
@@ -927,6 +966,18 @@ export default function Dashboard() {
               </span>
             </div>
             <div className="hidden min-w-0 items-center gap-2 md:flex">
+              {/* the panel is away: this is how it comes back */}
+              {navHidden && (
+                <button
+                  type="button"
+                  onClick={toggleNav}
+                  aria-label="Show the side panel"
+                  title="Show the side panel"
+                  className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <PanelLeftOpen className="size-4" />
+                </button>
+              )}
               <span className="truncate font-display text-sm font-semibold tracking-tight">
                 {brandName}
               </span>
