@@ -244,6 +244,7 @@ export default function ProjectsWorkspace({
               sortMode={sortMode}
               selection={selection}
               onSelect={onSelect}
+              canEdit={canEdit}
             />
           ) : activeView === "hierarchy" ? (
             <ProjectHierarchy
@@ -326,6 +327,7 @@ export default function ProjectsWorkspace({
             sortMode={sortMode}
             selection={selection}
             onSelect={onSelect}
+            canEdit={canEdit}
           />
         ) : activeView === "hierarchy" ? (
           <FlaggedItemsList

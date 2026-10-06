@@ -14,6 +14,7 @@ import {
   Flag,
   Folder,
   GripVertical,
+  MoveHorizontal,
   SquareKanban,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -1076,6 +1077,20 @@ type GanttRow = {
   meta?: string;
 };
 
+/** A bar being dragged along the timeline. */
+type GanttDrag = {
+  key: string;
+  startX: number;
+  /**
+   * Pixels per day in the track that was grabbed, measured on pointerdown: the
+   * track is as wide as the card allows it to be, so the day scale cannot be
+   * worked out from the timeline alone.
+   */
+  pxPerDay: number;
+  /** How many days the bar has been pulled, snapped to whole days. */
+  days: number;
+};
+
 /** A row the timeline cannot draw, listed underneath instead. */
 type GanttPending = {
   key: string;
@@ -1093,6 +1108,11 @@ type GanttPending = {
  * the chart rather than drawn at a made-up width — planning starts by giving it
  * a date. A job with no due date of its own inherits the project's, the same
  * way its due chips already do, and its milestone is drawn hollow to say so.
+ *
+ * Rescheduling is done by dragging a bar to the day it should land on (arrow
+ * keys do the same a day at a time), which writes the existing `dueAt` through
+ * `updateProject` / `updateJob` — a bar only ever moves its end date, because
+ * its start is the day the work was created and that cannot be moved.
  */
 export function ProjectGantt({
   mode,
@@ -1104,6 +1124,7 @@ export function ProjectGantt({
   sortMode = "manual",
   selection,
   onSelect,
+  canEdit = true,
 }: {
   mode: "projects" | "jobs";
   projects: Doc<"projects">[];
@@ -1114,10 +1135,21 @@ export function ProjectGantt({
   sortMode?: SortMode;
   selection?: FlaggedSel;
   onSelect?: (sel: FlaggedSel) => void;
+  /** False for viewers — the bars then read without offering a drag. */
+  canEdit?: boolean;
 }) {
   const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
   const projectStatuses = projectStatusesOrDefaults(
     configuredProjectStatuses ?? configuredStatusesQuery,
+  );
+  const updateProjectM = useMutation(api.costing.updateProject);
+  const updateJobM = useMutation(api.jobs.updateJob);
+  const [drag, setDrag] = useState<GanttDrag | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  // the date a row is going to have, held until the write comes back so a
+  // dragged bar never snaps to its old place while the round trip is in flight
+  const [pendingEnd, setPendingEnd] = useState<{ key: string; end: number } | null>(
+    null,
   );
   // read once per mount rather than on every render, so the today line and the
   // overdue rings stay put while the page is open
@@ -1250,8 +1282,49 @@ export function ProjectGantt({
         ((Math.min(Math.max(at, min), max) - min) / span) * 100,
       // ~3.2px a day, so a short span still fills the card and a long one scrolls
       trackWidth: Math.max(Math.round(span / DAY_MS) * 3.2, 420),
+      /** How many days the track spans, for turning a drag into whole days. */
+      days: span / DAY_MS,
     };
   }, [rows, today]);
+
+  /**
+   * The date a row has been dragged to, while that is still worth showing.
+   *
+   * Once the write lands the stored date and the server's are the same, so the
+   * override stops applying on its own — there is nothing to clean up and no
+   * second render to schedule, and a bar can never be left sitting on a date
+   * the server refused.
+   */
+  const overrideFor = (row: GanttRow): number | null => {
+    if (pendingEnd === null || pendingEnd.key !== row.key) return null;
+    return row.end === pendingEnd.end ? null : pendingEnd.end;
+  };
+
+  /**
+   * Move a line by whole days and write it back. Each press of an arrow key
+   * counts from the date already on screen rather than the stored one, so a
+   * run of them adds up instead of each one landing on the same day.
+   */
+  const reschedule = async (row: GanttRow, days: number) => {
+    const base = overrideFor(row) ?? dayStart(row.end);
+    // a bar can never end before the day the work itself was created
+    const end = Math.max(base + days * DAY_MS, dayStart(row.start));
+    if (end === base) return;
+    setPendingEnd({ key: row.key, end });
+    setBusyKey(row.key);
+    try {
+      if (row.jobId !== undefined) await updateJobM({ id: row.jobId, dueAt: end });
+      else if (row.projectId !== undefined)
+        await updateProjectM({ id: row.projectId, dueAt: end });
+    } catch (error) {
+      setPendingEnd(null);
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't reschedule that line.",
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  };
 
   if (rows.length === 0 && unscheduled.length === 0) {
     return (
@@ -1277,6 +1350,15 @@ export function ProjectGantt({
             <span className="inline-flex items-center gap-1.5 font-medium">
               <span className="h-3 w-px bg-primary/60" /> Today
             </span>
+            {canEdit && (
+              <span className="inline-flex items-center gap-1">
+                <MoveHorizontal className="size-3" />
+                Drag a bar to change its due date
+                <span className="text-muted-foreground/60">
+                  · arrow keys move a day
+                </span>
+              </span>
+            )}
             {projectStatuses.map((status, index) => (
               <span key={status} className="inline-flex items-center gap-1">
                 <span
@@ -1335,9 +1417,21 @@ export function ProjectGantt({
                   const statusIndex = projectStatuses.indexOf(row.status);
                   const accent = statusAccent(statusIndex, projectStatuses.length);
                   const ink = statusInk(statusIndex, projectStatuses.length);
+                  const dragging = drag !== null && drag.key === row.key;
+                  const override = overrideFor(row);
+                  // the day the bar is currently planned for: the server's, or
+                  // the one the reader has just dragged it to
+                  const scheduledEnd = override ?? dayStart(row.end);
+                  const preview = dragging
+                    ? Math.max(
+                        scheduledEnd + drag.days * DAY_MS,
+                        dayStart(row.start),
+                      )
+                    : override;
+                  const end = preview ?? row.end;
                   const from = timeline.pct(row.start);
-                  const to = timeline.pct(row.end);
-                  const overdue = !row.done && row.end < today;
+                  const to = timeline.pct(end);
+                  const overdue = !row.done && end < today;
                   const selected =
                     row.jobId !== undefined
                       ? selection?.kind === "job" && selection.id === row.jobId
@@ -1399,33 +1493,106 @@ export function ProjectGantt({
 
                       <div className="relative flex-1">
                         <span
+                          role={canEdit ? "button" : undefined}
+                          tabIndex={canEdit ? 0 : undefined}
+                          aria-label={
+                            canEdit
+                              ? `${row.name} — ${row.status}, due ${new Date(end).toLocaleDateString()}. Press the left or right arrow key to reschedule it.`
+                              : `${row.name} — ${row.status}, due ${new Date(end).toLocaleDateString()}`
+                          }
+                          onPointerDown={(event) => {
+                            if (!canEdit || busyKey !== null) return;
+                            const track = event.currentTarget.parentElement;
+                            const width = track?.getBoundingClientRect().width ?? 0;
+                            if (width <= 0 || timeline.days <= 0) return;
+                            // stops the drag from selecting the row's text
+                            event.preventDefault();
+                            event.currentTarget.setPointerCapture(event.pointerId);
+                            setDrag({
+                              key: row.key,
+                              startX: event.clientX,
+                              pxPerDay: width / timeline.days,
+                              days: 0,
+                            });
+                          }}
+                          onPointerMove={(event) => {
+                            if (drag === null || drag.key !== row.key) return;
+                            setDrag({
+                              ...drag,
+                              days: Math.round(
+                                (event.clientX - drag.startX) / drag.pxPerDay,
+                              ),
+                            });
+                          }}
+                          onPointerUp={(event) => {
+                            if (drag === null || drag.key !== row.key) return;
+                            event.currentTarget.releasePointerCapture(event.pointerId);
+                            const { days } = drag;
+                            setDrag(null);
+                            // a click that did not move the bar is left alone
+                            if (days !== 0) void reschedule(row, days);
+                          }}
+                          onPointerCancel={() => setDrag(null)}
+                          onKeyDown={(event) => {
+                            if (!canEdit) return;
+                            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+                              return;
+                            event.preventDefault();
+                            const step = (event.shiftKey ? 7 : 1) * (event.key === "ArrowRight" ? 1 : -1);
+                            void reschedule(row, step);
+                          }}
                           className={cn(
                             "absolute top-1/2 h-2.5 -translate-y-1/2 rounded-full",
                             accent,
                             row.done && "opacity-40",
                             overdue && "ring-1 ring-destructive/60",
+                            canEdit &&
+                              "cursor-grab touch-none active:cursor-grabbing",
+                            dragging && "ring-2 ring-primary/70",
+                            busyKey === row.key && "animate-pulse",
                           )}
                           style={{
                             left: `${from}%`,
                             width: `${Math.max(to - from, 0.6)}%`,
                           }}
-                          title={`${row.status} — created ${new Date(row.start).toLocaleDateString()}${overdue ? ", overdue" : ""}`}
+                          title={
+                            canEdit
+                              ? `${row.status} — created ${new Date(row.start).toLocaleDateString()}. Drag to change the due date.`
+                              : `${row.status} — created ${new Date(row.start).toLocaleDateString()}${overdue ? ", overdue" : ""}`
+                          }
                         />
                         <Diamond
                           className={cn(
                             "absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 fill-card",
                             ink,
-                            row.inherited && "fill-transparent",
+                            row.inherited && preview === null && "fill-transparent",
                           )}
                           style={{ left: `${to}%` }}
                         />
+                        {/* the day being dragged to, following the bar */}
+                        {drag !== null && dragging && (
+                          <span
+                            className={cn(
+                              "pointer-events-none absolute -top-1.5 z-20 -translate-x-1/2 rounded-md border bg-popover px-1.5 py-0.5 text-[10px] font-medium tabular-nums shadow-sm",
+                              drag.days === 0 && "text-muted-foreground",
+                            )}
+                            style={{ left: `${to}%` }}
+                          >
+                            {drag.days === 0
+                              ? new Date(end).toLocaleDateString()
+                              : `${drag.days > 0 ? "+" : "−"}${Math.abs(drag.days)}d · ${new Date(end).toLocaleDateString()}`}
+                          </span>
+                        )}
                       </div>
 
                       <div
                         className="flex shrink-0 flex-wrap items-center justify-end gap-1 border-l border-border/60 bg-card pr-3 pl-2"
                         style={{ width: GANTT_DUE_W }}
                       >
-                        <DueChips dueAt={row.end} inherited={row.inherited} />
+                        <DueChips
+                          dueAt={end}
+                          inherited={row.inherited && preview === null}
+                        />
                       </div>
                     </div>
                   );
@@ -1456,8 +1623,7 @@ export function ProjectGantt({
         </>
       ) : (
         <p className="flex items-center gap-2 border-b border-border/60 px-3 py-3 text-xs text-muted-foreground">
-          <ChartGantt className="size-4 shrink-0 text-muted-foreground/50" />
-          Nothing here has a due date yet, so there is no bar to draw. Set one and
+          <ChartGantt className="size-4 shrink-0 text-muted-foreground/50" />            Nothing here has a due date yet, so there is no bar to draw. Set one and
           it moves onto the timeline.
         </p>
       )}
