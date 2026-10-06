@@ -7,9 +7,14 @@ import PriorityChip from "@/components/PriorityChip";
 import StatusSelect from "@/components/StatusSelect";
 import {
   Briefcase,
+  CalendarRange,
+  ChartGantt,
   ChevronDown,
+  Diamond,
   Flag,
   Folder,
+  GripVertical,
+  SquareKanban,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -40,18 +45,34 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "@/lib/toast";
 
-/** Which entity the workspace is currently zoomed in on. */
-export type WorkspaceView = "list" | "hierarchy" | "board" | "report";
+/**
+ * How the workspace is drawn. `list` and `hierarchy` are the two reading
+ * orders of the same tree, `board` and `report` the two views of the products;
+ * `kanban` and `gantt` are the planning pair over projects and jobs — the
+ * board says where each one stands in the workflow, the timeline says when the
+ * dated work lands.
+ */
+export type WorkspaceView =
+  | "list"
+  | "hierarchy"
+  | "board"
+  | "report"
+  | "kanban"
+  | "gantt";
 
 /** The view buttons offered for each level filter. */
 export const VIEWS_BY_FILTER: Record<string, { view: WorkspaceView; label: string; icon: string }[]> = {
   projects: [
     { view: "list", label: "Project list", icon: "list" },
     { view: "hierarchy", label: "Project hierarchy", icon: "tree" },
+    { view: "kanban", label: "Kanban board", icon: "kanban" },
+    { view: "gantt", label: "Gantt timeline", icon: "gantt" },
   ],
   jobs: [
     { view: "list", label: "Job list", icon: "list" },
     { view: "hierarchy", label: "Job hierarchy", icon: "tree" },
+    { view: "kanban", label: "Kanban board", icon: "kanban" },
+    { view: "gantt", label: "Gantt timeline", icon: "gantt" },
   ],
   products: [
     { view: "list", label: "Product list", icon: "list" },
@@ -625,5 +646,857 @@ export function JobFlatList({
         );
       })}
     </ul>
+  );
+}
+
+// ── Planning views: the board and the timeline ────────────────────────────
+//
+// The hierarchy says what is inside what. These two answer the planning
+// questions instead: the Kanban board says where each project or job stands in
+// the workflow, and the Gantt timeline says when the dated work lands. Both
+// read the same projects, jobs and products the tree does, and both write
+// through the same `projectStatus` field the tree's own chips write — so a card
+// dragged on the board is a chip moved in the tree, and the two never disagree.
+
+/**
+ * The colour of a status, by its position in the workflow rather than its name.
+ * The statuses are renameable, so this keeps the two ends of the workflow — the
+ * first status and Finish — the same two colours whatever the reader called
+ * them, with the middle of the workflow in violet.
+ */
+function statusAccent(index: number, total: number): string {
+  if (index <= 0) return "bg-sky-500";
+  if (index >= total - 1) return "bg-emerald-500";
+  return "bg-violet-500";
+}
+
+/** The same status colour, as ink for an icon rather than a fill. */
+function statusInk(index: number, total: number): string {
+  if (index <= 0) return "text-sky-500";
+  if (index >= total - 1) return "text-emerald-500";
+  return "text-violet-500";
+}
+
+/** One card on the board, whichever level it came from. */
+type BoardCard = {
+  key: string;
+  projectId?: Id<"projects">;
+  jobId?: Id<"projectJobs">;
+  name: string;
+  code?: string;
+  /** the project a job belongs to, or the client a project is for */
+  tag?: string;
+  dueAt?: number;
+  status: string;
+  done: boolean;
+  /** jobs (and their products) under a project */
+  jobs?: number;
+  products?: number;
+  /** products finished out of the products linked to a job */
+  progress?: { done: number; total: number };
+};
+
+/**
+ * Projects or Jobs filter — Kanban view: one column per Projects status, one
+ * card per project (or per job).
+ *
+ * A card can be dragged into another column, or moved with the status dropdown
+ * it carries — the drag is for the mouse, the dropdown for touch, keyboard and
+ * screen readers. Either way the move writes the row's `projectStatus`, which
+ * is the same field the hierarchy chips and the Finish guard read, so the
+ * server's own rules (all products done before a job finishes, all jobs done
+ * before a project does) still hold: a refusal comes back as a toast and the
+ * card stays where it was.
+ */
+export function ProjectKanban({
+  mode,
+  projects,
+  jobs,
+  fgs,
+  projectStatuses: configuredProjectStatuses,
+  statusFilter = "all",
+  sortMode = "manual",
+  selection,
+  onSelect,
+  canEdit = true,
+}: {
+  mode: "projects" | "jobs";
+  projects: Doc<"projects">[];
+  jobs: JobDoc[];
+  fgs: FgDoc[];
+  projectStatuses?: string[];
+  statusFilter?: FlagStatusFilter;
+  sortMode?: SortMode;
+  selection?: FlaggedSel;
+  onSelect?: (sel: FlaggedSel) => void;
+  /** False for viewers — the board then reads without offering a move. */
+  canEdit?: boolean;
+}) {
+  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(
+    configuredProjectStatuses ?? configuredStatusesQuery,
+  );
+  const setProjectStatusM = useMutation(api.costing.setProjectProjectStatus);
+  const setJobStatusM = useMutation(api.jobs.setJobProjectStatus);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const cards = useMemo<BoardCard[]>(() => {
+    const keep = (status: string, done: boolean) =>
+      matchesStatusFilter(statusFilter ?? "all", status, done);
+
+    if (mode === "jobs") {
+      const projectNameOf = new Map(
+        projects.map((project) => [String(project._id), project.name] as const),
+      );
+      return sortJobs(jobs, sortMode).flatMap((job) => {
+        const status = jobProjectStatus(job, projectStatuses);
+        const done = status === PROJECT_STATUS_FINISH;
+        if (!keep(status, done)) return [];
+        const products = productsOfJob(fgs, job._id);
+        return [
+          {
+            key: `j:${job._id}`,
+            jobId: job._id,
+            name: job.name,
+            code: job.code,
+            tag: projectNameOf.get(String(job.projectId)) ?? "Project",
+            dueAt: job.dueAt,
+            status,
+            done,
+            products: products.length,
+            progress: {
+              done: products.filter((product) => product.isCompleted).length,
+              total: products.length,
+            },
+          },
+        ];
+      });
+    }
+
+    return projects.flatMap((project) => {
+      const status = projectDocStatus(project, projectStatuses);
+      const done = status === PROJECT_STATUS_FINISH;
+      if (!keep(status, done)) return [];
+      const projectJobs = jobs.filter((job) => job.projectId === project._id);
+      const jobIds = new Set(projectJobs.map((job) => String(job._id)));
+      const products = fgs.filter((fg) =>
+        productJobIds(fg).some((jobId) => jobIds.has(String(jobId))),
+      );
+      return [
+        {
+          key: `p:${project._id}`,
+          projectId: project._id,
+          name: project.name,
+          code: project.code,
+          tag: project.client,
+          dueAt: project.dueAt,
+          status,
+          done,
+          jobs: projectJobs.length,
+          products: products.length,
+        },
+      ];
+    });
+  }, [mode, projects, jobs, fgs, projectStatuses, statusFilter, sortMode]);
+
+  /** Write a card's move through the workflow, or explain why it was refused. */
+  const move = async (key: string | null, status: string) => {
+    if (!canEdit || key === null) return;
+    const card = cards.find((entry) => entry.key === key);
+    if (card === undefined || card.status === status) {
+      setDragging(null);
+      setDropTarget(null);
+      return;
+    }
+    setBusyKey(card.key);
+    try {
+      if (card.jobId !== undefined) await setJobStatusM({ id: card.jobId, status });
+      else if (card.projectId !== undefined)
+        await setProjectStatusM({ id: card.projectId, status });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't move the card.",
+      );
+    } finally {
+      setBusyKey(null);
+      setDragging(null);
+      setDropTarget(null);
+    }
+  };
+
+  if (cards.length === 0) {
+    return (
+      <div className="px-6 py-10 text-center">
+        <SquareKanban className="mx-auto size-7 text-muted-foreground/40" />
+        <p className="mt-2 text-sm font-medium">Nothing to plan yet</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {mode === "jobs"
+            ? "Flag a job in the Projects page and it lands on this board."
+            : "Flag work under a project and the project lands on this board."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto p-3">
+      <ul className="flex min-w-max items-start gap-3">
+        {projectStatuses.map((status, index) => {
+          const column = cards.filter((card) => card.status === status);
+          const accent = statusAccent(index, projectStatuses.length);
+          const isTarget = dragging !== null && dropTarget === status;
+          return (
+            <li
+              key={status}
+              aria-label={`${status} — ${column.length} ${column.length === 1 ? "card" : "cards"}`}
+              onDragOver={(event) => {
+                if (!canEdit || dragging === null) return;
+                // without this the drop is never allowed
+                event.preventDefault();
+                setDropTarget(status);
+              }}
+              onDragLeave={(event) => {
+                // dragleave also fires on the way over a card inside the
+                // column, so only a move to something outside counts
+                if (
+                  event.currentTarget.contains(event.relatedTarget as Node | null)
+                )
+                  return;
+                setDropTarget((current) => (current === status ? null : current));
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                void move(dragging, status);
+              }}
+              className={cn(
+                "flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-muted/30 transition-colors",
+                isTarget && "border-primary/50 bg-primary/[0.06]",
+              )}
+            >
+              <span className={cn("h-1 w-full", accent)} />
+              <div className="flex items-center gap-2 px-3 py-2">
+                <span className={cn("size-2 shrink-0 rounded-full", accent)} />
+                <span className="min-w-0 truncate text-xs font-semibold">
+                  {status}
+                </span>
+                <span className="ml-auto shrink-0 rounded-full bg-card px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+                  {column.length}
+                </span>
+              </div>
+              <ul className="flex min-h-16 flex-col gap-2 px-2 pb-2">
+                {column.length === 0 ? (
+                  <li className="grid flex-1 place-items-center rounded-lg border border-dashed border-border/70 px-3 py-6 text-center text-[11px] text-muted-foreground">
+                    {isTarget ? "Drop here" : "Empty"}
+                  </li>
+                ) : (
+                  column.map((card) => {
+                    const selected =
+                      card.jobId !== undefined
+                        ? selection?.kind === "job" && selection.id === card.jobId
+                        : selection?.kind === "project" &&
+                          selection.id === card.projectId;
+                    return (
+                      <li
+                        key={card.key}
+                        className={cn(
+                          "overflow-hidden rounded-lg border bg-card shadow-sm transition-opacity",
+                          selected && "border-primary/40",
+                          dragging === card.key && "opacity-40",
+                          busyKey === card.key && "opacity-60",
+                        )}
+                      >
+                        {/* the draggable body stops short of the status
+                            dropdown, so picking a status never starts a drag */}
+                        <div
+                          draggable={canEdit && busyKey === null}
+                          onDragStart={() => setDragging(card.key)}
+                          onDragEnd={() => {
+                            setDragging(null);
+                            setDropTarget(null);
+                          }}
+                          className={cn(
+                            "flex flex-col gap-1.5 px-2.5 py-2.5",
+                            canEdit && "cursor-grab active:cursor-grabbing",
+                          )}
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              card.jobId !== undefined
+                                ? onSelect?.({ kind: "job", id: card.jobId })
+                                : card.projectId !== undefined &&
+                                  onSelect?.({ kind: "project", id: card.projectId })
+                            }
+                            className={cn(
+                              "flex min-w-0 items-center gap-1.5 text-left text-sm font-medium",
+                              card.done && "text-muted-foreground line-through",
+                            )}
+                          >
+                            {card.jobId !== undefined ? (
+                              <Briefcase className="size-3.5 shrink-0 text-sky-500/80" />
+                            ) : (
+                              <Folder
+                                className={cn(
+                                  "size-3.5 shrink-0",
+                                  card.done ? "text-emerald-500" : "text-sky-500/80",
+                                )}
+                              />
+                            )}
+                            <span className="min-w-0 truncate">{card.name}</span>
+                          </button>
+                          <span className="flex flex-wrap items-center gap-1">
+                            {card.code && (
+                              <span className="font-mono text-[10px] text-muted-foreground/70">
+                                {card.code}
+                              </span>
+                            )}
+                            {card.tag && <span className={tagChip}>{card.tag}</span>}
+                          </span>
+                          <span className="flex flex-wrap items-center gap-1">
+                            {card.jobs !== undefined && (
+                              <span className="shrink-0 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-sky-700 dark:text-sky-400">
+                                {card.jobs} job{card.jobs === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {card.products !== undefined && card.progress === undefined && (
+                              <span className="shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-violet-700 dark:text-violet-400">
+                                {card.products} product{card.products === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {card.progress !== undefined && card.progress.total > 0 && (
+                              <span
+                                className={cn(
+                                  "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                                  card.done
+                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                    : "bg-muted text-muted-foreground",
+                                )}
+                                title="Products completed"
+                              >
+                                {card.progress.done}/{card.progress.total} products
+                              </span>
+                            )}
+                            <DueChips dueAt={card.dueAt} />
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 border-t border-border/60 bg-muted/30 px-2 py-1">
+                          <StatusSelect
+                            value={card.status}
+                            statuses={projectStatuses}
+                            disabled={!canEdit || busyKey !== null}
+                            title={
+                              canEdit
+                                ? "Move to another status"
+                                : "Read-only — you cannot change the status"
+                            }
+                            onChange={(next) => void move(card.key, next)}
+                          />
+                          {canEdit && (
+                            <GripVertical
+                              aria-hidden
+                              className="size-3.5 shrink-0 text-muted-foreground/40"
+                            />
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })
+                )}
+              </ul>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// ── The timeline ──────────────────────────────────────────────────────────
+
+const DAY_MS = 86_400_000;
+/** Wide enough for a name and its counts; matches the sticky label column. */
+const GANTT_LABEL_W = 244;
+/** Wide enough for the two due chips, which wrap when they need to. */
+const GANTT_DUE_W = 132;
+
+/** Midnight of a day, so a bar never drifts across a daylight-saving shift. */
+function dayStart(ms: number): number {
+  const date = new Date(ms);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function monthStart(ms: number): number {
+  const date = new Date(ms);
+  return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
+}
+
+/** The exclusive end of the month a timestamp falls in. */
+function monthEnd(ms: number): number {
+  const date = new Date(ms);
+  return new Date(date.getFullYear(), date.getMonth() + 1, 1).getTime();
+}
+
+type MonthBand = { key: string; label: string; from: number; to: number };
+
+/** The month columns across a span, each as its own share of the timeline. */
+function monthBands(start: number, end: number): MonthBand[] {
+  const bands: MonthBand[] = [];
+  let cursor = monthStart(start);
+  while (cursor < end) {
+    const date = new Date(cursor);
+    bands.push({
+      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
+      label: date.toLocaleDateString(undefined, { month: "short", year: "numeric" }),
+      from: cursor,
+      to: monthEnd(cursor),
+    });
+    cursor = new Date(date.getFullYear(), date.getMonth() + 1, 1).getTime();
+  }
+  return bands;
+}
+
+/** A line drawn on the timeline. */
+type GanttRow = {
+  key: string;
+  projectId?: Id<"projects">;
+  jobId?: Id<"projectJobs">;
+  name: string;
+  code?: string;
+  /** 0 for the level the filter is on, 1 for a project's jobs */
+  depth: 0 | 1;
+  start: number;
+  end: number;
+  /** the end is the parent project's due date, not the job's own */
+  inherited?: boolean;
+  status: string;
+  done: boolean;
+  meta?: string;
+};
+
+/** A row the timeline cannot draw, listed underneath instead. */
+type GanttPending = {
+  key: string;
+  projectId?: Id<"projects">;
+  jobId?: Id<"projectJobs">;
+  name: string;
+  meta?: string;
+};
+
+/**
+ * Projects or Jobs filter — Gantt view: one bar per project (or job) from the
+ * day it was created to the day it is due, with a milestone at the due date.
+ *
+ * Only a due date can end a bar, so anything still without one is listed below
+ * the chart rather than drawn at a made-up width — planning starts by giving it
+ * a date. A job with no due date of its own inherits the project's, the same
+ * way its due chips already do, and its milestone is drawn hollow to say so.
+ */
+export function ProjectGantt({
+  mode,
+  projects,
+  jobs,
+  fgs,
+  projectStatuses: configuredProjectStatuses,
+  statusFilter = "all",
+  sortMode = "manual",
+  selection,
+  onSelect,
+}: {
+  mode: "projects" | "jobs";
+  projects: Doc<"projects">[];
+  jobs: JobDoc[];
+  fgs: FgDoc[];
+  projectStatuses?: string[];
+  statusFilter?: FlagStatusFilter;
+  sortMode?: SortMode;
+  selection?: FlaggedSel;
+  onSelect?: (sel: FlaggedSel) => void;
+}) {
+  const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
+  const projectStatuses = projectStatusesOrDefaults(
+    configuredProjectStatuses ?? configuredStatusesQuery,
+  );
+  // read once per mount rather than on every render, so the today line and the
+  // overdue rings stay put while the page is open
+  const [today] = useState(() => dayStart(Date.now()));
+
+  const { rows, unscheduled } = useMemo(() => {
+    const charted: GanttRow[] = [];
+    const pending: GanttPending[] = [];
+    const keep = (status: string, done: boolean) =>
+      matchesStatusFilter(statusFilter ?? "all", status, done);
+    const plural = (count: number, noun: string) =>
+      `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+    if (mode === "jobs") {
+      for (const job of sortJobs(jobs, sortMode)) {
+        const status = jobProjectStatus(job, projectStatuses);
+        const done = status === PROJECT_STATUS_FINISH;
+        if (!keep(status, done)) continue;
+        const project = projects.find((entry) => entry._id === job.projectId);
+        const products = productsOfJob(fgs, job._id);
+        const finished = products.filter((product) => product.isCompleted).length;
+        const meta = [
+          project?.name ?? "Project",
+          products.length > 0 ? `${finished}/${products.length} products` : undefined,
+        ]
+          .filter((part) => part !== undefined)
+          .join(" · ");
+        if (job.dueAt === undefined) {
+          pending.push({ key: `j:${job._id}`, jobId: job._id, name: job.name, meta });
+          continue;
+        }
+        charted.push({
+          key: `j:${job._id}`,
+          jobId: job._id,
+          name: job.name,
+          code: job.code,
+          depth: 0,
+          start: job._creationTime,
+          end: job.dueAt,
+          status,
+          done,
+          meta,
+        });
+      }
+      return { rows: charted, unscheduled: pending };
+    }
+
+    for (const project of projects) {
+      const status = projectDocStatus(project, projectStatuses);
+      const done = status === PROJECT_STATUS_FINISH;
+      if (!keep(status, done)) continue;
+      const projectJobs = sortJobs(
+        jobs.filter((job) => job.projectId === project._id),
+        sortMode,
+      );
+      const jobIds = new Set(projectJobs.map((job) => String(job._id)));
+      const products = fgs.filter((fg) =>
+        productJobIds(fg).some((jobId) => jobIds.has(String(jobId))),
+      );
+      const meta = `${plural(projectJobs.length, "job")} · ${plural(products.length, "product")}`;
+      if (project.dueAt === undefined) {
+        pending.push({
+          key: `p:${project._id}`,
+          projectId: project._id,
+          name: project.name,
+          meta,
+        });
+        continue;
+      }
+      charted.push({
+        key: `p:${project._id}`,
+        projectId: project._id,
+        name: project.name,
+        code: project.code,
+        depth: 0,
+        start: project._creationTime,
+        end: project.dueAt,
+        status,
+        done,
+        meta,
+      });
+      for (const job of projectJobs) {
+        const jobStatus = jobProjectStatus(job, projectStatuses);
+        const jobDone = jobStatus === PROJECT_STATUS_FINISH;
+        if (!keep(jobStatus, jobDone)) continue;
+        // a job with no due date of its own is planned against the project's
+        const end = job.dueAt ?? project.dueAt;
+        const jobProducts = productsOfJob(fgs, job._id);
+        const jobFinished = jobProducts.filter(
+          (product) => product.isCompleted,
+        ).length;
+        charted.push({
+          key: `j:${job._id}`,
+          jobId: job._id,
+          name: job.name,
+          code: job.code,
+          depth: 1,
+          start: job._creationTime,
+          end,
+          inherited: job.dueAt === undefined,
+          status: jobStatus,
+          done: jobDone,
+          meta:
+            jobProducts.length > 0
+              ? `${jobFinished}/${jobProducts.length} products`
+              : undefined,
+        });
+      }
+    }
+    return { rows: charted, unscheduled: pending };
+  }, [mode, projects, jobs, fgs, projectStatuses, statusFilter, sortMode]);
+
+  const timeline = useMemo(() => {
+    const stamps = rows.flatMap((row) => [row.start, row.end]);
+    stamps.push(today);
+    // a two-year horizon either side of today keeps a stray date in 2099 from
+    // stretching the chart into thousands of unreadable columns
+    const horizon = 400 * DAY_MS;
+    const min = monthStart(
+      Math.max(Math.min(...stamps), today - horizon),
+    );
+    const max = monthEnd(Math.min(Math.max(...stamps), today + horizon));
+    const span = Math.max(max - min, DAY_MS);
+    return {
+      min,
+      max,
+      bands: monthBands(min, max),
+      /** Where a timestamp sits across the track, as a percentage. */
+      pct: (at: number) =>
+        ((Math.min(Math.max(at, min), max) - min) / span) * 100,
+      // ~3.2px a day, so a short span still fills the card and a long one scrolls
+      trackWidth: Math.max(Math.round(span / DAY_MS) * 3.2, 420),
+    };
+  }, [rows, today]);
+
+  if (rows.length === 0 && unscheduled.length === 0) {
+    return (
+      <div className="px-6 py-10 text-center">
+        <ChartGantt className="mx-auto size-7 text-muted-foreground/40" />
+        <p className="mt-2 text-sm font-medium">Nothing to schedule yet</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {mode === "jobs"
+            ? "Flag a job in the Projects page and it lands on this timeline."
+            : "Flag work under a project and the project lands on this timeline."}
+        </p>
+      </div>
+    );
+  }
+
+  const todayPct = timeline.pct(today);
+
+  return (
+    <div>
+      {rows.length > 0 ? (
+        <>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5 font-medium">
+              <span className="h-3 w-px bg-primary/60" /> Today
+            </span>
+            {projectStatuses.map((status, index) => (
+              <span key={status} className="inline-flex items-center gap-1">
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    statusAccent(index, projectStatuses.length),
+                  )}
+                />
+                {status}
+              </span>
+            ))}
+            <span className="ml-auto tabular-nums">
+              {timeline.bands.length} month
+              {timeline.bands.length === 1 ? "" : "s"}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <div
+              style={{
+                minWidth: timeline.trackWidth + GANTT_LABEL_W + GANTT_DUE_W,
+              }}
+            >
+              {/* month header */}
+              <div className="flex h-8 border-b border-border/60 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                <div
+                  className="sticky left-0 z-20 flex shrink-0 items-center border-r border-border/60 bg-card px-3"
+                  style={{ width: GANTT_LABEL_W }}
+                >
+                  {mode === "jobs" ? "Job" : "Project"}
+                </div>
+                <div className="relative flex-1">
+                  {timeline.bands.map((band) => (
+                    <span
+                      key={band.key}
+                      className="absolute top-0 flex h-full items-center overflow-hidden border-l border-border/50 px-1.5 whitespace-nowrap"
+                      style={{
+                        left: `${timeline.pct(band.from)}%`,
+                        width: `${timeline.pct(band.to) - timeline.pct(band.from)}%`,
+                      }}
+                    >
+                      {band.label}
+                    </span>
+                  ))}
+                </div>
+                <div
+                  className="flex shrink-0 items-center justify-end border-l border-border/60 bg-card pr-3"
+                  style={{ width: GANTT_DUE_W }}
+                >
+                  Due
+                </div>
+              </div>
+
+              <div className="relative">
+                {rows.map((row) => {
+                  const statusIndex = projectStatuses.indexOf(row.status);
+                  const accent = statusAccent(statusIndex, projectStatuses.length);
+                  const ink = statusInk(statusIndex, projectStatuses.length);
+                  const from = timeline.pct(row.start);
+                  const to = timeline.pct(row.end);
+                  const overdue = !row.done && row.end < today;
+                  const selected =
+                    row.jobId !== undefined
+                      ? selection?.kind === "job" && selection.id === row.jobId
+                      : selection?.kind === "project" &&
+                        selection.id === row.projectId;
+                  return (
+                    <div
+                      key={row.key}
+                      className={cn(
+                        "flex h-12 border-b border-border/40 transition-colors last:border-b-0 hover:bg-accent/30",
+                        row.depth === 1 && "bg-muted/20",
+                        selected && "bg-primary/[0.04]",
+                      )}
+                    >
+                      <div
+                        className="sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-card px-3"
+                        style={{ width: GANTT_LABEL_W }}
+                      >
+                        {row.depth === 0 ? (
+                          <Folder
+                            className={cn(
+                              "size-3.5 shrink-0",
+                              row.done ? "text-emerald-500" : "text-sky-500/80",
+                            )}
+                          />
+                        ) : (
+                          <Briefcase className="ml-3 size-3 shrink-0 text-sky-500/80" />
+                        )}
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              row.jobId !== undefined
+                                ? onSelect?.({ kind: "job", id: row.jobId })
+                                : row.projectId !== undefined &&
+                                  onSelect?.({ kind: "project", id: row.projectId })
+                            }
+                            title="Open this line's side panel"
+                            className={cn(
+                              "min-w-0 truncate text-left hover:underline",
+                              row.depth === 0
+                                ? "text-xs font-medium"
+                                : "text-[11px] font-medium",
+                              row.done && "text-muted-foreground line-through",
+                            )}
+                          >
+                            {row.name}
+                          </button>
+                          <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+                            {row.code && (
+                              <span className="shrink-0 font-mono text-muted-foreground/70">
+                                {row.code}
+                              </span>
+                            )}
+                            {row.meta && <span className="truncate">{row.meta}</span>}
+                          </span>
+                        </span>
+                      </div>
+
+                      <div className="relative flex-1">
+                        <span
+                          className={cn(
+                            "absolute top-1/2 h-2.5 -translate-y-1/2 rounded-full",
+                            accent,
+                            row.done && "opacity-40",
+                            overdue && "ring-1 ring-destructive/60",
+                          )}
+                          style={{
+                            left: `${from}%`,
+                            width: `${Math.max(to - from, 0.6)}%`,
+                          }}
+                          title={`${row.status} — created ${new Date(row.start).toLocaleDateString()}${overdue ? ", overdue" : ""}`}
+                        />
+                        <Diamond
+                          className={cn(
+                            "absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 fill-card",
+                            ink,
+                            row.inherited && "fill-transparent",
+                          )}
+                          style={{ left: `${to}%` }}
+                        />
+                      </div>
+
+                      <div
+                        className="flex shrink-0 flex-wrap items-center justify-end gap-1 border-l border-border/60 bg-card pr-3 pl-2"
+                        style={{ width: GANTT_DUE_W }}
+                      >
+                        <DueChips dueAt={row.end} inherited={row.inherited} />
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* month rules and the today line, over the bars so the whole
+                    thing reads as one chart */}
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-0 z-10"
+                  style={{ left: GANTT_LABEL_W, right: GANTT_DUE_W }}
+                >
+                  {timeline.bands.map((band) => (
+                    <span
+                      key={band.key}
+                      className="absolute inset-y-0 w-px bg-border/40"
+                      style={{ left: `${timeline.pct(band.from)}%` }}
+                    />
+                  ))}
+                  <span
+                    className="absolute inset-y-0 w-px bg-primary/60"
+                    style={{ left: `${todayPct}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <p className="flex items-center gap-2 border-b border-border/60 px-3 py-3 text-xs text-muted-foreground">
+          <ChartGantt className="size-4 shrink-0 text-muted-foreground/50" />
+          Nothing here has a due date yet, so there is no bar to draw. Set one and
+          it moves onto the timeline.
+        </p>
+      )}
+
+      {unscheduled.length > 0 && (
+        <div className="px-3 py-3">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+            <CalendarRange className="size-3.5" />
+            No due date
+            <span className="font-normal normal-case">({unscheduled.length})</span>
+          </p>
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {unscheduled.map((row) => (
+              <li key={row.key}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    row.jobId !== undefined
+                      ? onSelect?.({ kind: "job", id: row.jobId })
+                      : row.projectId !== undefined &&
+                        onSelect?.({ kind: "project", id: row.projectId })
+                  }
+                  title={`Open “${row.name}” and give it a due date`}
+                  className="inline-flex max-w-72 items-center gap-1.5 rounded-full border border-dashed border-border px-2 py-0.5 text-[11px] transition-colors hover:border-primary/40 hover:bg-primary/10"
+                >
+                  <span className="min-w-0 truncate">{row.name}</span>
+                  {row.meta && (
+                    <span className="shrink-0 text-muted-foreground">{row.meta}</span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Open one and set a due date from its side panel to plan it on the
+            timeline.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

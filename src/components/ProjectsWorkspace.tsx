@@ -1,12 +1,14 @@
 import { Loader2 } from "lucide-react";
 import {
   BarChart3,
+  ChartGantt,
   Columns3,
   Flag,
   List,
   ListTree,
   Printer,
   Settings2,
+  SquareKanban,
 } from "lucide-react";
 import ProductPrintSheet from "@/components/ProductPrintSheet";
 import ProductDetailPanel from "@/components/ProductDetailPanel";
@@ -14,7 +16,9 @@ import StatusSelect from "@/components/StatusSelect";
 import ProjectStatusSettings from "@/components/ProjectStatusSettings";
 import {
   JobFlatList,
+  ProjectGantt,
   ProjectHierarchy,
+  ProjectKanban,
   VIEWS_BY_FILTER,
   resolveView,
   type WorkspaceView,
@@ -164,7 +168,11 @@ export default function ProjectsWorkspace({
                     ? Columns3
                     : entry.icon === "report"
                       ? BarChart3
-                      : List;
+                      : entry.icon === "kanban"
+                        ? SquareKanban
+                        : entry.icon === "gantt"
+                          ? ChartGantt
+                          : List;
               return (
                 <button
                   key={entry.view}
@@ -212,7 +220,32 @@ export default function ProjectsWorkspace({
             </p>
           </div>
         ) : filter === "projects" ? (
-          activeView === "hierarchy" ? (
+          activeView === "kanban" ? (
+            <ProjectKanban
+              mode="projects"
+              projects={projects}
+              jobs={jobs ?? []}
+              fgs={fgs ?? []}
+              projectStatuses={projectStatuses}
+              statusFilter={status}
+              sortMode={sortMode}
+              selection={selection}
+              onSelect={onSelect}
+              canEdit={canEdit}
+            />
+          ) : activeView === "gantt" ? (
+            <ProjectGantt
+              mode="projects"
+              projects={projects}
+              jobs={jobs ?? []}
+              fgs={fgs ?? []}
+              projectStatuses={projectStatuses}
+              statusFilter={status}
+              sortMode={sortMode}
+              selection={selection}
+              onSelect={onSelect}
+            />
+          ) : activeView === "hierarchy" ? (
             <ProjectHierarchy
               projects={projects}
               jobs={jobs ?? []}
@@ -269,6 +302,31 @@ export default function ProjectsWorkspace({
               onSelect={onSelect}
             />
           )
+        ) : activeView === "kanban" ? (
+          <ProjectKanban
+            mode="jobs"
+            projects={projects ?? []}
+            jobs={jobs ?? []}
+            fgs={fgs ?? []}
+            projectStatuses={projectStatuses}
+            statusFilter={status}
+            sortMode={sortMode}
+            selection={selection}
+            onSelect={onSelect}
+            canEdit={canEdit}
+          />
+        ) : activeView === "gantt" ? (
+          <ProjectGantt
+            mode="jobs"
+            projects={projects ?? []}
+            jobs={jobs ?? []}
+            fgs={fgs ?? []}
+            projectStatuses={projectStatuses}
+            statusFilter={status}
+            sortMode={sortMode}
+            selection={selection}
+            onSelect={onSelect}
+          />
         ) : activeView === "hierarchy" ? (
           <FlaggedItemsList
             data={items}
