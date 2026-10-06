@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { assignableIds, firmAncestors, scopeUserId } from "./org";
 import { PROJECT_STATUS_START } from "../lib/project-statuses";
+import { assertPlanNests } from "./scheduleRules";
 
 /**
  * The task features a project, a job or a product was missing.
@@ -539,6 +540,18 @@ export const update = mutation({
       else if (args.budget !== undefined) {
         patch.budget = args.budget >= 0 ? args.budget : undefined;
       }
+    }
+    // the dates on the panel obey the same nesting rule the timeline does:
+    // a job inside its project, a product inside its job, and a project or job
+    // never pulled in past the work it carries
+    const nextStart =
+      args.clearStart === true ? undefined : (args.startAt ?? node.startAt);
+    const nextDue = args.clearDue === true ? undefined : (args.dueAt ?? node.dueAt);
+    if (nextStart !== node.startAt || nextDue !== node.dueAt) {
+      await assertPlanNests(ctx, args.kind, node, {
+        startAt: nextStart,
+        dueAt: nextDue,
+      });
     }
     await patchNode(ctx, args.kind, args.id, patch);
   },

@@ -18,6 +18,8 @@ import {
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
 } from "../lib/project-statuses";
+import { shiftDates, withinRefusal } from "../lib/schedule-window";
+import { assertPlanNests } from "./scheduleRules";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -178,7 +180,15 @@ export const addJob = mutation({
   handler: async (ctx, opts) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
-    await assertOwnedProject(ctx, userId, opts.projectId);
+    const project = await assertOwnedProject(ctx, userId, opts.projectId);
+    // a job planned outside the project it belongs to is refused on the way in
+    const outside = withinRefusal(
+      { start: opts.startAt, end: opts.dueAt },
+      { start: project.startAt, end: project.dueAt },
+      "this job",
+      "project",
+    );
+    if (outside !== null) throw new Error(outside);
     const name = opts.name.trim();
     if (name.length === 0) throw new Error("Give the job a name.");
     const code = await nextJobCode(ctx, userId);
@@ -237,6 +247,18 @@ export const updateJob = mutation({
     if (patch.dueAt !== undefined) clean.dueAt = patch.dueAt;
     if (patch.clearStart === true) clean.startAt = undefined;
     if (patch.clearDue === true) clean.dueAt = undefined;
+    // the job's own dates stay inside its project's and still cover the
+    // products it carries, whichever surface wrote them
+    const nextStart =
+      patch.clearStart === true ? undefined : (patch.startAt ?? job.startAt);
+    const nextDue =
+      patch.clearDue === true ? undefined : (patch.dueAt ?? job.dueAt);
+    if (nextStart !== job.startAt || nextDue !== job.dueAt) {
+      await assertPlanNests(ctx, "job", job, {
+        startAt: nextStart,
+        dueAt: nextDue,
+      });
+    }
     if (patch.status !== undefined) {
       const next = normalizeStatus(patch.status);
       // "completed" is earned by finishing every product under the job, so
@@ -246,6 +268,43 @@ export const updateJob = mutation({
     }
     if (patch.priority !== undefined) clean.priority = patch.priority;
     await ctx.db.patch(id, clean);
+  },
+});
+
+/**
+ * Move a job along the timeline as one bundle: the job's dates become the ones
+ * asked for and every product under it that carries dates of its own moves by
+ * the same whole days, so nothing is resized and the products keep sitting
+ * exactly where they sat inside the job.
+ */
+export const moveJobTimeline = mutation({
+  args: {
+    id: v.id("projectJobs"),
+    startAt: v.number(),
+    dueAt: v.number(),
+    days: v.number(),
+  },
+  handler: async (ctx, { id, startAt, dueAt, days }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const job = await ctx.db.get(id);
+    if (job === null || job.ownerId !== userId)
+      throw new Error("That job no longer exists.");
+    const project = await ctx.db.get(job.projectId);
+    const outside = withinRefusal(
+      { start: startAt, end: dueAt },
+      { start: project?.startAt, end: project?.dueAt },
+      "this job",
+      "project",
+    );
+    if (outside !== null) throw new Error(outside);
+    const shift = Math.round(days);
+    await ctx.db.patch(id, { startAt, dueAt });
+    if (shift === 0) return;
+    for (const fg of await productsOfJob(ctx, userId, id)) {
+      const moved = shiftDates(fg, shift);
+      if (moved !== null) await ctx.db.patch(fg._id, moved);
+    }
   },
 });
 

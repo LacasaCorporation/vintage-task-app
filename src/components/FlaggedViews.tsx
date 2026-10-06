@@ -48,6 +48,16 @@ import {
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useFgStatusChange } from "@/lib/useFgStatusChange";
+import {
+  DAY_MS,
+  draggedDates,
+  limitsFrom,
+  shrinkRefusal,
+  withinRefusal,
+  type DateLimits,
+  type DateWindow,
+  type ScheduleGrip,
+} from "@/lib/schedule-window";
 import { toast } from "@/lib/toast";
 
 /**
@@ -1013,7 +1023,6 @@ export function ProjectKanban({
 
 // ── The timeline ──────────────────────────────────────────────────────────
 
-const DAY_MS = 86_400_000;
 /** Wide enough for a name and its counts; matches the sticky label column. */
 const GANTT_LABEL_W = 244;
 /**
@@ -1208,9 +1217,81 @@ function weekendShading(fromMs: number, pxPerDay: number): string {
   return `repeating-linear-gradient(to right, ${stops.join(", ")})`;
 }
 
+/** The three levels of the plan, deepest last. */
+type PlanLevel = "project" | "job" | "product";
+
+/**
+ * The fill of a bar, by the level it belongs to.
+ *
+ * A project, the jobs inside it and the products inside those are three
+ * different things sharing one chart, so the colour says which one a bar is
+ * before its name is read — and the same colour is used in the legend and on
+ * the level's icon, so the chart is readable at a glance. The line's status is
+ * still on it: the milestone at its end is inked with the workflow colour and
+ * the label column carries its dot.
+ */
+const LEVEL_FILL: Record<PlanLevel, string> = {
+  project: "bg-indigo-500",
+  job: "bg-sky-500",
+  product: "bg-teal-500",
+};
+
+/** The same level colour, as ink for an icon. */
+const LEVEL_INK: Record<PlanLevel, string> = {
+  project: "text-indigo-500",
+  job: "text-sky-500",
+  product: "text-teal-500",
+};
+
+const LEVEL_LABEL: Record<PlanLevel, string> = {
+  project: "Project",
+  job: "Job",
+  product: "Product",
+};
+
+const PLAN_LEVELS: readonly PlanLevel[] = ["project", "job", "product"];
+
+/** How a line is named in a refusal, and what it has to stay inside. */
+const PLAN_SUBJECT: Record<PlanLevel, string> = {
+  project: "this project",
+  job: "this job",
+  product: "this product",
+};
+const PLAN_CONTAINER: Record<PlanLevel, string> = {
+  project: "project",
+  job: "job",
+  product: "job",
+};
+/** What a line carries, for the refusal when it is pulled in too far. */
+const PLAN_CONTENTS: Record<PlanLevel, string> = {
+  project: "jobs",
+  job: "products",
+  product: "products",
+};
+
+/**
+ * A window, or nothing at all when neither end of it is dated — an undated
+ * parent puts no limit on the work inside it.
+ */
+function windowOf(start?: number, end?: number): DateWindow | undefined {
+  return start === undefined && end === undefined
+    ? undefined
+    : { start, end };
+}
+
+/** The own dates of a set of records, as the shrink limits of their parent. */
+function ownDates(records: readonly { startAt?: number; dueAt?: number }[]) {
+  return records.map((record) => ({
+    startAt: record.startAt,
+    dueAt: record.dueAt,
+  }));
+}
+
 /** A line drawn on the timeline. */
 type GanttRow = {
   key: string;
+  /** Which level it is drawn at — the bar's colour comes from this. */
+  level: PlanLevel;
   projectId?: Id<"projects">;
   jobId?: Id<"projectJobs">;
   fgId?: Id<"finishedGoods">;
@@ -1234,10 +1315,14 @@ type GanttRow = {
   meta?: string;
   /** Products finished out of the products this line carries. */
   progress?: { done: number; total: number };
+  /** The window the line has to stay inside: its parent's planned dates. */
+  bounds?: DateWindow;
+  /** What the line's own children stop it being shrunk past. */
+  limits?: DateLimits;
 };
 
 /** Which part of a bar a drag has hold of. */
-type GanttGrip = "move" | "start" | "end";
+type GanttGrip = ScheduleGrip;
 
 /** A bar being dragged along the timeline. */
 type GanttDrag = {
@@ -1253,24 +1338,6 @@ type GanttDrag = {
   /** How many days the bar has been pulled, snapped to whole days. */
   days: number;
 };
-
-/**
- * The dates a drag lands on. The body of a bar carries both dates along; an
- * edge carries only its own, and neither end can be dragged past the other, so
- * a line can never be turned inside out.
- */
-function draggedDates(
-  base: { start: number; end: number },
-  days: number,
-  grip: GanttGrip,
-): { start: number; end: number } {
-  const shift = days * DAY_MS;
-  if (grip === "move")
-    return { start: base.start + shift, end: base.end + shift };
-  if (grip === "start")
-    return { start: Math.min(base.start + shift, base.end), end: base.end };
-  return { start: base.start, end: Math.max(base.end + shift, base.start) };
-}
 
 /**
  * A write in flight: the dates it sets (null = unset that date) and the dates
@@ -1331,8 +1398,12 @@ export function ProjectGantt({
   const updateProjectM = useMutation(api.costing.updateProject);
   const updateJobM = useMutation(api.jobs.updateJob);
   const updateFgM = useMutation(api.costing.updateFinishedGood);
+  const moveProjectM = useMutation(api.costing.moveProjectTimeline);
+  const moveJobM = useMutation(api.jobs.moveJobTimeline);
   const [drag, setDrag] = useState<GanttDrag | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  // the line whose bar the pointer is over — what the hover card is showing
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
   // the dates a row is being written to, held until the stored row agrees —
   // so a dragged bar never snaps back mid-round-trip
   const [pending, setPending] = useState<GanttPending | null>(null);
@@ -1385,6 +1456,7 @@ export function ProjectGantt({
         .join(" · ");
       return {
         key: `f:${fg._id}`,
+        level: "product",
         fgId: fg._id,
         name: fg.name,
         code: fg.code,
@@ -1398,6 +1470,12 @@ export function ProjectGantt({
         status,
         done,
         meta: meta.length > 0 ? meta : undefined,
+        // a product is planned between its job's dates — the job's own, or the
+        // project's where the job has none of its own
+        bounds: windowOf(
+          job?.startAt ?? project?.startAt,
+          job?.dueAt ?? project?.dueAt,
+        ),
       };
     };
 
@@ -1438,6 +1516,7 @@ export function ProjectGantt({
         if (end === undefined) missing += 1;
         charted.push({
           key: `j:${job._id}`,
+          level: "job",
           jobId: job._id,
           name: job.name,
           code: job.code,
@@ -1452,6 +1531,8 @@ export function ProjectGantt({
           done,
           meta,
           progress: { done: finished, total: products.length },
+          bounds: windowOf(project?.startAt, project?.dueAt),
+          limits: limitsFrom(ownDates(products)),
         });
         for (const product of sortFgs(products, sortMode)) {
           const row = productRow(product, 1, job, project);
@@ -1481,6 +1562,7 @@ export function ProjectGantt({
       if (project.dueAt === undefined) missing += 1;
       charted.push({
         key: `p:${project._id}`,
+        level: "project",
         projectId: project._id,
         name: project.name,
         code: project.code,
@@ -1495,6 +1577,8 @@ export function ProjectGantt({
         done,
         meta,
         progress: { done: finished, total: products.length },
+        // the project cannot be pulled in past the jobs it carries
+        limits: limitsFrom(ownDates(projectJobs)),
       });
       for (const job of projectJobs) {
         const jobStatus = jobProjectStatus(job, projectStatuses);
@@ -1510,6 +1594,7 @@ export function ProjectGantt({
         if (jobEnd === undefined) missing += 1;
         charted.push({
           key: `j:${job._id}`,
+          level: "job",
           jobId: job._id,
           name: job.name,
           code: job.code,
@@ -1527,6 +1612,8 @@ export function ProjectGantt({
               ? `${jobFinished}/${jobProducts.length} products`
               : undefined,
           progress: { done: jobFinished, total: jobProducts.length },
+          bounds: windowOf(project.startAt, project.dueAt),
+          limits: limitsFrom(ownDates(jobProducts)),
         });
         for (const product of sortFgs(jobProducts, sortMode)) {
           const row = productRow(product, 2, job, project);
@@ -1648,6 +1735,31 @@ export function ProjectGantt({
     overrideFor(row) ?? { start: dayStart(row.start), end: dayStart(row.end) };
 
   /**
+   * Why a typed date cannot be taken, or null when the plan still nests.
+   *
+   * A drag is clamped rather than refused — the bar stops where the plan stops
+   * and the reader sees it stop — but a date typed into a column is an exact
+   * ask, so it is answered exactly, in the words the server would refuse it
+   * with. Both come from the same rules module, so the two never disagree.
+   */
+  const dateRefusal = (row: GanttRow, next: DateWindow): string | null => {
+    return (
+      withinRefusal(
+        next,
+        row.bounds ?? {},
+        PLAN_SUBJECT[row.level],
+        PLAN_CONTAINER[row.level],
+      ) ??
+      shrinkRefusal(
+        next,
+        row.limits,
+        PLAN_CONTAINER[row.level],
+        PLAN_CONTENTS[row.level],
+      )
+    );
+  };
+
+  /**
    * Write a line's dates to whichever record owns them, holding the written
    * dates on screen until the stored row agrees. A date that is not named is
    * left alone; naming it as a clear removes it.
@@ -1696,21 +1808,61 @@ export function ProjectGantt({
   };
 
   /**
+   * Move a whole line as one bundle.
+   *
+   * What a project or a job is dragged by is handed to the server, which moves
+   * the work underneath it along by the same whole days: only the two dates
+   * change, nothing is resized, so every duration inside the bundle is kept and
+   * the plan stays nested by construction. The products of a job never leave it,
+   * and the job never leaves its project, however far the bundle is taken.
+   */
+  const moveBundle = async (
+    row: GanttRow,
+    start: number,
+    end: number,
+    days: number,
+  ) => {
+    setPending({ key: row.key, startAt: start, dueAt: end, shown: { start, end } });
+    setBusyKey(row.key);
+    try {
+      if (row.jobId !== undefined)
+        await moveJobM({ id: row.jobId, startAt: start, dueAt: end, days });
+      else if (row.projectId !== undefined)
+        await moveProjectM({ id: row.projectId, startAt: start, dueAt: end, days });
+    } catch (error) {
+      setPending(null);
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't move that line.",
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  /**
    * Move a line, or one end of it, by whole days. Each press of an arrow key
    * counts from the date already on screen rather than the stored one, so a
    * run of them adds up instead of each one landing on the same day.
+   *
+   * The pull is clamped to what the plan allows before anything is written, so
+   * a bar dragged against the edge of its project stops there rather than being
+   * refused on release.
    */
   const reschedule = async (row: GanttRow, days: number, grip: GanttGrip) => {
-    const { start: from, end: to } = datesOf(row);
-    const shift = days * DAY_MS;
-    // moving takes both dates along; an edge moves only its own, and neither
-    // can be pulled past the other
-    const start =
-      grip === "end" ? from : grip === "move" ? from + shift : Math.min(from + shift, to);
-    const end =
-      grip === "start" ? to : grip === "move" ? to + shift : Math.max(to + shift, from);
-    if (start === from && end === to) return;
-    await apply(row, { startAt: start, dueAt: end });
+    const base = datesOf(row);
+    const next = draggedDates(base, grip, days, row.bounds, row.limits);
+    if (next.start === base.start && next.end === base.end) return;
+    // a project or a job carries the work inside it; a product carries nothing
+    if (grip === "move" && row.level !== "product") {
+      await moveBundle(
+        row,
+        next.start,
+        next.end,
+        Math.round((next.start - base.start) / DAY_MS),
+      );
+      return;
+    }
+    await apply(row, { startAt: next.start, dueAt: next.end });
   };
 
   /**
@@ -1731,13 +1883,26 @@ export function ProjectGantt({
         await apply(row, { clearStart: true });
         return;
       }
-      // a start after the end pulls the end out with it
+      // a start after the end pulls the end out with it, so what is checked is
+      // the window the line would be left with
+      const next = at > end ? { start: at, end: at } : { start: at, end };
+      const refusal = dateRefusal(row, next);
+      if (refusal !== null) {
+        toast.error(refusal);
+        return;
+      }
       await apply(row, at > end ? { startAt: at, dueAt: at } : { startAt: at });
       return;
     }
     if (at === null) {
       if (row.ownEnd === undefined) return;
       await apply(row, { clearDue: true });
+      return;
+    }
+    const next = at < start ? { start: at, end: at } : { start, end: at };
+    const refusal = dateRefusal(row, next);
+    if (refusal !== null) {
+      toast.error(refusal);
       return;
     }
     await apply(row, at < start ? { startAt: at, dueAt: at } : { dueAt: at });
@@ -1826,6 +1991,14 @@ export function ProjectGantt({
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
+            {PLAN_LEVELS.map((level) => (
+              <span key={level} className="inline-flex items-center gap-1">
+                <span className={cn("h-2 w-4 rounded-full", LEVEL_FILL[level])} />
+                {LEVEL_LABEL[level]}
+              </span>
+            ))}
+            <span className="h-3 w-px bg-border" />
+            <span className="font-medium">Status</span>
             {projectStatuses.map((status, index) => (
               <span key={status} className="inline-flex items-center gap-1">
                 <span
@@ -1840,7 +2013,8 @@ export function ProjectGantt({
             {canEdit && (
               <span className="ml-auto inline-flex items-center gap-1">
                 <MoveHorizontal className="size-3" />
-                Drag a bar to move it, or an edge to change its start or end
+                Hover a bar for the line behind it; drag it to move the whole bundle,
+                or an edge to change one date
                 <span className="text-muted-foreground/60">
                   · ← → move a day, ↑ ↓ resize, ⌥ for the start
                 </span>

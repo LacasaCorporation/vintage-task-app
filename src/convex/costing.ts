@@ -31,6 +31,8 @@ import { currencySymbol } from "../lib/currency";
 import { defaultTaxPct } from "./accountingDefaults";
 import { isProductDone, productsOfJob } from "./jobs";
 import { requireUnusedMaterial, requireUnusedProduct } from "./usage";
+import { assertPlanNests } from "./scheduleRules";
+import { shiftDates } from "../lib/schedule-window";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -1037,7 +1039,64 @@ export const updateProject = mutation({
     if (patch.clearDue === true) clean.dueAt = undefined;
     if (patch.budget !== undefined)
       clean.budget = patch.budget >= 0 ? patch.budget : undefined;
+    // the project's own dates cannot be pulled in past the jobs inside it, so
+    // narrowing a project can never leave its work outside it
+    const nextStart =
+      patch.clearStart === true ? undefined : (patch.startAt ?? project.startAt);
+    const nextDue =
+      patch.clearDue === true ? undefined : (patch.dueAt ?? project.dueAt);
+    if (nextStart !== project.startAt || nextDue !== project.dueAt) {
+      await assertPlanNests(ctx, "project", project, {
+        startAt: nextStart,
+        dueAt: nextDue,
+      });
+    }
     await ctx.db.patch(id, clean);
+  },
+});
+
+/**
+ * Move a project along the timeline as one bundle.
+ *
+ * The project's dates become the ones asked for and every job — and every
+ * product under those jobs — that carries dates of its own moves by the same
+ * whole days. Nothing is resized, so a bundle move can never change how long
+ * any line of it is planned to take, and the work keeps sitting exactly where
+ * it sat inside the project.
+ *
+ * `days` is the shift the reader dragged, worked out by the chart from the same
+ * base it draws the bar on, so the row that moved and the rows it carries can
+ * never disagree by a day.
+ */
+export const moveProjectTimeline = mutation({
+  args: {
+    id: v.id("projects"),
+    startAt: v.number(),
+    dueAt: v.number(),
+    days: v.number(),
+  },
+  handler: async (ctx, { id, startAt, dueAt, days }) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const project = await ctx.db.get(id);
+    if (project === null || project.ownerId !== userId)
+      throw new Error("That project no longer exists.");
+    const shift = Math.round(days);
+    await ctx.db.patch(id, { startAt, dueAt });
+    if (shift === 0) return;
+    const jobs = await ctx.db
+      .query("projectJobs")
+      .withIndex("by_project", (q) => q.eq("projectId", id))
+      .collect();
+    for (const job of jobs) {
+      if (job.ownerId !== userId) continue;
+      const movedJob = shiftDates(job, shift);
+      if (movedJob !== null) await ctx.db.patch(job._id, movedJob);
+      for (const fg of await productsOfJob(ctx, userId, job._id)) {
+        const movedFg = shiftDates(fg, shift);
+        if (movedFg !== null) await ctx.db.patch(fg._id, movedFg);
+      }
+    }
   },
 });
 
@@ -1379,6 +1438,19 @@ export const updateFinishedGood = mutation({
     if (clearStart === true) patch.startAt = undefined;
     if (clearDue === true) patch.dueAt = undefined;
     if (clearRecurrence === true) patch.recurrence = undefined;
+    // a product is planned between its job's dates, never outside them
+    const nextStart =
+      clearStart === true ? undefined : (patch.startAt ?? fg.startAt);
+    const nextDue = clearDue === true ? undefined : (patch.dueAt ?? fg.dueAt);
+    if (nextStart !== fg.startAt || nextDue !== fg.dueAt) {
+      await assertPlanNests(
+        ctx,
+        "product",
+        fg,
+        { startAt: nextStart, dueAt: nextDue },
+        patch.jobId,
+      );
+    }
     await ctx.db.patch(id, patch);
     await clearStaleProductFlag(ctx, userId, id, jobIdsOf(fg));
     // moving a product into a job that was already finished reopens it
