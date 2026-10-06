@@ -79,6 +79,27 @@ const teamMemberValidator = v.object({
 
 // organisation settings singleton: one row per organisation (ownerId = super
 // admin). Everything the organisation owns is scoped to this owner id.
+
+/**
+ * One entry of the Projects status workflow. Rows written before statuses had
+ * a colour are still plain names, so a name alone stays valid; newer rows add
+ * how the status is worn — its colour, the completion it counts for and who
+ * owns the stage. All of it is presentation: the workflow itself still moves
+ * on names alone.
+ */
+export const projectStatusValidator = v.union(
+  v.string(),
+  v.object({
+    name: v.string(),
+    /** A key from the editor's palette, e.g. "sky". */
+    color: v.optional(v.string()),
+    /** Completion percentage, 0–100. */
+    completion: v.optional(v.number()),
+    /** Who owns this stage — a person or a team, as text. */
+    assignee: v.optional(v.string()),
+  }),
+);
+
 const settings = defineTable({
   ownerId: v.id("users"), // the super admin who owns this organisation
   workspaceName: v.optional(v.string()), // organisation name
@@ -102,7 +123,7 @@ const settings = defineTable({
   /** Tax registration or VAT number, where the business has one. */
   taxId: v.optional(v.string()),
   /** Ordered workflow statuses for Projects. Start and Finish are fixed. */
-  projectStatuses: v.optional(v.array(v.string())),
+  projectStatuses: v.optional(v.array(projectStatusValidator)),
   /**
    * Which accounts the automatic postings use. A bill, an invoice, a receipt
    * and a payment all read these instead of guessing from an account code, so

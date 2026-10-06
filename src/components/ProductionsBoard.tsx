@@ -17,7 +17,8 @@ import {
   finishBlockedReason,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
-  projectStatusesOrDefaults,
+  projectStatusDetailsOrDefaults,
+  type ProjectStatusDetail,
 } from "@/lib/project-statuses";
 import { isFlaggedProjectWork } from "@/lib/project-work";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -49,9 +50,13 @@ export default function ProductionsBoard({
   const setFgCompletedM = useMutation(api.costing.setFgCompleted);
   const setJobProjectStatusM = useMutation(api.jobs.setJobProjectStatus);
   const { confirm } = useAppDialogs();
-  const projectStatusesQuery = useQuery(api.settings.listProjectStatuses);
+  const statusDetailsQuery = useQuery(api.settings.listProjectStatusDetails);
   const setProjectStatusesM = useMutation(api.settings.setProjectStatuses);
-  const projectStatuses = projectStatusesOrDefaults(projectStatusesQuery);
+  // one query holds the statuses and the details the editor keeps — colour,
+  // completion and who owns the stage — so the board and the editor read the
+  // same workflow and can never disagree about what a status is called
+  const statusDetails = projectStatusDetailsOrDefaults(statusDetailsQuery);
+  const projectStatuses = statusDetails.map((detail) => detail.name);
 
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // level filter (projects / jobs / products), status filter, and the
@@ -69,7 +74,7 @@ export default function ProductionsBoard({
   // the print sheet is mounted on demand, then the browser print dialog opens
   const [printing, setPrinting] = useState(false);
   const [statusSettingsOpen, setStatusSettingsOpen] = useState(false);
-  const [statusDraft, setStatusDraft] = useState<string[] | null>(null);
+  const [statusDraft, setStatusDraft] = useState<ProjectStatusDetail[] | null>(null);
 
   const onlyFlaggedJobs = useMemo(
     () => (jobs ?? []).filter((j) => j.isFlagged),
@@ -230,7 +235,7 @@ export default function ProductionsBoard({
       onStatusDraft={setStatusDraft}
       statusSettingsOpen={statusSettingsOpen}
       onToggleStatusSettings={() => {
-        setStatusDraft(projectStatuses);
+        setStatusDraft(statusDetails);
         setStatusSettingsOpen((open) => !open);
       }}
       onSaveStatuses={() => void saveProjectStatuses()}

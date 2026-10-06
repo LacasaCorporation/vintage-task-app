@@ -39,6 +39,7 @@ import {
   type SortMode,
 } from "@/components/FlaggedLists";
 import type { Doc } from "@/convex/_generated/dataModel";
+import type { ProjectStatusDetail } from "@/lib/project-statuses";
 import { cn } from "@/lib/utils";
 
 /**
@@ -82,8 +83,8 @@ export default function ProjectsWorkspace({
   status: FlagStatusFilter;
   onStatusChange: (next: FlagStatusFilter) => void;
   projectStatuses: string[];
-  statusDraft: string[] | null;
-  onStatusDraft: (next: string[]) => void;
+  statusDraft: ProjectStatusDetail[] | null;
+  onStatusDraft: (next: ProjectStatusDetail[]) => void;
   statusSettingsOpen: boolean;
   onToggleStatusSettings: () => void;
   onSaveStatuses: () => void;
@@ -140,6 +141,7 @@ export default function ProjectsWorkspace({
               allLabel="Any status"
               size="md"
               title="Filter by status"
+              projectColors
               onChange={(next) => onStatusChange(next as FlagStatusFilter)}
             />
             <button

@@ -4,7 +4,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { activeFirmSettings, firmTeam, ownedFirmSettings, scopeUserId } from "./org";
-import { permissionsValidator } from "./schema";
+import { permissionsValidator, projectStatusValidator } from "./schema";
 import type {
   ActionKey,
   GranularPerms,
@@ -13,7 +13,8 @@ import type {
 } from "../lib/permissions";
 import { ACTIONS, ITEMS, SECTIONS } from "../lib/permissions";
 import {
-  cleanProjectStatuses,
+  cleanProjectStatusDetails,
+  projectStatusDetailsOrDefaults,
   projectStatusesOrDefaults,
 } from "../lib/project-statuses";
 import {
@@ -209,16 +210,32 @@ export const listProjectStatuses = query({
   },
 });
 
+/**
+ * The same statuses with the details the editor now keeps — the colour each
+ * status wears, the completion it counts for and who owns the stage. Names
+ * come back from `listProjectStatuses` exactly as before, so the workflow's
+ * own logic never has to know the details exist.
+ */
+export const listProjectStatusDetails = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return projectStatusDetailsOrDefaults(undefined);
+    const settingsDoc = await getSettings(ctx, userId);
+    return projectStatusDetailsOrDefaults(settingsDoc?.projectStatuses);
+  },
+});
+
 /** Save the ordered Projects status workflow. Start and Finish cannot change. */
 export const setProjectStatuses = mutation({
-  args: { statuses: v.array(v.string()) },
+  args: { statuses: v.array(projectStatusValidator) },
   handler: async (ctx, { statuses }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const settingsDoc = await getOrCreateSettings(ctx, userId);
-    const cleaned = cleanProjectStatuses(statuses);
+    const cleaned = cleanProjectStatusDetails(statuses);
     await ctx.db.patch(settingsDoc._id, { projectStatuses: cleaned });
-    return cleaned;
+    return projectStatusDetailsOrDefaults(cleaned);
   },
 });
 

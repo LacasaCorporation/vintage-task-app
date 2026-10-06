@@ -54,6 +54,8 @@ import {
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
   projectStatusesOrDefaults,
+  projectStatusDetailsOrDefaults,
+  statusColor,
   productLockedReason,
 } from "@/lib/project-statuses";
 
@@ -194,6 +196,22 @@ export type FlaggedSel =
 /** Wider chip shared by the Projects workspace filter bar and cards. */
 export const tagChip =
   "shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground";
+
+/**
+ * A status as a chip: the colour that stage wears over the plain chip's tint,
+ * so a row that only *reads* its status says the same thing at a glance as a
+ * row that can change it. Where the status can be changed, StatusSelect takes
+ * over and offers the colours as well.
+ */
+export function StatusChip({ status }: { status: string }) {
+  const details = projectStatusDetailsOrDefaults(
+    useQuery(api.settings.listProjectStatusDetails),
+  );
+  const index = details.findIndex((entry) => entry.name === status);
+  const color =
+    index >= 0 ? statusColor(details, status, index, details.length) : null;
+  return <span className={cn(tagChip, color?.soft, color?.softInk)}>{status}</span>;
+}
 
 /** Flagged jobs & products (from the Projects section) with their labels. */
 export type FlaggedData = {
@@ -410,7 +428,7 @@ export function FlaggedItemsList({
               )}
               <DueChips dueAt={job.dueAt} empty />
               <span className={tagChip}>{data.projectNameOf(job)}</span>
-              <span className={tagChip}>{jobProjectStatus(job, projectStatuses)}</span>
+              <StatusChip status={jobProjectStatus(job, projectStatuses)} />
             </div>
             {jobProducts.length > 0 && (
               <ul
@@ -484,6 +502,7 @@ export function FlaggedItemsList({
                           projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
                         ),
                       )}
+                      projectColors
                       disabled={fg.productionStartedAt === undefined}
                       title={
                         fg.productionStartedAt === undefined
@@ -726,7 +745,7 @@ export function FlaggedProjectsList({
               {projectFgs.length} product{projectFgs.length === 1 ? "" : "s"}
             </span>
             <DueChips dueAt={project.dueAt} />
-            <span className={tagChip}>{status}</span>
+            <StatusChip status={status} />
           </li>
         );
       })}
@@ -860,6 +879,7 @@ export function FlaggedProductsList({
               projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
               fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]),
             )}
+            projectColors
             disabled={fg.productionStartedAt === undefined}
             title={
               fg.productionStartedAt === undefined
@@ -1592,7 +1612,7 @@ export function ProductionReport({
                       )}
                     </span>
                     <span className="col-span-2 flex flex-wrap items-center gap-1.5 sm:col-span-1 sm:hidden">
-                      <span className={tagChip}>{row.status}</span>
+                      <StatusChip status={row.status} />
                     </span>
                   </li>
                 ))}

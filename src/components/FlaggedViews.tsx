@@ -19,14 +19,19 @@ import {
   Package,
   SquareKanban,
   TriangleAlert,
+  UserRound,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   middleProjectStatuses,
   PROJECT_STATUS_FINISH,
+  projectStatusDetailsOrDefaults,
   projectStatusesOrDefaults,
   productLockedReason,
+  statusAssignee,
+  statusColor,
+  statusCompletion,
 } from "@/lib/project-statuses";
 import {
   DueChips,
@@ -490,6 +495,7 @@ function JobRow({
                   projectStatuses,
                   fgProjectStatus(fg, projectStatuses),
                 )}
+                projectColors
                 disabled={fg.productionStartedAt === undefined}
                 title={
                   fg.productionStartedAt === undefined
@@ -668,23 +674,11 @@ export function JobFlatList({
 // dragged on the board is a chip moved in the tree, and the two never disagree.
 
 /**
- * The colour of a status, by its position in the workflow rather than its name.
- * The statuses are renameable, so this keeps the two ends of the workflow — the
- * first status and Finish — the same two colours whatever the reader called
- * them, with the middle of the workflow in violet.
+ * The colour of a status is read in `statusColor`: its own if the workflow's
+ * editor gave it one, otherwise its position — the first status and Finish
+ * keep the same two colours whatever the reader called them, with the middle
+ * of the workflow in violet.
  */
-function statusAccent(index: number, total: number): string {
-  if (index <= 0) return "bg-sky-500";
-  if (index >= total - 1) return "bg-emerald-500";
-  return "bg-violet-500";
-}
-
-/** The same status colour, as ink for an icon rather than a fill. */
-function statusInk(index: number, total: number): string {
-  if (index <= 0) return "text-sky-500";
-  if (index >= total - 1) return "text-emerald-500";
-  return "text-violet-500";
-}
 
 /** One card on the board, whichever level it came from. */
 type BoardCard = {
@@ -744,6 +738,11 @@ export function ProjectKanban({
   const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
   const projectStatuses = projectStatusesOrDefaults(
     configuredProjectStatuses ?? configuredStatusesQuery,
+  );
+  // the same statuses with the details the editor keeps: which colour each
+  // column wears, the completion a product there counts for, who owns the stage
+  const statusDetails = projectStatusDetailsOrDefaults(
+    useQuery(api.settings.listProjectStatusDetails),
   );
   const setProjectStatusM = useMutation(api.costing.setProjectProjectStatus);
   const setJobStatusM = useMutation(api.jobs.setJobProjectStatus);
@@ -854,7 +853,20 @@ export function ProjectKanban({
       <ul className="flex min-w-max items-start gap-3">
         {projectStatuses.map((status, index) => {
           const column = cards.filter((card) => card.status === status);
-          const accent = statusAccent(index, projectStatuses.length);
+          const color = statusColor(
+            statusDetails,
+            status,
+            index,
+            projectStatuses.length,
+          );
+          const accent = color.fill;
+          const completion = statusCompletion(
+            statusDetails,
+            status,
+            index,
+            projectStatuses.length,
+          );
+          const owner = statusAssignee(statusDetails, status);
           const isTarget = dragging !== null && dropTarget === status;
           return (
             <li
@@ -893,6 +905,29 @@ export function ProjectKanban({
                 <span className="ml-auto shrink-0 rounded-full bg-card px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
                   {column.length}
                 </span>
+              </div>
+              {/* what the stage itself says: how far a product in it counts,
+                  and who the stage belongs to when somebody was given */}
+              <div className="flex items-center gap-1.5 px-3 pb-2 text-[10px] text-muted-foreground">
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-1.5 py-0.5 font-medium tabular-nums",
+                    color.soft,
+                    color.softInk,
+                  )}
+                  title={`A product in ${status} counts ${completion}% complete`}
+                >
+                  {completion}%
+                </span>
+                {owner !== null && (
+                  <span
+                    className="inline-flex min-w-0 items-center gap-1"
+                    title={`${status} is owned by ${owner}`}
+                  >
+                    <UserRound className="size-3 shrink-0" />
+                    <span className="truncate">{owner}</span>
+                  </span>
+                )}
               </div>
               <ul className="flex min-h-16 flex-col gap-2 px-2 pb-2">
                 {column.length === 0 ? (
@@ -994,6 +1029,7 @@ export function ProjectKanban({
                           <StatusSelect
                             value={card.status}
                             statuses={projectStatuses}
+                            projectColors
                             disabled={!canEdit || busyKey !== null}
                             title={
                               canEdit
@@ -1395,6 +1431,11 @@ export function ProjectGantt({
   const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
   const projectStatuses = projectStatusesOrDefaults(
     configuredProjectStatuses ?? configuredStatusesQuery,
+  );
+  // the statuses with the details the editor keeps, so the legend, the bars'
+  // ink and a resting pointer's card all wear the colour the board wears
+  const statusDetails = projectStatusDetailsOrDefaults(
+    useQuery(api.settings.listProjectStatusDetails),
   );
   const updateProjectM = useMutation(api.costing.updateProject);
   const updateJobM = useMutation(api.jobs.updateJob);
@@ -2005,7 +2046,12 @@ export function ProjectGantt({
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
-                    statusAccent(index, projectStatuses.length),
+                    statusColor(
+                      statusDetails,
+                      status,
+                      index,
+                      projectStatuses.length,
+                    ).fill,
                   )}
                 />
                 {status}
@@ -2083,7 +2129,24 @@ export function ProjectGantt({
                   const statusIndex = projectStatuses.indexOf(row.status);
                   // the bar wears the colour of its level; the milestone keeps
                   // the workflow ink, so status still reads off the chart
-                  const ink = statusInk(statusIndex, projectStatuses.length);
+                  const rowColor = statusColor(
+                    statusDetails,
+                    row.status,
+                    statusIndex,
+                    projectStatuses.length,
+                  );
+                  const ink = rowColor.ink;
+                  // what the stage says about this line, for the card below
+                  const rowCompletion =
+                    statusIndex >= 0
+                      ? statusCompletion(
+                          statusDetails,
+                          row.status,
+                          statusIndex,
+                          projectStatuses.length,
+                        )
+                      : null;
+                  const rowOwner = statusAssignee(statusDetails, row.status);
                   const dragging = drag !== null && drag.key === row.key;
                   const hovering = hoverKey === row.key && !dragging;
                   const planned = overrideFor(row);
@@ -2400,7 +2463,7 @@ export function ProjectGantt({
                               marginLeft: to > 55 ? -6 : 6,
                             }}
                           >
-                            <span className="flex items-center gap-1.5">
+                            <span className="flex min-w-0 max-w-[260px] items-center gap-1.5">
                               <span
                                 className={cn(
                                   "size-1.5 shrink-0 rounded-full",
@@ -2410,8 +2473,12 @@ export function ProjectGantt({
                               <span className="font-medium text-foreground">
                                 {LEVEL_LABEL[row.level]}
                               </span>
-                              <span className="text-muted-foreground">
+                              <span className="min-w-0 truncate text-muted-foreground">
                                 {row.status}
+                                {rowCompletion !== null
+                                  ? ` · ${rowCompletion}%`
+                                  : ""}
+                                {rowOwner !== null ? ` · ${rowOwner}` : ""}
                               </span>
                               {overdue && (
                                 <span className="font-medium text-destructive">
