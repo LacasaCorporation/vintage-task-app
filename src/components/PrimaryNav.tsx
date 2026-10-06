@@ -6,6 +6,7 @@ import {
   ChevronDown,
   FileBarChart,
   Folder,
+  House,
   Layers,
   NotebookPen,
   Package,
@@ -22,7 +23,12 @@ import { cn } from "@/lib/utils";
 type FgDoc = Doc<"finishedGoods">;
 type MaterialDoc = Doc<"rawMaterials">;
 
-export type PrimarySection = "tasks" | "notes" | "costing" | "settings";
+export type PrimarySection =
+  | "home"
+  | "tasks"
+  | "notes"
+  | "costing"
+  | "settings";
 
 const rowCls = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors";
 const subRowCls = "flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors";
@@ -157,6 +163,13 @@ export default function PrimaryNav({
 
   return (
     <div className="flex flex-col gap-0.5">
+      <NavRow
+        label="Home"
+        Icon={House}
+        active={section === "home"}
+        onClick={() => onSelectSection("home")}
+      />
+
       <div className="ml-5 border-l border-border/60 pl-1">
         <button
           type="button"

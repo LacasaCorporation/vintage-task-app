@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import TasksSidebar from "@/components/TasksSidebar";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import TasksPanel from "@/components/TasksPanel";
+import HomeDashboard from "@/components/HomeDashboard";
 import PrimaryNav, { type PrimarySection } from "@/components/PrimaryNav";
 import type { CostingView } from "@/components/CostingSidebar";
 import { format } from "date-fns";
@@ -42,7 +43,7 @@ function SectionLoading({ label }: { label: string }) {
   );
 }
 
-type Section = "tasks" | "notes" | "costing" | "settings";
+type Section = "home" | "tasks" | "notes" | "costing" | "settings";
 type NotebookId = Id<"notebooks">;
 type PageId = Id<"notePages">;
 type ListId = Id<"taskLists">;
@@ -62,9 +63,12 @@ export default function Dashboard() {
   // section is read from the address bar rather than always starting on tasks
   const [section, setSection] = useState<Section>(() => {
     const asked = new URLSearchParams(window.location.search).get("section");
-    return asked === "costing" || asked === "notes" || asked === "tasks"
+    return asked === "home" ||
+      asked === "costing" ||
+      asked === "notes" ||
+      asked === "tasks"
       ? asked
-      : "tasks";
+      : "home";
   });
 
   // ── Access control (Settings tab roles & restrictions) ─────────────
@@ -105,6 +109,9 @@ export default function Dashboard() {
   };
   const sectionAllowed = (s: Section): boolean => {
     if (s === "settings") return canOpenSettings;
+    // Home is an overview of what the user may already see, so it is never
+    // withheld — its panels are gated individually instead.
+    if (s === "home") return true;
     if (myRole === "super") return true;
     return canDo(s, "view");
   };
@@ -966,7 +973,16 @@ export default function Dashboard() {
             </div>
           )}
 
-          {section === "settings" ? (
+          {section === "home" ? (
+            <HomeDashboard
+              firstName={firstName}
+              firmName={brandName}
+              canViewSales={canDoItem("sales", "view")}
+              canViewPurchase={canDoItem("purchases", "view")}
+              onGo={handleSelectSection}
+              onGoView={handleSelectCostingView}
+            />
+          ) : section === "settings" ? (
             <Suspense fallback={<SectionLoading label="settings" />}>
               <SettingsPanel />
             </Suspense>
@@ -1030,7 +1046,7 @@ export default function Dashboard() {
         </main>
 
         <p className="pb-8 text-center text-xs text-muted-foreground">
-          Slate · Your tasks &amp; notes, synced in real time.
+          Slate · Tasks, production and the books, in real time.
         </p>
       </div>
     </div>
