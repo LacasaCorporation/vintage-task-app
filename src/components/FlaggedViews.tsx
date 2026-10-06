@@ -7,6 +7,7 @@ import PriorityChip from "@/components/PriorityChip";
 import StatusSelect from "@/components/StatusSelect";
 import {
   Briefcase,
+  CalendarDays,
   CalendarRange,
   ChartGantt,
   ChevronDown,
@@ -16,8 +17,9 @@ import {
   GripVertical,
   MoveHorizontal,
   SquareKanban,
+  TriangleAlert,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   middleProjectStatuses,
@@ -1040,23 +1042,147 @@ function monthEnd(ms: number): number {
   return new Date(date.getFullYear(), date.getMonth() + 1, 1).getTime();
 }
 
-type MonthBand = { key: string; label: string; from: number; to: number };
+/** The widest the track is ever drawn, so a long span stays a chart, not a wall. */
+const GANTT_MAX_TRACK = 5000;
+/** Narrower than this a band cannot hold its own label, so the axis coarsens. */
+const GANTT_MIN_BAND = 34;
 
-/** The month columns across a span, each as its own share of the timeline. */
-function monthBands(start: number, end: number): MonthBand[] {
-  const bands: MonthBand[] = [];
-  let cursor = monthStart(start);
-  while (cursor < end) {
-    const date = new Date(cursor);
-    bands.push({
-      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
-      label: date.toLocaleDateString(undefined, { month: "short", year: "numeric" }),
-      from: cursor,
-      to: monthEnd(cursor),
-    });
-    cursor = new Date(date.getFullYear(), date.getMonth() + 1, 1).getTime();
+/** The step the axis is built from. */
+type BandUnit = "day" | "week" | "month" | "quarter";
+
+/** The axis steps, finest first, with the days each one covers. */
+const GANTT_UNITS: readonly { id: BandUnit; days: number }[] = [
+  { id: "day", days: 1 },
+  { id: "week", days: 7 },
+  { id: "month", days: 30.4375 },
+  { id: "quarter", days: 91.3125 },
+];
+
+/** How finely the axis is drawn — the scale buttons the reader gets. */
+type GanttZoom = "day" | "week" | "month" | "quarter";
+
+const GANTT_ZOOMS: readonly {
+  id: GanttZoom;
+  label: string;
+  unit: BandUnit;
+  /** How much room one day of the span gets at this scale. */
+  pxPerDay: number;
+}[] = [
+  { id: "day", label: "Days", unit: "day", pxPerDay: 44 },
+  { id: "week", label: "Weeks", unit: "week", pxPerDay: 14 },
+  { id: "month", label: "Months", unit: "month", pxPerDay: 4 },
+  { id: "quarter", label: "Quarters", unit: "quarter", pxPerDay: 1.6 },
+];
+
+/**
+ * The scale that suits a span, so a month of work opens on day columns and two
+ * years of it opens on quarters rather than on an unreadable smear.
+ */
+function pickZoom(spanDays: number): GanttZoom {
+  if (spanDays <= 45) return "day";
+  if (spanDays <= 120) return "week";
+  if (spanDays <= 420) return "month";
+  return "quarter";
+}
+
+/** The start of the step a timestamp falls in — the axis is snapped to these. */
+function alignToUnit(ms: number, unit: BandUnit): number {
+  const date = new Date(ms);
+  if (unit === "day") return dayStart(ms);
+  if (unit === "week") {
+    // weeks run Monday → Sunday, the working week these plans are read in
+    const weekday = (date.getDay() + 6) % 7;
+    return new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate() - weekday,
+    ).getTime();
+  }
+  if (unit === "month") return monthStart(ms);
+  return new Date(date.getFullYear(), Math.floor(date.getMonth() / 3) * 3, 1).getTime();
+}
+
+/**
+ * The next boundary along. Built on the calendar rather than by adding 24 hours
+ * so a day or a week stays a day or a week across a daylight-saving change.
+ */
+function addUnit(ms: number, unit: BandUnit): number {
+  const date = new Date(ms);
+  if (unit === "day")
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
+  if (unit === "week")
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 7).getTime();
+  if (unit === "month")
+    return new Date(date.getFullYear(), date.getMonth() + 1, 1).getTime();
+  return new Date(date.getFullYear(), date.getMonth() + 3, 1).getTime();
+}
+
+/** A band's label, shortened to whatever its own width can hold. */
+function bandLabel(ms: number, unit: BandUnit, widthPx: number): string {
+  const date = new Date(ms);
+  if (unit === "day")
+    return widthPx >= 74
+      ? date.toLocaleDateString(undefined, { weekday: "short", day: "numeric" })
+      : String(date.getDate());
+  if (unit === "week")
+    return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  if (unit === "month")
+    return date.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  return `Q${Math.floor(date.getMonth() / 3) + 1} ${date.getFullYear()}`;
+}
+
+type GanttBand = { key: string; from: number; to: number };
+
+/**
+ * The axis columns across a span. The first one starts on a step boundary, not
+ * on the span's own edge, which is why the caller measures the chart from
+ * `bands[0].from`: a stub half-band at the left edge would carry a label that
+ * does not match the days it actually draws.
+ */
+function ganttBands(start: number, end: number, unit: BandUnit): GanttBand[] {
+  const bands: GanttBand[] = [];
+  let cursor = alignToUnit(start, unit);
+  // the span is bounded by the horizon and every step moves forwards, so this
+  // cap only ever stops a runaway, never a real range
+  while (cursor < end && bands.length < 400) {
+    const to = addUnit(cursor, unit);
+    bands.push({ key: `${unit}:${cursor}`, from: cursor, to });
+    cursor = to;
   }
   return bands;
+}
+
+/**
+ * A repeating stripe that shades Saturday and Sunday, phase-aligned to the
+ * first day of the range: one background instead of one element per day.
+ *
+ * A single seven-day period is walked and the runs are always closed on day
+ * seven, which is what makes the repeat seamless — the colour at day seven is
+ * the colour at day zero by construction.
+ */
+function weekendShading(fromMs: number, pxPerDay: number): string {
+  const startWeekday = new Date(dayStart(fromMs)).getDay();
+  const shaded = (offset: number) => {
+    const weekday = (startWeekday + offset) % 7;
+    return weekday === 0 || weekday === 6;
+  };
+  const runs: { on: boolean; to: number }[] = [];
+  let on = shaded(0);
+  for (let day = 1; day <= 7; day += 1) {
+    const next = day === 7 ? shaded(0) : shaded(day);
+    if (next !== on) {
+      runs.push({ on, to: day });
+      on = next;
+    }
+  }
+  runs.push({ on, to: 7 });
+  let at = 0;
+  const stops = runs.map((run) => {
+    const stop = `${run.on ? "rgba(120,130,150,0.16)" : "transparent"} ${at * pxPerDay}px ${run.to * pxPerDay}px`;
+    at = run.to;
+    return stop;
+  });
+  return `repeating-linear-gradient(to right, ${stops.join(", ")})`;
 }
 
 /** A line drawn on the timeline. */
@@ -1075,6 +1201,8 @@ type GanttRow = {
   status: string;
   done: boolean;
   meta?: string;
+  /** Products finished out of the products this line carries. */
+  progress?: { done: number; total: number };
 };
 
 /** A bar being dragged along the timeline. */
@@ -1151,6 +1279,10 @@ export function ProjectGantt({
   const [pendingEnd, setPendingEnd] = useState<{ key: string; end: number } | null>(
     null,
   );
+  // null until the reader picks a scale, so the chart can open on the one that
+  // suits the work it is actually showing
+  const [zoom, setZoom] = useState<GanttZoom | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
   // read once per mount rather than on every render, so the today line and the
   // overdue rings stay put while the page is open
   const [today] = useState(() => dayStart(Date.now()));
@@ -1192,6 +1324,7 @@ export function ProjectGantt({
           status,
           done,
           meta,
+          progress: { done: finished, total: products.length },
         });
       }
       return { rows: charted, unscheduled: pending };
@@ -1209,6 +1342,7 @@ export function ProjectGantt({
       const products = fgs.filter((fg) =>
         productJobIds(fg).some((jobId) => jobIds.has(String(jobId))),
       );
+      const finished = products.filter((product) => product.isCompleted).length;
       const meta = `${plural(projectJobs.length, "job")} · ${plural(products.length, "product")}`;
       if (project.dueAt === undefined) {
         pending.push({
@@ -1230,6 +1364,7 @@ export function ProjectGantt({
         status,
         done,
         meta,
+        progress: { done: finished, total: products.length },
       });
       for (const job of projectJobs) {
         const jobStatus = jobProjectStatus(job, projectStatuses);
@@ -1256,36 +1391,98 @@ export function ProjectGantt({
             jobProducts.length > 0
               ? `${jobFinished}/${jobProducts.length} products`
               : undefined,
+          progress: { done: jobFinished, total: jobProducts.length },
         });
       }
     }
     return { rows: charted, unscheduled: pending };
   }, [mode, projects, jobs, fgs, projectStatuses, statusFilter, sortMode]);
 
-  const timeline = useMemo(() => {
+  // the days the chart has to cover, before any scale is chosen: everything on
+  // it, plus today so the reader always has a "now" to measure against
+  const range = useMemo(() => {
     const stamps = rows.flatMap((row) => [row.start, row.end]);
     stamps.push(today);
     // a two-year horizon either side of today keeps a stray date in 2099 from
     // stretching the chart into thousands of unreadable columns
     const horizon = 400 * DAY_MS;
-    const min = monthStart(
-      Math.max(Math.min(...stamps), today - horizon),
-    );
+    const min = monthStart(Math.max(Math.min(...stamps), today - horizon));
     const max = monthEnd(Math.min(Math.max(...stamps), today + horizon));
-    const span = Math.max(max - min, DAY_MS);
+    return { min, max, spanDays: (max - min) / DAY_MS };
+  }, [rows, today]);
+
+  const activeZoom = zoom ?? pickZoom(range.spanDays);
+
+  const timeline = useMemo(() => {
+    const { min, max } = range;
+    const preset =
+      GANTT_ZOOMS.find((entry) => entry.id === activeZoom) ?? GANTT_ZOOMS[2];
+    // The chart is measured from the axis's own first boundary, so a week column
+    // is a whole week rather than a stub at the left edge. A long span is capped
+    // rather than drawn to its natural width, and the step is then coarsened
+    // until its bands can hold a label — never made finer than the reader asked
+    // for. Two passes are enough: coarsening only ever widens a band.
+    let unitIndex = GANTT_UNITS.findIndex((entry) => entry.id === preset.unit);
+    let bands: GanttBand[] = [];
+    let from = min;
+    let trackWidth = 0;
+    let pxPerDay = 0;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const step = GANTT_UNITS[unitIndex];
+      bands = ganttBands(min, max, step.id);
+      from = bands[0]?.from ?? min;
+      const drawnDays = Math.max((max - from) / DAY_MS, 1);
+      trackWidth = Math.min(
+        Math.max(drawnDays * preset.pxPerDay, 420),
+        GANTT_MAX_TRACK,
+      );
+      pxPerDay = trackWidth / drawnDays;
+      if (
+        step.days * pxPerDay >= GANTT_MIN_BAND ||
+        unitIndex === GANTT_UNITS.length - 1
+      )
+        break;
+      unitIndex += 1;
+    }
+    const step = GANTT_UNITS[unitIndex];
+    const span = Math.max(max - from, DAY_MS);
     return {
-      min,
+      min: from,
       max,
-      bands: monthBands(min, max),
       /** Where a timestamp sits across the track, as a percentage. */
       pct: (at: number) =>
-        ((Math.min(Math.max(at, min), max) - min) / span) * 100,
-      // ~3.2px a day, so a short span still fills the card and a long one scrolls
-      trackWidth: Math.max(Math.round(span / DAY_MS) * 3.2, 420),
+        ((Math.min(Math.max(at, from), max) - from) / span) * 100,
+      trackWidth,
+      pxPerDay,
+      unit: step.id,
+      bands: bands.map((band) => ({
+        ...band,
+        label: bandLabel(band.from, step.id, step.days * pxPerDay),
+      })),
       /** How many days the track spans, for turning a drag into whole days. */
       days: span / DAY_MS,
     };
-  }, [rows, today]);
+  }, [range, activeZoom]);
+
+  /**
+   * Put today in the middle of the viewport, whatever the scale. The track is
+   * everything between the frozen name column and the due column.
+   */
+  const scrollToToday = () => {
+    const el = scrollerRef.current;
+    if (el === null) return;
+    const track = el.scrollWidth - GANTT_LABEL_W - GANTT_DUE_W;
+    const at = (timeline.pct(today) / 100) * track;
+    // the browser clamps the far end for us
+    el.scrollLeft = Math.max(at + GANTT_LABEL_W - el.clientWidth / 2, 0);
+  };
+
+  const late = rows.filter((row) => !row.done && row.end < today).length;
+  // below ~2px a day a stripe is noise, so the shading is left off
+  const weekend =
+    timeline.pxPerDay >= 2
+      ? weekendShading(timeline.min, timeline.pxPerDay)
+      : null;
 
   /**
    * The date a row has been dragged to, while that is still worth showing.
@@ -1346,19 +1543,68 @@ export function ProjectGantt({
     <div>
       {rows.length > 0 ? (
         <>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5 font-medium">
-              <span className="h-3 w-px bg-primary/60" /> Today
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
+            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-card p-0.5">
+              {GANTT_ZOOMS.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  aria-pressed={activeZoom === entry.id}
+                  onClick={() => setZoom(entry.id)}
+                  title={
+                    zoom === entry.id
+                      ? `${entry.label} — chosen by hand`
+                      : `Show the timeline in ${entry.label.toLowerCase()}`
+                  }
+                  className={cn(
+                    "rounded-md px-2 py-0.5 transition-colors",
+                    activeZoom === entry.id
+                      ? "bg-primary/10 font-medium text-primary"
+                      : "hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  {entry.label}
+                </button>
+              ))}
             </span>
-            {canEdit && (
-              <span className="inline-flex items-center gap-1">
-                <MoveHorizontal className="size-3" />
-                Drag a bar to change its due date
-                <span className="text-muted-foreground/60">
-                  · arrow keys move a day
-                </span>
+            <span className="inline-flex items-center gap-1.5 font-medium">
+              <span className="h-3 w-px bg-primary/60" />
+              {new Date(timeline.min).toLocaleDateString(undefined, {
+                day: "numeric",
+                month: "short",
+              })}
+              {" – "}
+              {new Date(timeline.max).toLocaleDateString(undefined, {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
+            </span>
+            {late > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive">
+                <TriangleAlert className="size-3" />
+                {late} late
               </span>
             )}
+            <span className="tabular-nums">
+              {rows.length} line{rows.length === 1 ? "" : "s"}
+            </span>
+            <span className="ml-auto inline-flex items-center gap-2">
+              <span className="tabular-nums">
+                {timeline.bands.length} {timeline.unit}
+                {timeline.bands.length === 1 ? "" : "s"}
+              </span>
+              <button
+                type="button"
+                onClick={scrollToToday}
+                title="Scroll the chart to today"
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-0.5 font-medium transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <CalendarDays className="size-3" /> Today
+              </button>
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
             {projectStatuses.map((status, index) => (
               <span key={status} className="inline-flex items-center gap-1">
                 <span
@@ -1370,13 +1616,18 @@ export function ProjectGantt({
                 {status}
               </span>
             ))}
-            <span className="ml-auto tabular-nums">
-              {timeline.bands.length} month
-              {timeline.bands.length === 1 ? "" : "s"}
-            </span>
+            {canEdit && (
+              <span className="ml-auto inline-flex items-center gap-1">
+                <MoveHorizontal className="size-3" />
+                Drag a bar to change its due date
+                <span className="text-muted-foreground/60">
+                  · arrow keys move a day
+                </span>
+              </span>
+            )}
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" ref={scrollerRef}>
             <div
               style={{
                 minWidth: timeline.trackWidth + GANTT_LABEL_W + GANTT_DUE_W,
@@ -1413,6 +1664,19 @@ export function ProjectGantt({
               </div>
 
               <div className="relative">
+                {/* weekends, as one repeating stripe behind the bars rather
+                    than one element per day */}
+                {weekend !== null && (
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-y-0"
+                    style={{
+                      left: GANTT_LABEL_W,
+                      right: GANTT_DUE_W,
+                      backgroundImage: weekend,
+                    }}
+                  />
+                )}
                 {rows.map((row) => {
                   const statusIndex = projectStatuses.indexOf(row.status);
                   const accent = statusAccent(statusIndex, projectStatuses.length);
@@ -1432,6 +1696,12 @@ export function ProjectGantt({
                   const from = timeline.pct(row.start);
                   const to = timeline.pct(end);
                   const overdue = !row.done && end < today;
+                  // how long the work has been given: creation → due date
+                  const durationDays = Math.max(1, Math.round((end - row.start) / DAY_MS));
+                  const doneLabel =
+                    row.progress !== undefined && row.progress.total > 0
+                      ? `, ${row.progress.done}/${row.progress.total} products done`
+                      : "";
                   const selected =
                     row.jobId !== undefined
                       ? selection?.kind === "job" && selection.id === row.jobId
@@ -1479,8 +1749,13 @@ export function ProjectGantt({
                             )}
                           >
                             {row.name}
-                          </button>
-                          <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+                          </button>                            <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+                            <span
+                              className="shrink-0 tabular-nums"
+                              title={`${durationDays} day${durationDays === 1 ? "" : "s"} from creation to its due date`}
+                            >
+                              {durationDays}d
+                            </span>
                             {row.code && (
                               <span className="shrink-0 font-mono text-muted-foreground/70">
                                 {row.code}
@@ -1497,8 +1772,8 @@ export function ProjectGantt({
                           tabIndex={canEdit ? 0 : undefined}
                           aria-label={
                             canEdit
-                              ? `${row.name} — ${row.status}, due ${new Date(end).toLocaleDateString()}. Press the left or right arrow key to reschedule it.`
-                              : `${row.name} — ${row.status}, due ${new Date(end).toLocaleDateString()}`
+                              ? `${row.name} — ${row.status}, due ${new Date(end).toLocaleDateString()}${doneLabel}. Press the left or right arrow key to reschedule it.`
+                              : `${row.name} — ${row.status}, due ${new Date(end).toLocaleDateString()}${doneLabel}`
                           }
                           onPointerDown={(event) => {
                             if (!canEdit || busyKey !== null) return;
@@ -1557,10 +1832,22 @@ export function ProjectGantt({
                           }}
                           title={
                             canEdit
-                              ? `${row.status} — created ${new Date(row.start).toLocaleDateString()}. Drag to change the due date.`
-                              : `${row.status} — created ${new Date(row.start).toLocaleDateString()}${overdue ? ", overdue" : ""}`
+                              ? `${row.status} — created ${new Date(row.start).toLocaleDateString()}, ${durationDays} day${durationDays === 1 ? "" : "s"}${doneLabel}. Drag to change the due date.`
+                              : `${row.status} — created ${new Date(row.start).toLocaleDateString()}, ${durationDays} day${durationDays === 1 ? "" : "s"}${doneLabel}${overdue ? ", overdue" : ""}`
                           }
-                        />
+                        >
+                          {/* how much of the line is already made, as an inlay
+                              on the bar rather than a second bar */}
+                          {row.progress !== undefined && row.progress.total > 0 && (
+                            <span
+                              aria-hidden
+                              className="absolute inset-y-0 left-0 rounded-full bg-black/25"
+                              style={{
+                                width: `${(row.progress.done / row.progress.total) * 100}%`,
+                              }}
+                            />
+                          )}
+                        </span>
                         <Diamond
                           className={cn(
                             "absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 fill-card",
