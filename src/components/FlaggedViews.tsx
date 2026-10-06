@@ -53,6 +53,7 @@ import {
   draggedDates,
   limitsFrom,
   shrinkRefusal,
+  windowDate,
   withinRefusal,
   type DateLimits,
   type DateWindow,
@@ -2080,9 +2081,11 @@ export function ProjectGantt({
                 )}
                 {rows.map((row) => {
                   const statusIndex = projectStatuses.indexOf(row.status);
-                  const accent = statusAccent(statusIndex, projectStatuses.length);
+                  // the bar wears the colour of its level; the milestone keeps
+                  // the workflow ink, so status still reads off the chart
                   const ink = statusInk(statusIndex, projectStatuses.length);
                   const dragging = drag !== null && drag.key === row.key;
+                  const hovering = hoverKey === row.key && !dragging;
                   const planned = overrideFor(row);
                   // the dates the line is drawn with: the stored ones, or the
                   // ones being dragged or just written
@@ -2090,8 +2093,16 @@ export function ProjectGantt({
                     start: dayStart(row.start),
                     end: dayStart(row.end),
                   };
+                  // clamped through the very same rule the write obeys, so the
+                  // preview cannot show a date the server would refuse
                   const dragged = dragging
-                    ? draggedDates(base, drag.days, drag.grip)
+                    ? draggedDates(
+                        base,
+                        drag.grip,
+                        drag.days,
+                        row.bounds,
+                        row.limits,
+                      )
                     : base;
                   const start = dragged.start;
                   const end = dragged.end;
@@ -2142,7 +2153,8 @@ export function ProjectGantt({
                         {row.fgId !== undefined ? (
                           <Package
                             className={cn(
-                              "size-3 shrink-0 text-violet-500/80",
+                              "size-3 shrink-0",
+                              LEVEL_INK[row.level],
                               row.depth === 1 && "ml-3",
                               row.depth === 2 && "ml-6",
                             )}
@@ -2151,11 +2163,14 @@ export function ProjectGantt({
                           <Folder
                             className={cn(
                               "size-3.5 shrink-0",
-                              row.done ? "text-emerald-500" : "text-sky-500/80",
+                              LEVEL_INK[row.level],
+                              row.done && "opacity-60",
                             )}
                           />
                         ) : (
-                          <Briefcase className="ml-3 size-3 shrink-0 text-sky-500/80" />
+                          <Briefcase
+                            className={cn("ml-3 size-3 shrink-0", LEVEL_INK[row.level])}
+                          />
                         )}
                         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                           <button
@@ -2243,6 +2258,12 @@ export function ProjectGantt({
                               if (days !== 0) void reschedule(row, days, grip);
                             }}
                             onPointerCancel={() => setDrag(null)}
+                            // the card follows the pointer onto the bar and off
+                            // it again, without ever getting in its way
+                            onPointerEnter={() => setHoverKey(row.key)}
+                            onPointerLeave={() =>
+                              setHoverKey((key) => (key === row.key ? null : key))
+                            }
                             onKeyDown={(event) => {
                               if (!canEdit) return;
                               const step =
@@ -2269,7 +2290,7 @@ export function ProjectGantt({
                             }}
                             className={cn(
                               "group absolute top-1/2 h-2.5 -translate-y-1/2 rounded-full",
-                              accent,
+                              LEVEL_FILL[row.level],
                               row.done && "opacity-40",
                               overdue && "ring-1 ring-destructive/60",
                               canEdit &&
@@ -2327,6 +2348,10 @@ export function ProjectGantt({
                             className="absolute top-1/2 h-2.5 w-4 -translate-y-1/2 rounded-full border border-dashed border-muted-foreground/60"
                             style={{ left: `${from}%` }}
                             title="No end date yet — set one in the End column"
+                            onPointerEnter={() => setHoverKey(row.key)}
+                            onPointerLeave={() =>
+                              setHoverKey((key) => (key === row.key ? null : key))
+                            }
                           />
                         )}
                         {hasEnd && (
@@ -2356,6 +2381,64 @@ export function ProjectGantt({
                             {drag.days === 0
                               ? new Date(drag.grip === "start" ? start : end).toLocaleDateString()
                               : `${drag.days > 0 ? "+" : "−"}${Math.abs(drag.days)}d · ${new Date(drag.grip === "start" ? start : end).toLocaleDateString()}`}
+                          </span>
+                        )}
+                        {/* what the line is, while the pointer rests on its bar:
+                            the level the colour stands for, the workflow state,
+                            the dates it is actually drawn with, and which of
+                            them it owns rather than inherits */}
+                        {hovering && (
+                          <span
+                            className={cn(
+                              // three lines that fit inside the 48px row, so the
+                              // card never adds scrollable overflow to the chart
+                              "pointer-events-none absolute top-1/2 z-30 flex -translate-y-1/2 flex-col rounded-lg border bg-popover/95 px-2 py-1 text-[10px] leading-[1.2] shadow-lg backdrop-blur-sm",
+                              to > 55 && "-translate-x-full",
+                            )}
+                            style={{
+                              left: `${to > 55 ? to : from}%`,
+                              marginLeft: to > 55 ? -6 : 6,
+                            }}
+                          >
+                            <span className="flex items-center gap-1.5">
+                              <span
+                                className={cn(
+                                  "size-1.5 shrink-0 rounded-full",
+                                  LEVEL_FILL[row.level],
+                                )}
+                              />
+                              <span className="font-medium text-foreground">
+                                {LEVEL_LABEL[row.level]}
+                              </span>
+                              <span className="text-muted-foreground">
+                                {row.status}
+                              </span>
+                              {overdue && (
+                                <span className="font-medium text-destructive">
+                                  overdue
+                                </span>
+                              )}
+                            </span>
+                            <span className="max-w-[260px] truncate font-medium text-foreground">
+                              {row.name}
+                              {row.code ? ` · ${row.code}` : ""}
+                            </span>
+                            <span className="flex items-center gap-1 whitespace-nowrap text-muted-foreground tabular-nums">
+                              <span>{windowDate(start)}</span>
+                              <span>→</span>
+                              <span>{hasEnd ? windowDate(end) : "no end yet"}</span>
+                              <span>· {durationDays}d</span>
+                              {row.progress !== undefined &&
+                                row.progress.total > 0 && (
+                                  <span>
+                                    · {row.progress.done}/{row.progress.total} done
+                                  </span>
+                                )}
+                              <span>
+                                · {startPlanned ? "own start" : "start not planned"}{" "}
+                                / {endPlanned ? "own end" : "end not planned"}
+                              </span>
+                            </span>
                           </span>
                         )}
                       </div>
