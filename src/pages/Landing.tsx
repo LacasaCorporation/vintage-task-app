@@ -11,13 +11,15 @@ import {
   Landmark,
   Layers,
   ListChecks,
+  Loader2,
   Quote,
   Receipt,
   ShieldCheck,
   ShoppingCart,
   Sparkles,
 } from "lucide-react";
-import { Link } from "react-router";
+import { Link, Navigate } from "react-router";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 
 const fadeUp = {
@@ -94,6 +96,19 @@ const proofs = [
 ];
 
 export default function Landing() {
+  const { isLoading, isAuthenticated } = useAuth();
+
+  // Someone who is already signed in opens straight into their workspace — the
+  // pitch below is for the people who have not been through the door yet.
+  if (isLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </main>
+    );
+  }
+  if (isAuthenticated) return <Navigate to="/dashboard" replace />;
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* ── Top nav ───────────────────────────────────────────────── */}
