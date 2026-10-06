@@ -17,6 +17,7 @@ import {
   GripVertical,
   MoveHorizontal,
   Package,
+  Rows3,
   SquareKanban,
   TriangleAlert,
   UserRound,
@@ -1071,6 +1072,17 @@ const GANTT_END_W = 112;
 /** Both date columns together — the chrome the chart itself is not drawn in. */
 const GANTT_DATE_W = GANTT_START_W + GANTT_END_W;
 
+/**
+ * How tall a row is drawn, in pixels. A timeline is read by comparing many
+ * lines at once, so the default squeezes them together — about a third more of
+ * the run fits on screen — while comfortable is the roomy row for anyone who
+ * wants the names easier to pick out.
+ */
+const GANTT_ROW_H = { compact: 34, comfy: 48 } as const;
+
+/** Where the row-density choice is remembered between visits. */
+const GANTT_DENSITY_KEY = "slate.ganttRows";
+
 /** Midnight of a day, so a bar never drifts across a daylight-saving shift. */
 function dayStart(ms: number): number {
   const date = new Date(ms);
@@ -1443,6 +1455,26 @@ export function ProjectGantt({
   const moveProjectM = useMutation(api.costing.moveProjectTimeline);
   const moveJobM = useMutation(api.jobs.moveJobTimeline);
   const [drag, setDrag] = useState<GanttDrag | null>(null);
+  // compact by default: the chart is about seeing the whole run at once
+  const [dense, setDense] = useState(() => {
+    try {
+      return window.localStorage.getItem(GANTT_DENSITY_KEY) !== "comfy";
+    } catch {
+      // storage can be unavailable — the chart still starts compact
+      return true;
+    }
+  });
+  const toggleDensity = () =>
+    setDense((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(GANTT_DENSITY_KEY, next ? "compact" : "comfy");
+      } catch {
+        // remembered for this session only — the toggle still works
+      }
+      return next;
+    });
+  const rowH = dense ? GANTT_ROW_H.compact : GANTT_ROW_H.comfy;
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // the line whose bar the pointer is over — what the hover card is showing
   const [hoverKey, setHoverKey] = useState<string | null>(null);
@@ -2030,6 +2062,20 @@ export function ProjectGantt({
               >
                 <CalendarDays className="size-3" /> Today
               </button>
+              <button
+                type="button"
+                onClick={toggleDensity}
+                aria-pressed={dense}
+                title={
+                  dense
+                    ? `Rows are squeezed to fit more lines — switch to ${GANTT_ROW_H.comfy}px rows`
+                    : `Rows are ${GANTT_ROW_H.comfy}px — squeeze them to fit more lines`
+                }
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-0.5 font-medium transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Rows3 className="size-3" />
+                {dense ? "Compact" : "Comfortable"}
+              </button>
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
@@ -2204,10 +2250,11 @@ export function ProjectGantt({
                     <div
                       key={row.key}
                       className={cn(
-                        "flex h-12 border-b border-border/40 transition-colors last:border-b-0 hover:bg-accent/30",
+                        "flex border-b border-border/40 transition-colors last:border-b-0 hover:bg-accent/30",
                         row.depth === 1 && "bg-muted/20",
                         selected && "bg-primary/[0.04]",
                       )}
+                      style={{ height: rowH }}
                     >
                       <div
                         className="sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-card px-3"
@@ -2453,7 +2500,7 @@ export function ProjectGantt({
                         {hovering && (
                           <span
                             className={cn(
-                              // three lines that fit inside the 48px row, so the
+                              // three lines that fit inside a row, so the
                               // card never adds scrollable overflow to the chart
                               "pointer-events-none absolute top-1/2 z-30 flex -translate-y-1/2 flex-col rounded-lg border bg-popover/95 px-2 py-1 text-[10px] leading-[1.2] shadow-lg backdrop-blur-sm",
                               to > 55 && "-translate-x-full",
