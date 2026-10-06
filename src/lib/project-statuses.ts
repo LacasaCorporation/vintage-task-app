@@ -34,6 +34,40 @@ export function productLockedReason(
   return null;
 }
 
+/**
+ * Units a run has part-made and would land on the shelf if it were finished
+ * now. Mirrors `landableQty` in convex/production.ts, which is the figure the
+ * server lands, so the two can never disagree about what is finishable.
+ */
+export function landableQtyOf(fg: {
+  inProduction?: number;
+  productionQty?: number;
+}): number {
+  return fg.inProduction ?? fg.productionQty ?? 0;
+}
+
+/**
+ * Why a product cannot be finished yet, or null when it can.
+ *
+ * Finishing is what puts a product's units on the shelf, so a batch has to be
+ * under way first: a product is finished by being produced, never by being
+ * ticked off. That is also what makes it go through the statuses — starting
+ * production is what moves it out of the first status.
+ *
+ * Mirrors the server's own `finishBlockedReason` in convex/production.ts, so a
+ * frozen control explains itself instead of offering what the server refuses.
+ */
+export function finishBlockedReason(fg: {
+  productionStartedAt?: number;
+  inProduction?: number;
+  productionQty?: number;
+}): string | null {
+  if (landableQtyOf(fg) > 0) return null;
+  return fg.productionStartedAt === undefined
+    ? "Start production before finishing this product — its units only reach the shelf when a batch is made."
+    : "This run has already landed all of its units. Start another batch to finish more of it.";
+}
+
 /** What the first status used to be called, so older saved sets still work. */
 const LEGACY_PROJECT_STATUS_START = "Start";
 

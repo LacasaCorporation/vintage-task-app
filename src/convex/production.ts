@@ -276,8 +276,16 @@ export const editConsumption = mutation({
  * so the product is left exactly as it was before the run.
  */
 export const stop = mutation({
-  args: { fgId: v.id("finishedGoods") },
-  handler: async (ctx, { fgId }) => {
+  args: {
+    fgId: v.id("finishedGoods"),
+    /**
+     * Required when the product is finished. Reversing the run reopens a
+     * product whose units are already on the shelf, so the reader is asked
+     * first and says so here — it is never done in passing.
+     */
+    confirmReverse: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { fgId, confirmReverse }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(fgId);
@@ -285,6 +293,15 @@ export const stop = mutation({
       throw new Error("That product no longer exists.");
     if (fg.productionStartedAt === undefined)
       throw new Error("Production isn't running for this product.");
+    // A finished product is on the books: reversing the run takes its units
+    // back off the shelf and reopens it. That is a real change, so it takes an
+    // explicit acknowledgement rather than happening behind a Yes button.
+    const finished =
+      fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH;
+    if (finished && confirmReverse !== true)
+      throw new Error(
+        `“${fg.name}” is finished — its units are on the shelf and its cost is in the job totals. Reversing the run reopens the product and takes those units back; confirm the reversal to go ahead.`,
+      );
 
     // a reverse has to undo the whole run: the units this run already landed
     // into stock come back off the shelf as well as the raw materials coming
@@ -371,6 +388,25 @@ export async function landRun(
 /** How many units finishing a product right now would put into stock. */
 export function landableQty(fg: Doc<"finishedGoods">): number {
   return fg.inProduction ?? fg.productionQty ?? 0;
+}
+
+/**
+ * Why a product cannot be finished yet, or null when it can.
+ *
+ * Finishing is what puts a product's units on the shelf, so a batch has to be
+ * under way first: a product is finished by being produced, never by being
+ * ticked off, and starting production is what moves it off the first status
+ * and through the workflow. Every way of finishing checks this, so the status,
+ * the tick and the stock ledger can never disagree.
+ *
+ * The client mirrors this in lib/project-statuses.ts, so a control that would
+ * be refused explains itself instead of being offered.
+ */
+export function finishBlockedReason(fg: Doc<"finishedGoods">): string | null {
+  if (landableQty(fg) > 0) return null;
+  return fg.productionStartedAt === undefined
+    ? "Start production before finishing this product — its units only reach the shelf when a batch is made."
+    : "This run has already landed all of its units. Start another batch to finish more of it.";
 }
 
 /**

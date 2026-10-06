@@ -10,6 +10,7 @@ import StatusSelect from "@/components/StatusSelect";
 import AssigneeChip from "@/components/AssigneeChip";
 import { assigneesOfTask } from "@/lib/task-people";
 import { isFlaggedProjectWork } from "@/lib/project-work";
+import { useFgStatusChange } from "@/lib/useFgStatusChange";
 import type { Priority } from "@/lib/task-utils";
 import {
   PRIORITY_META,
@@ -48,6 +49,7 @@ import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_PROJECT_STATUSES,
+  finishBlockedReason,
   middleProjectStatuses,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
@@ -57,6 +59,22 @@ import {
 
 export type JobDoc = Doc<"projectJobs">;
 export type FgDoc = Doc<"finishedGoods">;
+
+/**
+ * A product's tick is only offered when it would actually finish something:
+ * finishing lands a batch on the shelf, so with nothing part-made the server
+ * refuses it. Frozen here rather than left to fail, so the row explains
+ * itself. Reopening a finished product stays open — it asks first instead.
+ */
+function tickBlocked(fg: FgDoc): boolean {
+  return fg.isCompleted !== true && finishBlockedReason(fg) !== null;
+}
+
+/** What the tick means on this row, said before it is pressed. */
+function tickTitle(fg: FgDoc): string {
+  if (fg.isCompleted === true) return "Reopen this product — you'll be asked to confirm";
+  return finishBlockedReason(fg) ?? "Mark this product as done";
+}
 
 // the shared lookups live with the rest of the task helpers, so a screen that
 // only needs a colour doesn't have to load this one
@@ -248,7 +266,7 @@ export function FlaggedItemsList({
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(
     () => new Set(),
   );
-  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
+  const changeFgStatus = useFgStatusChange();
   const toggleProject = (key: string) =>
     setCollapsedProjects((current) => {
       const next = new Set(current);
@@ -411,7 +429,8 @@ export function FlaggedItemsList({
                   >
                     <Checkbox
                       checked={fg.isCompleted ?? false}
-                      disabled={busyKey !== null}
+                      disabled={busyKey !== null || tickBlocked(fg)}
+                      title={tickTitle(fg)}
                       onCheckedChange={() => onToggleFg(fg)}
                       aria-label={
                         fg.isCompleted
@@ -471,15 +490,7 @@ export function FlaggedItemsList({
                           ? "Start production to change the status"
                           : "Change the status"
                       }
-                      onChange={(status) =>
-                        void setFgProjectStatusM({ id: fg._id, status }).catch((error) =>
-                          toast.error(
-                            error instanceof Error
-                              ? error.message
-                              : "Couldn't update the product status.",
-                          ),
-                        )
-                      }
+                      onChange={(status) => void changeFgStatus(fg, status)}
                     />
                     <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
                   </li>
@@ -538,7 +549,8 @@ export function FlaggedItemsList({
               <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs">
                 <Checkbox
                   checked={fg.isCompleted ?? false}
-                  disabled={busyKey !== null}
+                  disabled={busyKey !== null || tickBlocked(fg)}
+                  title={tickTitle(fg)}
                   onCheckedChange={() => onToggleFg(fg)}
                   aria-label={
                     fg.isCompleted
@@ -761,7 +773,7 @@ export function FlaggedProductsList({
     const parentJob = allJobs.find((j) => jobIds.includes(j._id));
     return { fg, parentJob };
   });
-  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
+  const changeFgStatus = useFgStatusChange();
   // one people query for the whole list, so every row can name its assignees
   const peopleData = useQuery(api.tasks.people);
   const rowPeopleById = useMemo(
@@ -798,7 +810,8 @@ export function FlaggedProductsList({
         >
           <Checkbox
             checked={fg.isCompleted ?? false}
-            disabled={busyKey !== null}
+            disabled={busyKey !== null || tickBlocked(fg)}
+            title={tickTitle(fg)}
             onCheckedChange={() => onToggleFg(fg)}
             aria-label={
               fg.isCompleted
@@ -853,15 +866,7 @@ export function FlaggedProductsList({
                 ? "Start production to change the status"
                 : "Change the status"
             }
-            onChange={(status) =>
-              void setFgProjectStatusM({ id: fg._id, status }).catch((error) =>
-                toast.error(
-                  error instanceof Error
-                    ? error.message
-                    : "Couldn't update the product status.",
-                ),
-              )
-            }
+            onChange={(status) => void changeFgStatus(fg, status)}
           />
           <ProductionButton fg={fg} jobId={parentJob?._id} hideStatusPill />
         </li>
@@ -902,6 +907,10 @@ export function ProductionButton({
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const running = fg.productionStartedAt !== undefined;
+  // a finished product is on the books, so reversing its run reopens it — the
+  // one case where "reverse" is not just undoing a mistake
+  const finished =
+    fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH;
 
   // Production is the work of flagged jobs. A product with no job has nothing
   // to produce for, and one whose flag is off has not been put on the line
@@ -972,7 +981,11 @@ export function ProductionButton({
           type="button"
           disabled={busy}
           onClick={() => setConfirming(true)}
-          title="Reverse — stop production, return the consumed materials, and take back any units it already put into stock"
+          title={
+            finished
+              ? "Reverse — this product is finished, so reversing the run reopens it and takes the units it landed back off the shelf"
+              : "Reverse — stop production, return the consumed materials, and take back any units it already put into stock"
+          }
           aria-label={`Reverse the production of “${fg.name}”`}
           className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition-colors hover:bg-amber-500/20 disabled:opacity-50 dark:text-amber-400"
         >
@@ -990,15 +1003,20 @@ export function ProductionButton({
   return (
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
       <AlertTriangle className="size-2.5" />
-      Reverse and return the used stock?
+      {finished
+        ? "Reopen this finished product and return the used stock?"
+        : "Reverse and return the used stock?"}
       <button
         type="button"
         disabled={busy}
         onClick={() =>
           void run(
-            () => stopProduction({ fgId: fg._id }),
+            () =>
+              stopProduction({ fgId: fg._id, confirmReverse: finished }),
             "Couldn't reverse production.",
-            "Production reversed — materials and produced stock went back.",
+            finished
+              ? "Reversed — the product is open again and the units its run landed came back off the shelf."
+              : "Production reversed — materials and produced stock went back.",
           )
         }
         className="rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold text-destructive-foreground disabled:opacity-50"
@@ -1079,7 +1097,8 @@ function BoardCardView({
         </button>
         <Checkbox
           checked={done}
-          disabled={busy}
+          disabled={busy || tickBlocked(card.fg)}
+          title={tickTitle(card.fg)}
           onCheckedChange={() => onToggleFg(card.fg)}
           aria-label={
             done ? `Reopen product “${card.fg.name}”` : `Mark product “${card.fg.name}” as done`
@@ -1177,7 +1196,7 @@ export function FlaggedBoard({
     configuredProjectStatuses ?? configuredStatusesQuery,
   );
   const [dragging, setDragging] = useState<Id<"finishedGoods"> | null>(null);
-  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
+  const changeFgStatus = useFgStatusChange();
 
   const productCards: BoardCard[] = data.fgs.map((fg) => {
     const jobIds = fg.jobIds ?? (fg.jobId ? [fg.jobId] : []);
@@ -1206,9 +1225,7 @@ export function FlaggedBoard({
       if (onSetStatus) {
         onSetStatus(card.fg, col);
       } else {
-        void setFgProjectStatusM({ id: card.fg._id, status: col }).catch((error) =>
-          toast.error(error instanceof Error ? error.message : "Couldn't update the product status."),
-        );
+        void changeFgStatus(card.fg, col);
       }
     }
     setDragging(null);
@@ -1688,7 +1705,7 @@ export function FlaggedDetail({
   const updateFgM = useMutation(api.costing.updateFinishedGood);
   const updateProjectM = useMutation(api.costing.updateProject);
   const setJobProjectStatusM = useMutation(api.jobs.setJobProjectStatus);
-  const setFgProjectStatusM = useMutation(api.costing.setFgProjectStatus);
+  const changeFgStatus = useFgStatusChange();
   const setProjectProjectStatusM = useMutation(
     api.costing.setProjectProjectStatus,
   );
@@ -2268,7 +2285,7 @@ export function FlaggedDetail({
                 <DetailRow icon={Flag} label="Status">
                   <select
                     value={fgProjectStatus(fg, projectStatuses)}
-                    onChange={(e) => void setFgProjectStatusM({ id: fg._id, status: e.target.value })}
+                    onChange={(e) => void changeFgStatus(fg, e.target.value)}
                     disabled={busy}
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                   >

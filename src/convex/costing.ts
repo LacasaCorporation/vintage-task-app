@@ -13,7 +13,12 @@ import {
   jobIdsOf,
   projectHasFlaggedWork,
 } from "./flagCascade";
-import { syncProductionConsumption, landRun, landableQty } from "./production";
+import {
+  finishBlockedReason,
+  syncProductionConsumption,
+  landRun,
+  landableQty,
+} from "./production";
 import { getSettings } from "./settings";
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -1844,8 +1849,17 @@ export const setProjectFlag = mutation({
 
 /** Move a product to an ordered custom Projects status. */
 export const setFgProjectStatus = mutation({
-  args: { id: v.id("finishedGoods"), status: v.string() },
-  handler: async (ctx, { id, status }) => {
+  args: {
+    id: v.id("finishedGoods"),
+    status: v.string(),
+    /**
+     * Required to move a finished product back off Finish. Reopening it leaves
+     * its units on the shelf and its cost in the job totals, so the reader is
+     * asked first and says so here — it is never done in passing.
+     */
+    confirmReverse: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { id, status, confirmReverse }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(id);
@@ -1854,14 +1868,23 @@ export const setFgProjectStatus = mutation({
     const clean = status.trim().replace(/\s+/g, " ");
     if (!clean) throw new Error("Choose a status.");
     const isFinish = clean === PROJECT_STATUS_FINISH;
+    const wasFinished =
+      fg.projectStatus === PROJECT_STATUS_FINISH || fg.isCompleted === true;
     if (isFinish) {
+      // A product is finished by being produced: with no batch under way there
+      // is nothing to land, so Finish cannot be picked by hand at all. The
+      // product has to be started and work its way through the statuses.
+      const blocked = finishBlockedReason(fg);
+      if (blocked !== null) throw new Error(blocked);
       await assertNoOpenIssues(ctx, "product", id, "product");
       // finishing a product is what puts its units on the shelf, so the
       // project status and the stock ledger can never disagree
       await landRun(ctx, userId, fg, landableQty(fg));
+    } else if (wasFinished && confirmReverse !== true) {
+      throw new Error(
+        `“${fg.name}” is finished and its units are already on the shelf. Reopening it leaves the stock, the cost and the job totals as they are; confirm the reversal to go ahead.`,
+      );
     }
-    const wasFinished =
-      fg.projectStatus === PROJECT_STATUS_FINISH || fg.isCompleted === true;
     await ctx.db.patch(id, {
       projectStatus: clean,
       isCompleted: isFinish || undefined,
@@ -1892,10 +1915,23 @@ export const setFgProjectStatus = mutation({
  * Check off (or un-check) a flagged product in the todo list.
  * When every flagged product of a job is completed, the job itself is marked
  * completed (status → "completed"); un-checking reopens it (→ "in_progress").
+ *
+ * Ticking a product off is finishing it, so it follows the same rule as every
+ * other way of finishing: a batch has to be under way, because finishing is
+ * what lands its units on the shelf.
  */
 export const setFgCompleted = mutation({
-  args: { id: v.id("finishedGoods"), completed: v.boolean() },
-  handler: async (ctx, { id, completed }) => {
+  args: {
+    id: v.id("finishedGoods"),
+    completed: v.boolean(),
+    /**
+     * Required to reopen a finished product. Un-ticking one never touches its
+     * stock, its cost or the job totals its units are already counted in, so
+     * the reader is asked first and says so here.
+     */
+    confirmReverse: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { id, completed, confirmReverse }) => {
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in first.");
     const fg = await ctx.db.get(id);
@@ -1903,9 +1939,15 @@ export const setFgCompleted = mutation({
       throw new Error("That product no longer exists.");
     const wasDone = fg.isCompleted === true;
     if (completed) {
+      const blocked = finishBlockedReason(fg);
+      if (blocked !== null) throw new Error(blocked);
       await assertNoOpenIssues(ctx, "product", id, "product");
       // ticking a product off is finishing it: its units land in stock
       await landRun(ctx, userId, fg, landableQty(fg));
+    } else if (wasDone && confirmReverse !== true) {
+      throw new Error(
+        `“${fg.name}” is finished and its units are already on the shelf. Reopening it leaves the stock, the cost and the job totals as they are; confirm the reversal to go ahead.`,
+      );
     }
     await ctx.db.patch(id, {
       isCompleted: completed || undefined,

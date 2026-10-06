@@ -47,6 +47,7 @@ import {
 } from "@/components/FlaggedLists";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { useFgStatusChange } from "@/lib/useFgStatusChange";
 import { toast } from "@/lib/toast";
 
 /**
@@ -328,7 +329,7 @@ function JobRow({
   onToggleFg: (fg: FgDoc) => void;
 }) {
   const [open, setOpen] = useState(true);
-  const setFgStatusM = useMutation(api.costing.setFgProjectStatus);
+  const changeFgStatus = useFgStatusChange();
   const allProducts = productsOfJob(fgs, job._id);
   const products = sortFgs(
     allProducts.filter((f) =>
@@ -484,15 +485,7 @@ function JobRow({
                     ? "Start production to change the status"
                     : "Change the status"
                 }
-                onChange={(status) =>
-                  void setFgStatusM({ id: fg._id, status }).catch((error) =>
-                    toast.error(
-                      error instanceof Error
-                        ? error.message
-                        : "Couldn't update the product status.",
-                    ),
-                  )
-                }
+                onChange={(status) => void changeFgStatus(fg, status)}
               />
               <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
             </li>

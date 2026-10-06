@@ -14,11 +14,13 @@ import {
   type SortMode,
 } from "@/components/FlaggedLists";
 import {
+  finishBlockedReason,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
   projectStatusesOrDefaults,
 } from "@/lib/project-statuses";
 import { isFlaggedProjectWork } from "@/lib/project-work";
+import { useAppDialogs } from "@/components/AppDialogs";
 import { toast } from "@/lib/toast";
 
 /**
@@ -46,6 +48,7 @@ export default function ProductionsBoard({
   const projects = useQuery(api.costing.listProjects);
   const setFgCompletedM = useMutation(api.costing.setFgCompleted);
   const setJobProjectStatusM = useMutation(api.jobs.setJobProjectStatus);
+  const { confirm } = useAppDialogs();
   const projectStatusesQuery = useQuery(api.settings.listProjectStatuses);
   const setProjectStatusesM = useMutation(api.settings.setProjectStatuses);
   const projectStatuses = projectStatusesOrDefaults(projectStatusesQuery);
@@ -139,10 +142,40 @@ export default function ProductionsBoard({
     }, 120);
   };
 
+  /**
+   * Tick a product off, or reopen it.
+   *
+   * Ticking is finishing, which only a run under way can do — the tick is
+   * frozen while that is not the case, so it never reaches the server from
+   * here. Reopening a finished product is the one that has to be asked about:
+   * its units are on the shelf and its cost is in the job's totals, and
+   * reopening leaves both exactly as they are.
+   */
   const handleToggleFg = async (fg: FgDoc) => {
+    const reopening = fg.isCompleted === true;
+    if (reopening) {
+      const goAhead = await confirm({
+        title: `Reopen “${fg.name}”?`,
+        message:
+          "It is finished, so its units are already on the shelf and its cost is counted in the job's totals. Reopening puts it back on the list — the stock, the cost and those totals are not changed.",
+        confirmLabel: "Reopen",
+        danger: true,
+      });
+      if (!goAhead) return;
+    } else {
+      const blocked = finishBlockedReason(fg);
+      if (blocked !== null) {
+        toast.error(blocked);
+        return;
+      }
+    }
     setBusyKey(`f:${fg._id}`);
     try {
-      await setFgCompletedM({ id: fg._id, completed: !fg.isCompleted });
+      await setFgCompletedM({
+        id: fg._id,
+        completed: !fg.isCompleted,
+        confirmReverse: reopening,
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the product.");
     } finally {
