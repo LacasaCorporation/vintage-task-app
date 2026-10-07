@@ -2,11 +2,11 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useQuery } from "convex/react";
 import { ArrowLeft, Boxes, Loader2 } from "lucide-react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import CostingPanel from "@/components/CostingPanel";
 import { Button } from "@/components/ui/button";
 
-/** Where the products list lives, and where the Back button goes. */
+/** Where the products list lives, and where the Back button goes by default. */
 const BACK = "/dashboard?section=costing&view=products";
 
 /**
@@ -18,10 +18,19 @@ const BACK = "/dashboard?section=costing&view=products";
  * bottom, and the browser back button does nothing. A page has room for the
  * sheet, a sticky bar for the actions, and an address worth pasting to a
  * colleague.
+ *
+ * When the URL carries a `from` query parameter (set whenever the user was
+ * viewing a different list before opening the sheet — e.g. the projects view
+ * when they "clone product into this job") — every back action (← button,
+ * closeSheet, Save-successful redirect on page mode) returns them there
+ * instead of forcing the generic products list.
  */
 export default function CostingPage() {
   const { fgId } = useParams<{ fgId: string }>();
+  const [query] = useSearchParams();
   const navigate = useNavigate();
+
+  const returnTo = query.get("from") ?? undefined;
 
   const materials = useQuery(api.costing.listMaterials);
   const finishedGoods = useQuery(api.costing.listFinishedGoods);
@@ -52,10 +61,10 @@ export default function CostingPage() {
           size="sm"
           variant="outline"
           className="h-8 gap-1.5 rounded-lg text-xs"
-          onClick={() => navigate(BACK)}
+          onClick={() => navigate(returnTo ?? BACK)}
         >
           <ArrowLeft className="size-3.5" />
-          Back to products
+          Back
         </Button>
       </div>
     );
@@ -68,9 +77,10 @@ export default function CostingPage() {
       loading={false}
       view={{ kind: "fg", fgId: id }}
       onSelectView={(next) => {
-        if (next === null) navigate(BACK);
+        if (next === null) navigate(returnTo ?? BACK);
       }}
       layout="page"
+      returnTo={returnTo}
     />
   );
 }

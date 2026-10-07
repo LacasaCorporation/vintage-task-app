@@ -30,12 +30,13 @@ import ConnectJobDialog from "@/components/ConnectJobDialog";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { blendedRate, cleanRate, priceTaxedLines } from "@/lib/line-tax";
@@ -101,6 +102,46 @@ function AreaLoading({ label }: { label: string }) {
       Opening {label}…
     </p>
   );
+}
+
+function deriveBackLabelFromReturn(returnTo: string | undefined): string {
+  if (returnTo === undefined) return "Products";
+  try {
+    const q = returnTo.includes("?")
+      ? new URLSearchParams(returnTo.slice(returnTo.indexOf("?") + 1))
+      : new URLSearchParams();
+    const kind = q.get("view");
+    if (kind === null || kind === "products" || kind === "fg")
+      return "Products";
+    const kindLabels: Record<string, string> = {
+      projects: "Projects",
+      active: "Active",
+      inactive: "Inactive",
+      materials: "Materials",
+    };
+    if (kind in kindLabels) return kindLabels[kind];
+    const tab = q.get("tab");
+    const area = q.get("area");
+    if (kind === "purchase")
+      return tab !== null
+        ? `Purchase · ${tab.charAt(0).toUpperCase() + tab.slice(1)}`
+        : "Purchase";
+    if (kind === "sales")
+      return tab !== null
+        ? `Sales · ${tab.charAt(0).toUpperCase() + tab.slice(1)}`
+        : "Sales";
+    if (kind === "accounting")
+      return tab !== null
+        ? `Accounting · ${tab.charAt(0).toUpperCase() + tab.slice(1)}`
+        : "Accounting";
+    if (kind === "reports")
+      return area !== null
+        ? `Reports · ${area.charAt(0).toUpperCase() + area.slice(1)}`
+        : "Reports";
+    return kind.charAt(0).toUpperCase() + kind.slice(1);
+  } catch {
+    return "Products";
+  }
 }
 
 type FgDoc = Doc<"finishedGoods">;
@@ -210,7 +251,7 @@ export default function CostingPanel({
   loading,
   view,
   onSelectView,
-    onNewProject,
+  onNewProject,
   onEditProject,
   onDeleteProject,
   canCreate = true,
@@ -238,13 +279,18 @@ export default function CostingPanel({
    * something.
    */
   layout = "dialog",
+  /**
+   * Where to send the user after they close a page-layout sheet or save one.
+   * Overrides the default "Back to products list" redirect.
+   */
+  returnTo,
 }: {
   materials: MaterialDoc[];
   finishedGoods: FgDoc[];
   loading: boolean;
   view: CostingView;
   onSelectView: (view: CostingView) => void;
-    onNewProject?: () => void;
+  onNewProject?: () => void;
   onEditProject?: (project: Doc<"projects">) => void;
   onDeleteProject?: (project: Doc<"projects">) => void;
   canCreate?: boolean;
@@ -269,11 +315,30 @@ export default function CostingPanel({
   canEditProject?: boolean;
   canDeleteProject?: boolean;
   layout?: "dialog" | "page";
+  returnTo?: string;
 }) {
   const navigate = useNavigate();
   const [projectFocus, setProjectFocus] = useState<string | null>(null);
   /** The product whose costing sheet is open over the current view. */
   const [sheetId, setSheetId] = useState<Id<"finishedGoods"> | null>(null);
+  /**
+   * The last costing view the user was in BEFORE opening a sheet (i.e. while
+   * the sheet is closed or while we're still on the list that the user
+   * triggered the open from). Used to carry a return address so that opening
+   * the sheet from the projects tab returns the user there after save/close
+   * instead of dropping them into the products list. Updated in a useEffect
+   * on every render where `view` is NOT `fg` and NOT a plain products list,
+   * because if we tried to compute it from `view` on the same render where
+   * `view` became `fg`, we'd always see `fg` and lose the origin.
+   */
+  const lastListRef = useRef<CostingView>(null);
+  if (
+    view !== null &&
+    view.kind !== "fg" &&
+    !Object.is(view, lastListRef.current)
+  ) {
+    lastListRef.current = view;
+  }
   const addFgItem = useMutation(api.costing.addFgItem);
   const updateItem = useMutation(api.costing.updateItem);
   const removeItem = useMutation(api.costing.removeItem);
@@ -318,10 +383,17 @@ export default function CostingPanel({
         reader.onerror = () => reject(reader.error);
         reader.readAsDataURL(file);
       });
-      await setFgImage({ id: activeFg._id, data, name: file.name, size: file.size });
+      await setFgImage({
+        id: activeFg._id,
+        data,
+        name: file.name,
+        size: file.size,
+      });
       toast.success("Product image updated.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't attach the image.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't attach the image.",
+      );
     } finally {
       setUploadingImage(false);
     }
@@ -331,7 +403,8 @@ export default function CostingPanel({
     if (!activeFg?.imageUrl) return;
     const ok = await confirm({
       title: "Remove the product image?",
-      message: "The photo is detached from this product. It can be added again anytime.",
+      message:
+        "The photo is detached from this product. It can be added again anytime.",
       confirmLabel: "Remove image",
       danger: true,
     });
@@ -340,7 +413,9 @@ export default function CostingPanel({
       await clearFgImageM({ id: activeFg._id });
       toast.success("Image removed.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't remove the image.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't remove the image.",
+      );
     }
   };
 
@@ -383,9 +458,10 @@ export default function CostingPanel({
     // the tax box opens on the firm's default rate and only follows the user's
     // own once they have typed one
     const typedTax = Number(customTax);
-    const taxPct = customTax.trim() === "" || typedTax < 0
-      ? cleanRate(defaultTax?.taxPct ?? 0)
-      : cleanRate(typedTax);
+    const taxPct =
+      customTax.trim() === "" || typedTax < 0
+        ? cleanRate(defaultTax?.taxPct ?? 0)
+        : cleanRate(typedTax);
     const tax = subtotal * (taxPct / 100);
     return {
       qty: safeQty,
@@ -396,7 +472,9 @@ export default function CostingPanel({
       subtotal: Number.isFinite(subtotal) ? subtotal : 0,
       taxPct,
       tax: Number.isFinite(tax) ? tax : 0,
-      total: (Number.isFinite(subtotal) ? subtotal : 0) + (Number.isFinite(tax) ? tax : 0),
+      total:
+        (Number.isFinite(subtotal) ? subtotal : 0) +
+        (Number.isFinite(tax) ? tax : 0),
     };
   }, [customQty, customPrice, customTax, defaultTax?.taxPct]);
 
@@ -430,7 +508,38 @@ export default function CostingPanel({
   // The sheet has its own address now, at `/costing/:fgId`, so anything that
   // used to pop it open over a list sends the user to that page instead. One
   // redirect here covers every entry point in the app at once.
-  const sheetRoute = view?.kind === "fg" ? `/costing/${view.fgId}` : null;
+  //
+  // When the user was viewing a non-products list (projects / active /
+  // inactive / materials / purchase / sales / accounting / reports) before
+  // opening the sheet, the URL carries a `from` query param pointing back to
+  // that list. CostingPage honors it on close / save, so creating a product
+  // from a job returns the user to the project view instead of dropping them
+  // into the unrelated products list. The origin is derived from
+  // `lastListRef`, which tracks the previous non-sheet list so we don't see
+  // the freshly-assigned `view.kind === "fg"` and wrongly conclude there is
+  // no origin.
+  const lastView = lastListRef.current;
+  const returnAddr = (() => {
+    if (lastView === null) return null;
+    if (lastView.kind === "fg" || lastView.kind === "products") return null;
+    const parts = new URLSearchParams({
+      section: "costing",
+      view: lastView.kind,
+    });
+    if (lastView.kind === "purchase") parts.append("tab", lastView.tab);
+    if (lastView.kind === "sales") parts.append("tab", lastView.tab);
+    if (lastView.kind === "accounting") parts.append("tab", lastView.tab);
+    if (lastView.kind === "reports") parts.append("area", lastView.area);
+    return `/dashboard?${parts.toString()}`;
+  })();
+  const sheetRoute =
+    view?.kind === "fg"
+      ? (() => {
+          const base = `/costing/${view.fgId}`;
+          if (returnAddr === null) return base;
+          return `${base}?from=${encodeURIComponent(returnAddr)}`;
+        })()
+      : null;
   useEffect(() => {
     if (layout === "dialog" && sheetRoute !== null) navigate(sheetRoute);
   }, [layout, sheetRoute, navigate]);
@@ -444,7 +553,8 @@ export default function CostingPanel({
       : (finishedGoods.find((f) => f._id === activeFgId) ?? null);
   // the sheet renders as a modal over everything else, so anything it needs to
   // show the user has to live inside that modal
-  const sheetOpen = (view?.kind === "fg" || sheetId !== null) && activeFg !== null;
+  const sheetOpen =
+    (view?.kind === "fg" || sheetId !== null) && activeFg !== null;
   const { format, format: money, code: currencyCode } = useWorkspaceCurrency();
   const markupPct = activeFg?.markupPct ?? 0;
 
@@ -479,7 +589,9 @@ export default function CostingPanel({
       materials.map((m) => ({
         id: m._id,
         label: m.name,
-        sub: [m.code, m.category].filter((v) => !!v && v !== "").join(" · ") || undefined,
+        sub:
+          [m.code, m.category].filter((v) => !!v && v !== "").join(" · ") ||
+          undefined,
         hint: `${money(m.pricePerUnit)}/${m.unit}`,
         keywords: `${(m.stock ?? 0).toLocaleString()} ${m.unit} in stock`,
       })),
@@ -535,7 +647,10 @@ export default function CostingPanel({
     mergedOnceFor.current = activeFg._id;
     void mergeDuplicates({ fgId: activeFg._id })
       .then((removed) => {
-        if (removed > 0) toast.success(`Merged ${removed} duplicate row${removed === 1 ? "" : "s"}.`);
+        if (removed > 0)
+          toast.success(
+            `Merged ${removed} duplicate row${removed === 1 ? "" : "s"}.`,
+          );
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -573,11 +688,19 @@ export default function CostingPanel({
 
   const updateDraft = (
     id: Id<"costingItems">,
-    patch: Partial<{ label: string; qty: number; unitPrice: number; taxPct: number }>,
+    patch: Partial<{
+      label: string;
+      qty: number;
+      unitPrice: number;
+      taxPct: number;
+    }>,
   ) => setDrafts((ds) => ds.map((d) => (d.id === id ? { ...d, ...patch } : d)));
 
   /** True when a draft line and its stored row differ on anything. */
-  const draftChanged = (r: (typeof rows)[number], d: (typeof drafts)[number] | undefined) =>
+  const draftChanged = (
+    r: (typeof rows)[number],
+    d: (typeof drafts)[number] | undefined,
+  ) =>
     d !== undefined &&
     (d.label !== r.label ||
       d.qty !== r.qty ||
@@ -625,10 +748,13 @@ export default function CostingPanel({
       const bucket =
         row.materialId !== undefined
           ? "material"
-          : row.kind === "labour" || row.kind === "expense" || row.kind === "custom"
+          : row.kind === "labour" ||
+              row.kind === "expense" ||
+              row.kind === "custom"
             ? row.kind
             : "custom";
-      byKind[bucket] += line.qty * line.unitPrice * (1 + cleanRate(line.taxPct) / 100);
+      byKind[bucket] +=
+        line.qty * line.unitPrice * (1 + cleanRate(line.taxPct) / 100);
     });
     return {
       subtotal: priced.subtotal,
@@ -711,7 +837,9 @@ export default function CostingPanel({
         }
         toast.success("Sheet saved.");
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Couldn't save the sheet.");
+        toast.error(
+          error instanceof Error ? error.message : "Couldn't save the sheet.",
+        );
       } finally {
         setSavingSheet(false);
       }
@@ -748,6 +876,9 @@ export default function CostingPanel({
         });
       }
       toast.success(`“${activeFg.name}” saved.`);
+      if (layout === "page" && returnTo !== undefined) {
+        navigate(returnTo);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't save.");
     } finally {
@@ -785,8 +916,19 @@ export default function CostingPanel({
       columns: 2,
       confirmLabel: "Apply",
       fields: [
-        { key: "label", label: "Description", initial: row.label, required: true },
-        { key: "qty", label: "Quantity", initial: String(row.qty), type: "number", required: true },
+        {
+          key: "label",
+          label: "Description",
+          initial: row.label,
+          required: true,
+        },
+        {
+          key: "qty",
+          label: "Quantity",
+          initial: String(row.qty),
+          type: "number",
+          required: true,
+        },
         {
           key: "price",
           label: "Unit price",
@@ -829,28 +971,33 @@ export default function CostingPanel({
       });
       toast.success("Line updated.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the line.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't update the line.",
+      );
     }
   };
-  const editRow = (
-    row: {
-      _id: Id<"costingItems">;
-      label: string;
-      qty: number;
-      unitPrice: number;
-      taxPct?: number;
-      kind?: string;
-    },
-  ) => guardProduction("Editing a line", () => void handleEditRow(row));
+  const editRow = (row: {
+    _id: Id<"costingItems">;
+    label: string;
+    qty: number;
+    unitPrice: number;
+    taxPct?: number;
+    kind?: string;
+  }) => guardProduction("Editing a line", () => void handleEditRow(row));
 
   /** Reclassify a cost line as labour / expense / custom, straight from its badge. */
-  const setRowKind = async (row: { _id: Id<"costingItems"> }, kind: CostLineKind) => {
+  const setRowKind = async (
+    row: { _id: Id<"costingItems"> },
+    kind: CostLineKind,
+  ) => {
     const run = async () => {
       try {
         await updateItem({ id: row._id, kind });
       } catch (error) {
         toast.error(
-          error instanceof Error ? error.message : "Couldn't change the cost type.",
+          error instanceof Error
+            ? error.message
+            : "Couldn't change the cost type.",
         );
       }
     };
@@ -913,7 +1060,9 @@ export default function CostingPanel({
       setAddingMaterialId("");
       setMaterialQty("1");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't add the row.",
+      );
     }
   };
   const addMaterialRowGuarded = () =>
@@ -932,7 +1081,9 @@ export default function CostingPanel({
       toast.error("Rate can't be negative.");
       return;
     }
-    const label = customLabel.trim() || COST_KINDS.find((k) => k.kind === customKind)!.label;
+    const label =
+      customLabel.trim() ||
+      COST_KINDS.find((k) => k.kind === customKind)!.label;
     // the same cost, typed the same way, is the same line twice over — ask
     // first and offer to add to it rather than making a second row
     const twin = rows.find(
@@ -993,7 +1144,9 @@ export default function CostingPanel({
       // back to "follow the firm default" for the next line
       setCustomTax("-1");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't add the row.",
+      );
     }
   };
 
@@ -1078,11 +1231,15 @@ export default function CostingPanel({
               ? escapeHtml(costKindMeta(r.kind).label)
               : ""
           }</td>
-          ${withAmounts ? `<td class="num">${format(l.unitPrice)}</td>
+          ${
+            withAmounts
+              ? `<td class="num">${format(l.unitPrice)}</td>
           <td class="num">${cleanRate(l.taxPct)}%</td>
           <td class="num">${format(amount)}</td>
           <td class="num muted">${format(tax)}</td>
-          <td class="num strong">${format(amount + tax)}</td>` : ""}
+          <td class="num strong">${format(amount + tax)}</td>`
+              : ""
+          }
         </tr>`;
       })
       .join("");
@@ -1142,7 +1299,9 @@ export default function CostingPanel({
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>
-  ${withAmounts ? `
+  ${
+    withAmounts
+      ? `
   <table class="totals">
     <tr><td class="lbl">Sub total</td><td class="val">${money(totals.subtotal)}</td></tr>
     <tr><td class="lbl">Tax amount</td><td class="val">${money(totals.tax)}</td></tr>
@@ -1156,7 +1315,9 @@ export default function CostingPanel({
     <tr><td class="lbl">of which expenses</td><td class="val">${money(totals.expenses)}</td></tr>`
         : ""
     }
-  </table>` : ""}
+  </table>`
+      : ""
+  }
   ${activeFg.note ? `<p class="note">${escapeHtml(activeFg.note)}</p>` : ""}
   <script>window.onload = function () { window.print(); };</script>
 </body>
@@ -1228,12 +1389,13 @@ export default function CostingPanel({
   );
 
   /**
-   * Where the sheet is a page, closing it means going back to the products
+   * Where the sheet is a page, closing it means going back to wherever the
+   * user came from (if a returnTo was provided) — otherwise the products
    * list; as a dialog it means dismissing the overlay.
    */
   const closeSheet = () => {
     if (layout === "page") {
-      navigate("/dashboard?section=costing&view=products");
+      navigate(returnTo ?? "/dashboard?section=costing&view=products");
       return;
     }
     setSheetId(null);
@@ -1250,737 +1412,772 @@ export default function CostingPanel({
    * can never drift apart.
    */
   const sheetBody = activeFg ? (
-        <>
-          {pendingEdit !== null && (
-            <ProductionWarning
-              label={pendingEdit.label}
-              onContinue={() => {
-                const run = pendingEdit.run;
-                setPendingEdit(null);
-                void run();
-              }}
-              onCancel={() => setPendingEdit(null)}
-            />
-          )}
-          {/* product header */}
-          <div className="mt-1.5 flex flex-wrap items-center gap-2.5 rounded-xl border bg-card px-2.5 py-1.5 shadow-sm">
-            {/* product image: thumbnail or add button */}
-            {activeFg.imageUrl ? (
-              <div className="group/img relative shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setLightboxOpen(true)}
-                  title="Click to enlarge"
-                  className="block size-10 overflow-hidden rounded-lg border bg-muted"
-                >
-                  <img
-                    src={activeFg.imageUrl}
-                    alt={activeFg.imageAlt ?? activeFg.name}
-                    className="size-full object-cover"
-                  />
-                </button>
-                <span className="absolute -right-1.5 -top-1.5 hidden gap-0.5 group-hover/img:flex">
-                  <button
-                    type="button"
-                    aria-label="Replace image"
-                    title="Replace image"
-                    className="grid size-5 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-primary"
-                    onClick={handlePickImage}
-                  >
-                    <Pencil className="size-2.5" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Remove image"
-                    title="Remove image"
-                    className="grid size-5 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-destructive"
-                    onClick={() => void handleRemoveImage()}
-                  >
-                    <Trash2 className="size-2.5" />
-                  </button>
-                </span>
-              </div>
-            ) : (
+    <>
+      {pendingEdit !== null && (
+        <ProductionWarning
+          label={pendingEdit.label}
+          onContinue={() => {
+            const run = pendingEdit.run;
+            setPendingEdit(null);
+            void run();
+          }}
+          onCancel={() => setPendingEdit(null)}
+        />
+      )}
+      {/* product header */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-2.5 rounded-xl border bg-card px-2.5 py-1.5 shadow-sm">
+        {/* product image: thumbnail or add button */}
+        {activeFg.imageUrl ? (
+          <div className="group/img relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(true)}
+              title="Click to enlarge"
+              className="block size-10 overflow-hidden rounded-lg border bg-muted"
+            >
+              <img
+                src={activeFg.imageUrl}
+                alt={activeFg.imageAlt ?? activeFg.name}
+                className="size-full object-cover"
+              />
+            </button>
+            <span className="absolute -right-1.5 -top-1.5 hidden gap-0.5 group-hover/img:flex">
               <button
                 type="button"
+                aria-label="Replace image"
+                title="Replace image"
+                className="grid size-5 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-primary"
                 onClick={handlePickImage}
-                title="Add a product image"
-                className="grid size-10 shrink-0 place-items-center rounded-lg border border-dashed bg-muted/40 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
               >
-                {uploadingImage ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <ImagePlus className="size-4" />
-                )}
+                <Pencil className="size-2.5" />
               </button>
-            )}
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleImageFile}
-            />
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-display text-sm font-semibold">{activeFg.name}</p>
-              <p className="truncate text-[11px] text-muted-foreground">
-                {activeFg.projectName}
-                {activeFg.code ? ` · ${activeFg.code}` : ""}
-                {activeFg.unit ? ` · per ${activeFg.unit}` : ""}
-                {activeFg.productionStartedAt !== undefined && " · in production"}
-                {activeFg.isCompleted === true && " · finished"}
-                {jobNames.length > 0 && ` · in ${jobNames.join(", ")}`}
-              </p>
-              {activeFg.note && (
-                <p className="truncate text-[11px] text-muted-foreground/80">{activeFg.note}</p>
-              )}
-            </div>
-            {/* at-a-glance figures, so the sheet needs no scrolling to read */}
-            <dl className="flex shrink-0 items-center gap-3 text-right">
-              <div
-                title="Finished units on hand, ready to sell. A sales bill takes stock off this."
+              <button
+                type="button"
+                aria-label="Remove image"
+                title="Remove image"
+                className="grid size-5 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-destructive"
+                onClick={() => void handleRemoveImage()}
               >
-                <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                  Stock
-                </dt>
-                <dd
-                  className={cn(
-                    "text-xs font-semibold tabular-nums",
-                    (activeFg.stock ?? 0) < 0
-                      ? "text-destructive"
-                      : (activeFg.stock ?? 0) > 0
-                        ? "text-foreground"
-                        : "text-muted-foreground",
-                  )}
-                >
-                  {(activeFg.stock ?? 0).toLocaleString()}{" "}
-                  <span className="font-normal text-muted-foreground">
-                    {activeFg.unit ?? "pcs"}
-                  </span>
-                </dd>
-              </div>
-              {(activeFg.inProduction ?? 0) > 0 && (
-                <div
-                  title="Part-made right now — a run has started but not finished"
-                >
-                  <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                    In production
-                  </dt>
-                  <dd className="text-xs font-semibold tabular-nums text-primary">
-                    {activeFg.inProduction?.toLocaleString()}
-                  </dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
-                  Sales price
-                </dt>
-                <dd className="text-sm font-bold tabular-nums text-foreground">
-                  {money(totals.grand)}
-                </dd>
-              </div>
-            </dl>
-            {layout === "dialog" && sheetActions}
+                <Trash2 className="size-2.5" />
+              </button>
+            </span>
           </div>
-
-          {/* image lightbox */}
-          {lightboxOpen && activeFg.imageUrl && (
-            <div
-              className="fixed inset-0 z-[100] grid place-items-center bg-foreground/60 p-6 backdrop-blur-sm animate-in fade-in duration-150"
-              onClick={() => setLightboxOpen(false)}
+        ) : (
+          <button
+            type="button"
+            onClick={handlePickImage}
+            title="Add a product image"
+            className="grid size-10 shrink-0 place-items-center rounded-lg border border-dashed bg-muted/40 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+          >
+            {uploadingImage ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <ImagePlus className="size-4" />
+            )}
+          </button>
+        )}
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleImageFile}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-display text-sm font-semibold">
+            {activeFg.name}
+          </p>
+          <p className="truncate text-[11px] text-muted-foreground">
+            {activeFg.projectName}
+            {activeFg.code ? ` · ${activeFg.code}` : ""}
+            {activeFg.unit ? ` · per ${activeFg.unit}` : ""}
+            {activeFg.productionStartedAt !== undefined && " · in production"}
+            {activeFg.isCompleted === true && " · finished"}
+            {jobNames.length > 0 && ` · in ${jobNames.join(", ")}`}
+          </p>
+          {activeFg.note && (
+            <p className="truncate text-[11px] text-muted-foreground/80">
+              {activeFg.note}
+            </p>
+          )}
+        </div>
+        {/* at-a-glance figures, so the sheet needs no scrolling to read */}
+        <dl className="flex shrink-0 items-center gap-3 text-right">
+          <div title="Finished units on hand, ready to sell. A sales bill takes stock off this.">
+            <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+              Stock
+            </dt>
+            <dd
+              className={cn(
+                "text-xs font-semibold tabular-nums",
+                (activeFg.stock ?? 0) < 0
+                  ? "text-destructive"
+                  : (activeFg.stock ?? 0) > 0
+                    ? "text-foreground"
+                    : "text-muted-foreground",
+              )}
             >
-              <figure className="max-h-full max-w-3xl">
-                <img
-                  src={activeFg.imageUrl}
-                  alt={activeFg.imageAlt ?? activeFg.name}
-                  className="max-h-[80vh] max-w-full rounded-xl border bg-card object-contain shadow-2xl"
-                  onClick={(e) => e.stopPropagation()}
-                />
-                <figcaption className="mt-2 flex items-center justify-between gap-3 text-xs text-background/90">
-                  <span className="truncate">
-                    {activeFg.name}
-                    {activeFg.imageAlt ? ` — ${activeFg.imageAlt}` : ""}
-                  </span>
-                  <span className="shrink-0 opacity-70">Click anywhere to close</span>
-                </figcaption>
-              </figure>
+              {(activeFg.stock ?? 0).toLocaleString()}{" "}
+              <span className="font-normal text-muted-foreground">
+                {activeFg.unit ?? "pcs"}
+              </span>
+            </dd>
+          </div>
+          {(activeFg.inProduction ?? 0) > 0 && (
+            <div title="Part-made right now — a run has started but not finished">
+              <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                In production
+              </dt>
+              <dd className="text-xs font-semibold tabular-nums text-primary">
+                {activeFg.inProduction?.toLocaleString()}
+              </dd>
             </div>
           )}
+          <div>
+            <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+              Sales price
+            </dt>
+            <dd className="text-sm font-bold tabular-nums text-foreground">
+              {money(totals.grand)}
+            </dd>
+          </div>
+        </dl>
+        {layout === "dialog" && sheetActions}
+      </div>
 
-          {/* add-row bars: labour/expenses on their own line above the material
-              picker, so the two kinds of line never share one crowded row */}
-          {canCreate && (
-            <div className="mt-1.5 flex flex-col gap-px overflow-hidden rounded-xl border bg-card shadow-sm">
-              {/* cost line — labour, expenses and other non-material costs */}
-              <div className="flex flex-wrap items-center gap-1 px-2 py-1.5">
-              <span
-                className="flex shrink-0 items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
-                title="Add labour, transport, packaging or any other cost"
-              >
-                <Plus className="size-3" />
-                Cost
+      {/* image lightbox */}
+      {lightboxOpen && activeFg.imageUrl && (
+        <div
+          className="fixed inset-0 z-[100] grid place-items-center bg-foreground/60 p-6 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={() => setLightboxOpen(false)}
+        >
+          <figure className="max-h-full max-w-3xl">
+            <img
+              src={activeFg.imageUrl}
+              alt={activeFg.imageAlt ?? activeFg.name}
+              className="max-h-[80vh] max-w-full rounded-xl border bg-card object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <figcaption className="mt-2 flex items-center justify-between gap-3 text-xs text-background/90">
+              <span className="truncate">
+                {activeFg.name}
+                {activeFg.imageAlt ? ` — ${activeFg.imageAlt}` : ""}
               </span>
-              {/* the kind is chosen right where the name is, so labour never
+              <span className="shrink-0 opacity-70">
+                Click anywhere to close
+              </span>
+            </figcaption>
+          </figure>
+        </div>
+      )}
+
+      {/* add-row bars: labour/expenses on their own line above the material
+              picker, so the two kinds of line never share one crowded row */}
+      {canCreate && (
+        <div className="mt-1.5 flex flex-col gap-px overflow-hidden rounded-xl border bg-card shadow-sm">
+          {/* cost line — labour, expenses and other non-material costs */}
+          <div className="flex flex-wrap items-center gap-1 px-2 py-1.5">
+            <span
+              className="flex shrink-0 items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+              title="Add labour, transport, packaging or any other cost"
+            >
+              <Plus className="size-3" />
+              Cost
+            </span>
+            {/* the kind is chosen right where the name is, so labour never
                   lands on a sheet as an anonymous custom line */}
-              <div
-                className="flex shrink-0 overflow-hidden rounded-lg border"
-                role="radiogroup"
-                aria-label="Cost type"
-              >
-                {COST_KINDS.map((k, i) => (
-                  <button
-                    key={k.kind}
-                    type="button"
-                    role="radio"
-                    aria-checked={customKind === k.kind}
-                    title={k.hint}
-                    onClick={() => setCustomKind(k.kind)}
+            <div
+              className="flex shrink-0 overflow-hidden rounded-lg border"
+              role="radiogroup"
+              aria-label="Cost type"
+            >
+              {COST_KINDS.map((k, i) => (
+                <button
+                  key={k.kind}
+                  type="button"
+                  role="radio"
+                  aria-checked={customKind === k.kind}
+                  title={k.hint}
+                  onClick={() => setCustomKind(k.kind)}
+                  className={cn(
+                    "h-7 px-2 text-[11px] font-medium transition-colors",
+                    i > 0 && "border-l",
+                    customKind === k.kind
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-card text-muted-foreground hover:bg-accent",
+                  )}
+                >
+                  {k.label}
+                </button>
+              ))}
+            </div>
+            <Input
+              value={customLabel}
+              onChange={(e) => setCustomLabel(e.target.value)}
+              placeholder={
+                customKind === "labour"
+                  ? "e.g. Cutting, Stitching…"
+                  : customKind === "expense"
+                    ? "e.g. Freight, Power…"
+                    : "e.g. Packaging…"
+              }
+              aria-label="Cost line name"
+              className="h-7 min-w-[10rem] flex-1 rounded-lg text-xs"
+            />
+            <Input
+              type="number"
+              min="0"
+              step="any"
+              value={customQty}
+              onChange={(e) => setCustomQty(e.target.value)}
+              aria-label="Cost line quantity"
+              title="How many — hours, days, trips or units"
+              className="h-7 w-14 shrink-0 rounded-lg text-xs"
+            />
+            {/* unit comes from the managed master list, the same one materials use, so
+              a costing sheet never spells one unit two ways */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Cost line unit"
+                  title={
+                    customUnit
+                      ? `Measured in ${customUnit} — click to change`
+                      : "Pick the unit this line is measured in"
+                  }
+                  className="flex h-7 w-20 shrink-0 items-center justify-between gap-1 rounded-lg border bg-transparent px-2 text-left text-xs hover:bg-accent"
+                >
+                  <span
                     className={cn(
-                      "h-7 px-2 text-[11px] font-medium transition-colors",
-                      i > 0 && "border-l",
-                      customKind === k.kind
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-card text-muted-foreground hover:bg-accent",
+                      "truncate",
+                      customUnit === "" && "text-muted-foreground",
                     )}
                   >
-                    {k.label}
-                  </button>
-                ))}
-              </div>
-              <Input
-                value={customLabel}
-                onChange={(e) => setCustomLabel(e.target.value)}
-                placeholder={
-                  customKind === "labour"
-                    ? "e.g. Cutting, Stitching…"
-                    : customKind === "expense"
-                      ? "e.g. Freight, Power…"
-                      : "e.g. Packaging…"
-                }
-                aria-label="Cost line name"
-                className="h-7 min-w-[10rem] flex-1 rounded-lg text-xs"
-              />
-              <Input
-                type="number"
-                min="0"
-                step="any"
-                value={customQty}
-                onChange={(e) => setCustomQty(e.target.value)}
-                aria-label="Cost line quantity"
-                title="How many — hours, days, trips or units"
-                className="h-7 w-14 shrink-0 rounded-lg text-xs"
-              />
-              {/* unit comes from the managed master list, the same one materials use, so
-              a costing sheet never spells one unit two ways */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Cost line unit"
-                    title={
-                      customUnit
-                        ? `Measured in ${customUnit} — click to change`
-                        : "Pick the unit this line is measured in"
-                    }
-                    className="flex h-7 w-20 shrink-0 items-center justify-between gap-1 rounded-lg border bg-transparent px-2 text-left text-xs hover:bg-accent"
+                    {customUnit === "" ? "Unit" : customUnit}
+                  </span>
+                  <ChevronDown className="size-3 shrink-0 opacity-60" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-52">
+                {(costUnits ?? []).length === 0 ? (
+                  <DropdownMenuItem
+                    disabled
+                    className="text-[11px] text-muted-foreground"
                   >
-                    <span
-                      className={cn(
-                        "truncate",
-                        customUnit === "" && "text-muted-foreground",
-                      )}
-                    >
-                      {customUnit === "" ? "Unit" : customUnit}
-                    </span>
-                    <ChevronDown className="size-3 shrink-0 opacity-60" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-52">
-                  {(costUnits ?? []).length === 0 ? (
+                    No units set up yet — add them under Master data.
+                  </DropdownMenuItem>
+                ) : (
+                  (costUnits ?? []).map((u) => (
                     <DropdownMenuItem
-                      disabled
-                      className="text-[11px] text-muted-foreground"
+                      key={u._id}
+                      onSelect={() => {
+                        // a blank abbreviation falls back to the full name,
+                        // the same way UnitDetails reads these records
+                        const short = u.abbreviation?.trim();
+                        setCustomUnit(
+                          short !== undefined && short !== "" ? short : u.name,
+                        );
+                      }}
+                      title={u.fullName ?? u.name}
                     >
-                      No units set up yet — add them under Master data.
+                      {u.abbreviation ?? u.name}
                     </DropdownMenuItem>
-                  ) : (
-                    (costUnits ?? []).map((u) => (
-                      <DropdownMenuItem
-                        key={u._id}
-                        onSelect={() => {
-                          // a blank abbreviation falls back to the full name,
-                          // the same way UnitDetails reads these records
-                          const short = u.abbreviation?.trim();
-                          setCustomUnit(
-                            short !== undefined && short !== "" ? short : u.name,
-                          );
-                        }}
-                        title={u.fullName ?? u.name}
-                      >
-                        {u.abbreviation ?? u.name}
-                      </DropdownMenuItem>
-                    ))
-                  )}
-                  {customUnit !== "" && (
-                    <DropdownMenuItem
-                      onSelect={() => setCustomUnit("")}
-                      className="text-muted-foreground"
-                    >
-                      Clear unit
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Input
-                type="number"
-                min="0"
-                step="any"
-                value={customPrice}
-                onChange={(e) => setCustomPrice(e.target.value)}
-                aria-label="Cost line rate"
-                title="Rate per unit of quantity"
-                className="h-7 w-20 shrink-0 rounded-lg text-xs"
-              />
-              {/* subtotal is qty x rate, worked out here rather than typed, so
+                  ))
+                )}
+                {customUnit !== "" && (
+                  <DropdownMenuItem
+                    onSelect={() => setCustomUnit("")}
+                    className="text-muted-foreground"
+                  >
+                    Clear unit
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Input
+              type="number"
+              min="0"
+              step="any"
+              value={customPrice}
+              onChange={(e) => setCustomPrice(e.target.value)}
+              aria-label="Cost line rate"
+              title="Rate per unit of quantity"
+              className="h-7 w-20 shrink-0 rounded-lg text-xs"
+            />
+            {/* subtotal is qty x rate, worked out here rather than typed, so
                   it can never disagree with the two fields it comes from */}
-              <span
-                className="flex h-7 w-24 shrink-0 items-center justify-end rounded-lg border border-dashed bg-muted/30 px-2 text-xs text-muted-foreground tabular-nums"
-                title="Quantity × rate — worked out for you"
-                aria-label="Cost line subtotal"
-              >
-                {money(costPreview.subtotal)}
-              </span>
-              <div className="relative shrink-0">
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="any"
-                  value={customTax === "" || Number(customTax) < 0 ? "" : customTax}
-                  placeholder={String(costPreview.taxPct)}
-                  onChange={(e) => setCustomTax(e.target.value)}
-                  onFocus={() => {
-                    // first focus adopts the firm default as a real value, so
-                    // what is saved is never the placeholder
-                    if (customTax === "" || Number(customTax) < 0) {
-                      setCustomTax(String(costPreview.taxPct));
-                    }
-                  }}
-                  aria-label="Cost line tax percent"
-                  title={`Tax on this line — the firm default is ${costPreview.taxPct}%`}
-                  className="h-7 w-14 shrink-0 rounded-lg pr-4 text-xs tabular-nums"
-                />
-                <Percent
-                  className="pointer-events-none absolute top-1/2 right-1 size-2.5 -translate-y-1/2 text-muted-foreground/70"
-                  aria-hidden
-                />
-              </div>
-              {/* tax amount and total are worked out of the row, not typed —
-                  they are here so the line can be checked before it is added */}
-              <span
-                className="w-20 shrink-0 pr-1 text-right text-xs text-muted-foreground tabular-nums"
-                title="Tax on this subtotal"
-              >
-                {money(costPreview.tax)}
-              </span>
-              <span
-                className="w-24 shrink-0 pr-1 text-right text-xs font-semibold tabular-nums"
-                title="Subtotal + tax — what this line will cost"
-              >
-                {money(costPreview.total)}
-              </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="size-7 shrink-0 rounded-lg"
-                disabled={items === undefined || !costPreview.qtyValid || !costPreview.rateValid}
-                onClick={() =>
-                  guardProduction(
-                    `Adding a ${customKind === "custom" ? "custom" : customKind} line`,
-                    () => void addCustomRow(),
-                  )
+            <span
+              className="flex h-7 w-24 shrink-0 items-center justify-end rounded-lg border border-dashed bg-muted/30 px-2 text-xs text-muted-foreground tabular-nums"
+              title="Quantity × rate — worked out for you"
+              aria-label="Cost line subtotal"
+            >
+              {money(costPreview.subtotal)}
+            </span>
+            <div className="relative shrink-0">
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="any"
+                value={
+                  customTax === "" || Number(customTax) < 0 ? "" : customTax
                 }
-                title={`Add this ${customKind === "custom" ? "custom" : customKind} line to the sheet`}
-              >
-                <Plus className="size-3.5" />
-              </Button>
-              </div>
-
-              {/* material line — raw materials from the master price list */}
-              <div className="flex flex-wrap items-center gap-1 border-t bg-muted/25 px-2 py-1.5">
-                <span
-                  className="flex shrink-0 items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
-                  title="Add a raw material from the master price list"
-                >
-                  <Package className="size-3" />
-                  Material
-                </span>
-                <ItemPicker
-                  className="min-w-[170px] flex-1"
-                  size="sm"
-                  items={materialOptions}
-                  value={addingMaterialId}
-                  onChange={setAddingMaterialId}
-                  placeholder="Choose or search material…"
-                  searchPlaceholder="Search name, code or category…"
-                  emptyLabel="No material matches that."
-                  aria-label="Choose a raw material"
-                  onCreateNew={(term) =>
-                    navigate(
-                      `/materials/new?name=${encodeURIComponent(term.trim())}`,
-                    )
+                placeholder={String(costPreview.taxPct)}
+                onChange={(e) => setCustomTax(e.target.value)}
+                onFocus={() => {
+                  // first focus adopts the firm default as a real value, so
+                  // what is saved is never the placeholder
+                  if (customTax === "" || Number(customTax) < 0) {
+                    setCustomTax(String(costPreview.taxPct));
                   }
-                />
-                <Input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={materialQty}
-                  onChange={(e) => setMaterialQty(e.target.value)}
-                  aria-label="Material quantity"
-                  className="h-7 w-16 shrink-0 rounded-lg text-xs"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="size-7 shrink-0 rounded-lg"
-                  disabled={!addingMaterialId || items === undefined}
-                  onClick={addMaterialRowGuarded}
-                  title="Add this material to the sheet"
-                >
-                  <Plus className="size-3.5" />
-                </Button>
+                }}
+                aria-label="Cost line tax percent"
+                title={`Tax on this line — the firm default is ${costPreview.taxPct}%`}
+                className="h-7 w-14 shrink-0 rounded-lg pr-4 text-xs tabular-nums"
+              />
+              <Percent
+                className="pointer-events-none absolute top-1/2 right-1 size-2.5 -translate-y-1/2 text-muted-foreground/70"
+                aria-hidden
+              />
+            </div>
+            {/* tax amount and total are worked out of the row, not typed —
+                  they are here so the line can be checked before it is added */}
+            <span
+              className="w-20 shrink-0 pr-1 text-right text-xs text-muted-foreground tabular-nums"
+              title="Tax on this subtotal"
+            >
+              {money(costPreview.tax)}
+            </span>
+            <span
+              className="w-24 shrink-0 pr-1 text-right text-xs font-semibold tabular-nums"
+              title="Subtotal + tax — what this line will cost"
+            >
+              {money(costPreview.total)}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="size-7 shrink-0 rounded-lg"
+              disabled={
+                items === undefined ||
+                !costPreview.qtyValid ||
+                !costPreview.rateValid
+              }
+              onClick={() =>
+                guardProduction(
+                  `Adding a ${customKind === "custom" ? "custom" : customKind} line`,
+                  () => void addCustomRow(),
+                )
+              }
+              title={`Add this ${customKind === "custom" ? "custom" : customKind} line to the sheet`}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </div>
 
-                {/* the picked material, priced exactly as it will land on the
+          {/* material line — raw materials from the master price list */}
+          <div className="flex flex-wrap items-center gap-1 border-t bg-muted/25 px-2 py-1.5">
+            <span
+              className="flex shrink-0 items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+              title="Add a raw material from the master price list"
+            >
+              <Package className="size-3" />
+              Material
+            </span>
+            <ItemPicker
+              className="min-w-[170px] flex-1"
+              size="sm"
+              items={materialOptions}
+              value={addingMaterialId}
+              onChange={setAddingMaterialId}
+              placeholder="Choose or search material…"
+              searchPlaceholder="Search name, code or category…"
+              emptyLabel="No material matches that."
+              aria-label="Choose a raw material"
+              onCreateNew={(term) => {
+                const base = `/materials/new?name=${encodeURIComponent(term.trim())}`;
+                if (returnAddr === null) return void navigate(base);
+                return void navigate(
+                  `${base}&from=${encodeURIComponent(returnAddr)}`,
+                );
+              }}
+            />
+            <Input
+              type="number"
+              min="0"
+              step="any"
+              value={materialQty}
+              onChange={(e) => setMaterialQty(e.target.value)}
+              aria-label="Material quantity"
+              className="h-7 w-16 shrink-0 rounded-lg text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="size-7 shrink-0 rounded-lg"
+              disabled={!addingMaterialId || items === undefined}
+              onClick={addMaterialRowGuarded}
+              title="Add this material to the sheet"
+            >
+              <Plus className="size-3.5" />
+            </Button>
+
+            {/* the picked material, priced exactly as it will land on the
                     sheet — caught here rather than after it is added */}
-                {materialPreview !== null && (
-                  <div
-                    className="flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg border border-primary/25 bg-primary/[0.04] px-2.5 py-1 text-[11px]"
-                    aria-live="polite"
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-xs font-semibold">
-                        {materialPreview.material.name}
-                      </span>
-                      {materialPreview.material.code && (
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {materialPreview.material.code}
-                        </span>
-                      )}
+            {materialPreview !== null && (
+              <div
+                className="flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg border border-primary/25 bg-primary/[0.04] px-2.5 py-1 text-[11px]"
+                aria-live="polite"
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-xs font-semibold">
+                    {materialPreview.material.name}
+                  </span>
+                  {materialPreview.material.code && (
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {materialPreview.material.code}
                     </span>
-                    <span className="text-muted-foreground">
-                      Unit{" "}
-                      <span className="font-medium text-foreground">
-                        {materialPreview.material.unit}
-                      </span>
-                    </span>
-                    <span className="text-muted-foreground">
-                      Stock{" "}
-                      <span
-                        className={cn(
-                          "font-medium tabular-nums",
-                          materialPreview.short
-                            ? "text-amber-600 dark:text-amber-400"
-                            : "text-foreground",
-                        )}
-                        title={
-                          materialPreview.short
-                            ? `Only ${materialPreview.stock.toLocaleString()} on hand — this line needs ${materialPreview.qty.toLocaleString()}`
-                            : `${materialPreview.stock.toLocaleString()} on hand`
-                        }
-                      >
-                        {materialPreview.stock.toLocaleString()}
-                      </span>
-                    </span>
-                    <span className="text-muted-foreground">
-                      Qty{" "}
-                      <span className="font-medium text-foreground tabular-nums">
-                        {materialPreview.qty.toLocaleString()}
-                      </span>
-                      {!materialPreview.qtyValid && (
-                        <span className="text-amber-600 dark:text-amber-400">
-                          {" "}
-                          — must be more than zero
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-muted-foreground">
-                      Rate{" "}
-                      <span className="font-medium text-foreground tabular-nums">
-                        {money(materialPreview.rate)}
-                      </span>
-                    </span>
-                    <span className="text-muted-foreground">
-                      Tax{" "}
-                      <span className="font-medium text-foreground tabular-nums">
-                        {materialPreview.taxPct}% ({money(materialPreview.tax)})
-                      </span>
-                    </span>
-                    <span className="text-muted-foreground">
-                      Amount{" "}
-                      <span className="font-medium text-foreground tabular-nums">
-                        {money(materialPreview.amount)}
-                      </span>
-                    </span>
-                    <span className="text-foreground">
-                      Total{" "}
-                      <span className="font-semibold tabular-nums">
-                        {money(materialPreview.total)}
-                      </span>
-                    </span>
-                  </div>
-                )}
-
-                {materials.length === 0 && (
-                  <button
-                    type="button"
-                    onClick={() => onSelectView({ kind: "materials" })}
-                    className="text-[11px] text-primary hover:underline"
-                  >
-                    + Add raw materials first
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* what the sheet is asking to be checked before it is saved */}
-          {warnings.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-2.5 py-1 text-[11px] text-amber-800 dark:text-amber-300">
-              <span className="flex shrink-0 items-center gap-1 font-semibold">
-                <AlertTriangle className="size-3" />
-                {warnings.length} to check
-              </span>
-              {warnings.slice(0, 3).map((w) => (
-                <span key={w.id} className="opacity-90">
-                  · {w.text}
+                  )}
                 </span>
-              ))}
-              {warnings.length > 3 && (
-                <span className="opacity-70">+{warnings.length - 3} more</span>
-              )}
-            </div>
-          )}
+                <span className="text-muted-foreground">
+                  Unit{" "}
+                  <span className="font-medium text-foreground">
+                    {materialPreview.material.unit}
+                  </span>
+                </span>
+                <span className="text-muted-foreground">
+                  Stock{" "}
+                  <span
+                    className={cn(
+                      "font-medium tabular-nums",
+                      materialPreview.short
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-foreground",
+                    )}
+                    title={
+                      materialPreview.short
+                        ? `Only ${materialPreview.stock.toLocaleString()} on hand — this line needs ${materialPreview.qty.toLocaleString()}`
+                        : `${materialPreview.stock.toLocaleString()} on hand`
+                    }
+                  >
+                    {materialPreview.stock.toLocaleString()}
+                  </span>
+                </span>
+                <span className="text-muted-foreground">
+                  Qty{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    {materialPreview.qty.toLocaleString()}
+                  </span>
+                  {!materialPreview.qtyValid && (
+                    <span className="text-amber-600 dark:text-amber-400">
+                      {" "}
+                      — must be more than zero
+                    </span>
+                  )}
+                </span>
+                <span className="text-muted-foreground">
+                  Rate{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    {money(materialPreview.rate)}
+                  </span>
+                </span>
+                <span className="text-muted-foreground">
+                  Tax{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    {materialPreview.taxPct}% ({money(materialPreview.tax)})
+                  </span>
+                </span>
+                <span className="text-muted-foreground">
+                  Amount{" "}
+                  <span className="font-medium text-foreground tabular-nums">
+                    {money(materialPreview.amount)}
+                  </span>
+                </span>
+                <span className="text-foreground">
+                  Total{" "}
+                  <span className="font-semibold tabular-nums">
+                    {money(materialPreview.total)}
+                  </span>
+                </span>
+              </div>
+            )}
 
-          {/* the spreadsheet */}
-          <section className="mt-1.5 overflow-hidden rounded-xl border bg-card shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-sm">
-                <thead>
-                  <tr className="border-b border-border/70 bg-muted/40 text-left text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
-                    <th className="w-8 px-2 py-1.5 font-semibold">#</th>
-                    <th className="px-2 py-1.5 font-semibold">Description</th>
-                    <th className="w-[4.25rem] px-2 py-1.5 text-right font-semibold">Qty</th>
-                    <th className="w-14 px-2 py-1.5 font-semibold">Unit</th>
-                    <th className="w-24 px-2 py-1.5 text-right font-semibold">Rate</th>
-                    <th className="w-[4.5rem] px-2 py-1.5 text-right font-semibold">
-                      <span className="inline-flex items-center justify-end gap-0.5">
-                        <Percent className="size-2.5" aria-hidden />
-                        Tax
-                      </span>
-                    </th>
-                    <th className="w-28 px-2 py-1.5 text-right font-semibold">Amount</th>
-                    <th className="w-28 px-2 py-1.5 text-right font-semibold">Total</th>
-                    <th className="w-9 px-1 py-1.5" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {items === undefined ? (
-                    <tr>
-                      <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
-                        <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
-                        Loading rows…
+            {materials.length === 0 && (
+              <button
+                type="button"
+                onClick={() => onSelectView({ kind: "materials" })}
+                className="text-[11px] text-primary hover:underline"
+              >
+                + Add raw materials first
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* what the sheet is asking to be checked before it is saved */}
+      {warnings.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-2.5 py-1 text-[11px] text-amber-800 dark:text-amber-300">
+          <span className="flex shrink-0 items-center gap-1 font-semibold">
+            <AlertTriangle className="size-3" />
+            {warnings.length} to check
+          </span>
+          {warnings.slice(0, 3).map((w) => (
+            <span key={w.id} className="opacity-90">
+              · {w.text}
+            </span>
+          ))}
+          {warnings.length > 3 && (
+            <span className="opacity-70">+{warnings.length - 3} more</span>
+          )}
+        </div>
+      )}
+
+      {/* the spreadsheet */}
+      <section className="mt-1.5 overflow-hidden rounded-xl border bg-card shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-sm">
+            <thead>
+              <tr className="border-b border-border/70 bg-muted/40 text-left text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+                <th className="w-8 px-2 py-1.5 font-semibold">#</th>
+                <th className="px-2 py-1.5 font-semibold">Description</th>
+                <th className="w-[4.25rem] px-2 py-1.5 text-right font-semibold">
+                  Qty
+                </th>
+                <th className="w-14 px-2 py-1.5 font-semibold">Unit</th>
+                <th className="w-24 px-2 py-1.5 text-right font-semibold">
+                  Rate
+                </th>
+                <th className="w-[4.5rem] px-2 py-1.5 text-right font-semibold">
+                  <span className="inline-flex items-center justify-end gap-0.5">
+                    <Percent className="size-2.5" aria-hidden />
+                    Tax
+                  </span>
+                </th>
+                <th className="w-28 px-2 py-1.5 text-right font-semibold">
+                  Amount
+                </th>
+                <th className="w-28 px-2 py-1.5 text-right font-semibold">
+                  Total
+                </th>
+                <th className="w-9 px-1 py-1.5" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {items === undefined ? (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-4 py-10 text-center text-muted-foreground"
+                  >
+                    <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
+                    Loading rows…
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-4 py-10 text-center text-muted-foreground"
+                  >
+                    Empty sheet — add a raw material or a custom line above.
+                  </td>
+                </tr>
+              ) : (
+                rows.map((row, i) => {
+                  // the numbers on screen are the drafts, so an unsaved
+                  // edit already shows in the amount, the tax and the total
+                  const d = drafts.find((x) => x.id === row._id);
+                  const qty = d?.qty ?? row.qty;
+                  const rate = d?.unitPrice ?? row.unitPrice;
+                  const taxPct = d?.taxPct ?? row.taxPct ?? 0;
+                  const amount = qty * rate;
+                  const lineTax = amount * (cleanRate(taxPct) / 100);
+                  const material =
+                    row.materialId !== undefined
+                      ? materials.find((x) => x._id === row.materialId)
+                      : undefined;
+                  // labour/expense lines are badged so the recipe reads as
+                  // "materials + labour + overhead" at a glance
+                  const kindMeta =
+                    row.materialId === undefined && row.kind !== undefined
+                      ? costKindMeta(row.kind)
+                      : null;
+                  const short =
+                    material !== undefined && (material.stock ?? 0) < qty;
+                  return (
+                    <tr
+                      key={row._id}
+                      className={cn(
+                        "group/row transition-colors hover:bg-accent/40",
+                        rate === 0 || (taxPct === 0 && amount > 0)
+                          ? "bg-amber-500/[0.04]"
+                          : undefined,
+                      )}
+                    >
+                      <td className="px-2 py-1 align-top text-[11px] text-muted-foreground tabular-nums">
+                        {i + 1}
                       </td>
-                    </tr>
-                  ) : rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
-                        Empty sheet — add a raw material or a custom line above.
-                      </td>
-                    </tr>
-                  ) : (
-                    rows.map((row, i) => {
-                      // the numbers on screen are the drafts, so an unsaved
-                      // edit already shows in the amount, the tax and the total
-                      const d = drafts.find((x) => x.id === row._id);
-                      const qty = d?.qty ?? row.qty;
-                      const rate = d?.unitPrice ?? row.unitPrice;
-                      const taxPct = d?.taxPct ?? row.taxPct ?? 0;
-                      const amount = qty * rate;
-                      const lineTax = amount * (cleanRate(taxPct) / 100);
-                      const material =
-                        row.materialId !== undefined
-                          ? materials.find((x) => x._id === row.materialId)
-                          : undefined;
-                      // labour/expense lines are badged so the recipe reads as
-                      // "materials + labour + overhead" at a glance
-                      const kindMeta =
-                        row.materialId === undefined && row.kind !== undefined
-                          ? costKindMeta(row.kind)
-                          : null;
-                      const short =
-                        material !== undefined && (material.stock ?? 0) < qty;
-                      return (
-                        <tr
-                          key={row._id}
-                          className={cn(
-                            "group/row transition-colors hover:bg-accent/40",
-                            rate === 0 || (taxPct === 0 && amount > 0)
-                              ? "bg-amber-500/[0.04]"
-                              : undefined,
-                          )}
-                        >
-                          <td className="px-2 py-1 align-top text-[11px] text-muted-foreground tabular-nums">
-                            {i + 1}
-                          </td>
-                          <td className="max-w-0 px-2 py-1 align-top">
-                            <div className="flex min-w-0 items-center gap-1.5">
-                              <span className="truncate text-xs font-medium">
-                                {row.label}
-                              </span>
-                              {kindMeta !== null && canEdit && (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <button
-                                      type="button"
-                                      className={cn(
-                                        "shrink-0 rounded px-1 py-px text-[9px] font-semibold tracking-wide uppercase transition-opacity hover:opacity-80",
-                                        kindMeta.badge,
-                                      )}
-                                      title={`${kindMeta.hint} — click to change the type`}
-                                      aria-label={`Cost type: ${kindMeta.label}. Change it`}
-                                    >
-                                      {kindMeta.label}
-                                    </button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="start" className="w-56">
-                                    {COST_KINDS.map((k) => (
-                                      <DropdownMenuItem
-                                        key={k.kind}
-                                        onSelect={() => void setRowKind(row, k.kind)}
-                                        className="flex flex-col items-start gap-0.5"
-                                      >
-                                        <span className="font-medium">{k.label}</span>
-                                        <span className="text-[11px] text-muted-foreground">
-                                          {k.hint}
-                                        </span>
-                                      </DropdownMenuItem>
-                                    ))}
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              )}
-                              {kindMeta !== null && !canEdit && (
-                                <span
+                      <td className="max-w-0 px-2 py-1 align-top">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-xs font-medium">
+                            {row.label}
+                          </span>
+                          {kindMeta !== null && canEdit && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  type="button"
                                   className={cn(
-                                    "shrink-0 rounded px-1 py-px text-[9px] font-semibold tracking-wide uppercase",
+                                    "shrink-0 rounded px-1 py-px text-[9px] font-semibold tracking-wide uppercase transition-opacity hover:opacity-80",
                                     kindMeta.badge,
                                   )}
-                                  title={kindMeta.hint}
+                                  title={`${kindMeta.hint} — click to change the type`}
+                                  aria-label={`Cost type: ${kindMeta.label}. Change it`}
                                 >
                                   {kindMeta.label}
-                                </span>
-                              )}
-                              {material !== undefined && (
-                                <span
-                                  className={cn(
-                                    "inline-flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums",
-                                    short
-                                      ? "text-amber-600 dark:text-amber-400"
-                                      : "text-muted-foreground/70",
-                                  )}
-                                  title={
-                                    short
-                                      ? `Only ${(material.stock ?? 0).toLocaleString()} ${material.unit ?? ""} on hand — this batch needs ${qty.toLocaleString()}`
-                                      : `${(material.stock ?? 0).toLocaleString()} ${material.unit ?? ""} on hand`
-                                  }
-                                >
-                                  {short && <AlertTriangle className="size-2.5" />}
-                                  {(material.stock ?? 0).toLocaleString()}{" "}
-                                  {material.unit ?? ""} on hand
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-1 py-1 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={qty}
-                              onChange={(e) =>
-                                updateDraft(row._id, { qty: Number(e.target.value) })
-                              }
-                              className={cn(lineCls, "text-right tabular-nums")}
-                              aria-label="Quantity"
-                            />
-                          </td>
-                          <td className="px-2 py-1 align-top text-[11px] text-muted-foreground">
-                            {row.unit ?? "—"}
-                          </td>
-                          <td className="px-1 py-1 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={rate}
-                              onChange={(e) =>
-                                updateDraft(row._id, {
-                                  unitPrice: Number(e.target.value),
-                                })
-                              }
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent
+                                align="start"
+                                className="w-56"
+                              >
+                                {COST_KINDS.map((k) => (
+                                  <DropdownMenuItem
+                                    key={k.kind}
+                                    onSelect={() =>
+                                      void setRowKind(row, k.kind)
+                                    }
+                                    className="flex flex-col items-start gap-0.5"
+                                  >
+                                    <span className="font-medium">
+                                      {k.label}
+                                    </span>
+                                    <span className="text-[11px] text-muted-foreground">
+                                      {k.hint}
+                                    </span>
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                          {kindMeta !== null && !canEdit && (
+                            <span
                               className={cn(
-                                lineCls,
-                                "text-right tabular-nums",
-                                rate === 0 && "text-amber-600 dark:text-amber-400",
+                                "shrink-0 rounded px-1 py-px text-[9px] font-semibold tracking-wide uppercase",
+                                kindMeta.badge,
                               )}
-                              aria-label="Unit price"
-                            />
-                          </td>
-                          <td className="px-1 py-1 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              max="100"
-                              step="any"
-                              value={taxPct}
-                              onChange={(e) =>
-                                updateDraft(row._id, {
-                                  taxPct: cleanRate(Number(e.target.value)),
-                                })
-                              }
-                              title={`Tax on this line — ${cleanRate(taxPct)}% of ${money(amount)} is ${money(lineTax)}`}
+                              title={kindMeta.hint}
+                            >
+                              {kindMeta.label}
+                            </span>
+                          )}
+                          {material !== undefined && (
+                            <span
                               className={cn(
-                                lineCls,
-                                "text-right tabular-nums",
-                                taxPct === 0 && "text-muted-foreground",
+                                "inline-flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums",
+                                short
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : "text-muted-foreground/70",
                               )}
-                              aria-label="Tax percent"
-                            />
-                            <div className="pr-1.5 text-right text-[9px] leading-none text-muted-foreground/70 tabular-nums">
-                              {money(lineTax)}
-                            </div>
-                          </td>
-                          <td className="px-2 py-1 align-top text-right text-xs font-medium tabular-nums">
-                            {money(amount)}
-                          </td>
-                          <td className="px-2 py-1 align-top text-right text-xs font-semibold tabular-nums">
-                            {money(amount + lineTax)}
-                          </td>
-                          <td className="px-1 py-1 align-top text-right">
-                          <span
-                            className="hidden items-center gap-0.5 group-hover/row:inline-flex"
-                            aria-label={`Actions for ${row.label}`}
-                          >
-                            {canCreate && (
-                              <button
-                                type="button"
-                                aria-label={`Duplicate ${row.label}`}
-                                title="Duplicate this line"
-                                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
-                                onClick={() =>
-                                  guardProduction("Duplicating a line", () =>
+                              title={
+                                short
+                                  ? `Only ${(material.stock ?? 0).toLocaleString()} ${material.unit ?? ""} on hand — this batch needs ${qty.toLocaleString()}`
+                                  : `${(material.stock ?? 0).toLocaleString()} ${material.unit ?? ""} on hand`
+                              }
+                            >
+                              {short && <AlertTriangle className="size-2.5" />}
+                              {(material.stock ?? 0).toLocaleString()}{" "}
+                              {material.unit ?? ""} on hand
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-1 py-1 align-top">
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={qty}
+                          onChange={(e) =>
+                            updateDraft(row._id, {
+                              qty: Number(e.target.value),
+                            })
+                          }
+                          className={cn(lineCls, "text-right tabular-nums")}
+                          aria-label="Quantity"
+                        />
+                      </td>
+                      <td className="px-2 py-1 align-top text-[11px] text-muted-foreground">
+                        {row.unit ?? "—"}
+                      </td>
+                      <td className="px-1 py-1 align-top">
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={rate}
+                          onChange={(e) =>
+                            updateDraft(row._id, {
+                              unitPrice: Number(e.target.value),
+                            })
+                          }
+                          className={cn(
+                            lineCls,
+                            "text-right tabular-nums",
+                            rate === 0 && "text-amber-600 dark:text-amber-400",
+                          )}
+                          aria-label="Unit price"
+                        />
+                      </td>
+                      <td className="px-1 py-1 align-top">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="any"
+                          value={taxPct}
+                          onChange={(e) =>
+                            updateDraft(row._id, {
+                              taxPct: cleanRate(Number(e.target.value)),
+                            })
+                          }
+                          title={`Tax on this line — ${cleanRate(taxPct)}% of ${money(amount)} is ${money(lineTax)}`}
+                          className={cn(
+                            lineCls,
+                            "text-right tabular-nums",
+                            taxPct === 0 && "text-muted-foreground",
+                          )}
+                          aria-label="Tax percent"
+                        />
+                        <div className="pr-1.5 text-right text-[9px] leading-none text-muted-foreground/70 tabular-nums">
+                          {money(lineTax)}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1 align-top text-right text-xs font-medium tabular-nums">
+                        {money(amount)}
+                      </td>
+                      <td className="px-2 py-1 align-top text-right text-xs font-semibold tabular-nums">
+                        {money(amount + lineTax)}
+                      </td>
+                      <td className="px-1 py-1 align-top text-right">
+                        <span
+                          className="hidden items-center gap-0.5 group-hover/row:inline-flex"
+                          aria-label={`Actions for ${row.label}`}
+                        >
+                          {canCreate && (
+                            <button
+                              type="button"
+                              aria-label={`Duplicate ${row.label}`}
+                              title="Duplicate this line"
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
+                              onClick={() =>
+                                guardProduction(
+                                  "Duplicating a line",
+                                  () =>
                                     void addFgItem({
                                       fgId: activeFg._id,
                                       label: `${row.label} (copy)`,
@@ -1990,256 +2187,264 @@ export default function CostingPanel({
                                       ...(row.materialId !== undefined
                                         ? { materialId: row.materialId }
                                         : {}),
-                                      ...(row.kind !== undefined ? { kind: row.kind } : {}),
+                                      ...(row.kind !== undefined
+                                        ? { kind: row.kind }
+                                        : {}),
                                     }).catch(() =>
-                                      toast.error("Couldn't duplicate the line."),
+                                      toast.error(
+                                        "Couldn't duplicate the line.",
+                                      ),
                                     ),
-                                  )
-                                }
-                              >
-                                <Copy className="size-3" />
-                              </button>
-                            )}
-                            {canEdit && (
-                              <button
-                                type="button"
-                                aria-label={`Edit ${row.label}`}
-                                title="Edit line"
-                                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
-                                onClick={() => editRow(row)}
-                              >
-                                <Pencil className="size-3.5" />
-                              </button>
-                            )}
-                            {canDelete && (
-                              <button
-                                type="button"
-                                aria-label="Delete row"
-                                title="Delete line"
-                                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-destructive"
-                                onClick={() =>
-                                  void removeItem({ id: row._id }).catch(() =>
-                                    toast.error("Couldn't delete the row."),
-                                  )
-                                }
-                              >
-                                <Trash2 className="size-3.5" />
-                              </button>
-                            )}
-                          </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-                {rows.length > 0 && (
-                  <tfoot>
-                    <tr className="border-t border-border/70 bg-muted/30">
-                      <td
-                        colSpan={5}
-                        className="px-2 py-1 text-right text-[10px] tracking-wider text-muted-foreground uppercase"
-                      >
-                        Lines
-                        <span className="ml-1.5 opacity-70">{rows.length}</span>
+                                )
+                              }
+                            >
+                              <Copy className="size-3" />
+                            </button>
+                          )}
+                          {canEdit && (
+                            <button
+                              type="button"
+                              aria-label={`Edit ${row.label}`}
+                              title="Edit line"
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
+                              onClick={() => editRow(row)}
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              aria-label="Delete row"
+                              title="Delete line"
+                              className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-destructive"
+                              onClick={() =>
+                                void removeItem({ id: row._id }).catch(() =>
+                                  toast.error("Couldn't delete the row."),
+                                )
+                              }
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          )}
+                        </span>
                       </td>
-                      <td className="px-2 py-1 text-right text-xs font-semibold tabular-nums">
-                        {money(totals.tax)}
-                      </td>
-                      <td className="px-2 py-1 text-right text-xs text-muted-foreground tabular-nums">
-                        {money(totals.subtotal)}
-                      </td>
-                      <td className="px-2 py-1 text-right text-xs font-semibold tabular-nums">
-                        {money(totals.cost)}
-                      </td>
-                      <td />
                     </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </section>
+                  );
+                })
+              )}
+            </tbody>
+            {rows.length > 0 && (
+              <tfoot>
+                <tr className="border-t border-border/70 bg-muted/30">
+                  <td
+                    colSpan={5}
+                    className="px-2 py-1 text-right text-[10px] tracking-wider text-muted-foreground uppercase"
+                  >
+                    Lines
+                    <span className="ml-1.5 opacity-70">{rows.length}</span>
+                  </td>
+                  <td className="px-2 py-1 text-right text-xs font-semibold tabular-nums">
+                    {money(totals.tax)}
+                  </td>
+                  <td className="px-2 py-1 text-right text-xs text-muted-foreground tabular-nums">
+                    {money(totals.subtotal)}
+                  </td>
+                  <td className="px-2 py-1 text-right text-xs font-semibold tabular-nums">
+                    {money(totals.cost)}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </section>
 
-          {rows.length > 0 && (
-            /* ── totals: sub total → tax → cost → margin → sales price ──
+      {rows.length > 0 && (
+        /* ── totals: sub total → tax → cost → margin → sales price ──
                 One strip at the foot of the sheet, so a whole recipe adds up
                 without scrolling and without opening anything. */
-            <div className="mt-1.5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border shadow-sm sm:grid-cols-3 lg:grid-cols-5">
-              <Stat
-                label="Sub total"
-                value={money(totals.subtotal)}
-                hint={`${rows.length} line${rows.length === 1 ? "" : "s"} · before tax`}
-              />
-              <Stat
-                label="Tax amount"
-                value={money(totals.tax)}
-                hint={
-                  totals.tax > 0
-                    ? `blended ${totals.blendedTax}%`
-                    : `no tax on any line · default ${defaultTax?.taxPct ?? 0}%`
-                }
-                strong={totals.tax > 0}
-              />
-              <Stat
-                label="Total cost"
-                value={money(totals.cost)}
-                hint="sub total + tax"
-                strong
-              />
-              {/* margin is edited in place, the way it always was */}
-              <div className="min-w-0 bg-card px-3 py-1.5">
-                <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
-                  Margin
-                </div>
-                <div className="flex items-baseline gap-0.5">
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={markupPct}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      if (Number.isFinite(v) && v >= 0 && activeFg) {
-                        void updateFg({ id: activeFg._id, markupPct: v }).catch(() =>
-                          toast.error("Couldn't update the margin."),
-                        );
-                      }
-                    }}
-                    aria-label="Margin percent"
-                    className="w-10 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
-                  />
-                  <span className="text-[11px] text-muted-foreground">%</span>
-                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                    {money(totals.markup)}
-                  </span>
-                </div>
-                <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
-                  on total cost
-                </div>
-              </div>
-              <Stat
-                label="Sales price"
-                value={money(totals.grand)}
-                hint={`per ${activeFg.unit ?? "pcs"}`}
-                accent
-              />
+        <div className="mt-1.5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border shadow-sm sm:grid-cols-3 lg:grid-cols-5">
+          <Stat
+            label="Sub total"
+            value={money(totals.subtotal)}
+            hint={`${rows.length} line${rows.length === 1 ? "" : "s"} · before tax`}
+          />
+          <Stat
+            label="Tax amount"
+            value={money(totals.tax)}
+            hint={
+              totals.tax > 0
+                ? `blended ${totals.blendedTax}%`
+                : `no tax on any line · default ${defaultTax?.taxPct ?? 0}%`
+            }
+            strong={totals.tax > 0}
+          />
+          <Stat
+            label="Total cost"
+            value={money(totals.cost)}
+            hint="sub total + tax"
+            strong
+          />
+          {/* margin is edited in place, the way it always was */}
+          <div className="min-w-0 bg-card px-3 py-1.5">
+            <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
+              Margin
             </div>
-          )}
+            <div className="flex items-baseline gap-0.5">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={markupPct}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (Number.isFinite(v) && v >= 0 && activeFg) {
+                    void updateFg({ id: activeFg._id, markupPct: v }).catch(
+                      () => toast.error("Couldn't update the margin."),
+                    );
+                  }
+                }}
+                aria-label="Margin percent"
+                className="w-10 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
+              />
+              <span className="text-[11px] text-muted-foreground">%</span>
+              <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                {money(totals.markup)}
+              </span>
+            </div>
+            <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
+              on total cost
+            </div>
+          </div>
+          <Stat
+            label="Sales price"
+            value={money(totals.grand)}
+            hint={`per ${activeFg.unit ?? "pcs"}`}
+            accent
+          />
+        </div>
+      )}
 
-          {/* the same total, split the way the sheet was entered — materials
+      {/* the same total, split the way the sheet was entered — materials
               against labour against overhead, so a costing can be reviewed
               without picking through the rows */}
-          {rows.length > 0 &&
-            (totals.labour > 0 || totals.expenses > 0 || totals.other > 0) && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-card px-3 py-1.5 text-[11px] shadow-sm">
-                <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
-                  Cost split
+      {rows.length > 0 &&
+        (totals.labour > 0 || totals.expenses > 0 || totals.other > 0) && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-card px-3 py-1.5 text-[11px] shadow-sm">
+            <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+              Cost split
+            </span>
+            <span className="text-muted-foreground">
+              Materials{" "}
+              <span className="font-semibold text-foreground tabular-nums">
+                {money(totals.materials)}
+              </span>
+            </span>
+            {totals.labour > 0 && (
+              <span className="text-muted-foreground">
+                Labour{" "}
+                <span className="font-semibold text-violet-700 tabular-nums dark:text-violet-300">
+                  {money(totals.labour)}
                 </span>
-                <span className="text-muted-foreground">
-                  Materials{" "}
-                  <span className="font-semibold text-foreground tabular-nums">
-                    {money(totals.materials)}
-                  </span>
-                </span>
-                {totals.labour > 0 && (
-                  <span className="text-muted-foreground">
-                    Labour{" "}
-                    <span className="font-semibold text-violet-700 tabular-nums dark:text-violet-300">
-                      {money(totals.labour)}
-                    </span>
-                  </span>
-                )}
-                {totals.expenses > 0 && (
-                  <span className="text-muted-foreground">
-                    Expenses{" "}
-                    <span className="font-semibold text-amber-700 tabular-nums dark:text-amber-300">
-                      {money(totals.expenses)}
-                    </span>
-                  </span>
-                )}
-                {totals.other > 0 && (
-                  <span className="text-muted-foreground">
-                    Other{" "}
-                    <span className="font-semibold text-sky-700 tabular-nums dark:text-sky-300">
-                      {money(totals.other)}
-                    </span>
-                  </span>
-                )}
-                <span className="ml-auto text-muted-foreground/80">
-                  all figures include that line's tax
-                </span>
-              </div>
+              </span>
             )}
+            {totals.expenses > 0 && (
+              <span className="text-muted-foreground">
+                Expenses{" "}
+                <span className="font-semibold text-amber-700 tabular-nums dark:text-amber-300">
+                  {money(totals.expenses)}
+                </span>
+              </span>
+            )}
+            {totals.other > 0 && (
+              <span className="text-muted-foreground">
+                Other{" "}
+                <span className="font-semibold text-sky-700 tabular-nums dark:text-sky-300">
+                  {money(totals.other)}
+                </span>
+              </span>
+            )}
+            <span className="ml-auto text-muted-foreground/80">
+              all figures include that line's tax
+            </span>
+          </div>
+        )}
 
-          {rows.length > 0 && (
-            <div className="mt-1.5 flex items-center justify-end gap-1.5">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 gap-1.5 rounded-lg text-xs"
-                onClick={exportCsv}
-                title="Export this sheet as CSV"
-              >
-                <Download className="size-3.5" />
-                CSV
-              </Button>
-              {canPrint && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 gap-1.5 rounded-lg text-xs"
-                    title="Print this sheet"
-                  >
-                    <Printer className="size-3" />
-                    Print
-                    <ChevronDown className="size-3 opacity-60" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuItem onClick={() => printSheet(true)}>
-                    <Printer className="size-3.5" />
-                    <div className="flex flex-col">
-                      <span className="text-xs font-medium">With amounts</span>
-                      <span className="text-[10px] text-muted-foreground">Prices, tax and sales price</span>
-                    </div>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => printSheet(false)}>
-                    <Factory className="size-3.5" />
-                    <div className="flex flex-col">
-                      <span className="text-xs font-medium">Without amounts</span>
-                      <span className="text-[10px] text-muted-foreground">Production sheet — qty only</span>
-                    </div>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              )}
-            </div>
+      {rows.length > 0 && (
+        <div className="mt-1.5 flex items-center justify-end gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 rounded-lg text-xs"
+            onClick={exportCsv}
+            title="Export this sheet as CSV"
+          >
+            <Download className="size-3.5" />
+            CSV
+          </Button>
+          {canPrint && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 rounded-lg text-xs"
+                  title="Print this sheet"
+                >
+                  <Printer className="size-3" />
+                  Print
+                  <ChevronDown className="size-3 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem onClick={() => printSheet(true)}>
+                  <Printer className="size-3.5" />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-medium">With amounts</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Prices, tax and sales price
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => printSheet(false)}>
+                  <Factory className="size-3.5" />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-medium">Without amounts</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Production sheet — qty only
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
-          {/* putting the product into a job: the dialog closes the sheet's
+        </div>
+      )}
+      {/* putting the product into a job: the dialog closes the sheet's
               own dialog behind it, so it is mounted outside that content */}
-          {connectOpen && (
-            <ConnectJobDialog
-              open
-              productName={activeFg.name}
-              productUnit={activeFg.unit ?? "pcs"}
-              defaultQty={activeFg.qty ?? 1}
-              jobs={jobOptions}
-              currentJobId={activeFg.jobId}
-              onClose={() => setConnectOpen(false)}
-              onSubmit={async (jobId, qty) => {
-                await attachToJobM({ fgId: activeFg._id, jobId, qty });
-                const job = (allJobs ?? []).find((j) => j._id === jobId);
-                toast.success(
-                  `“${activeFg.name}” put into ${job?.name ?? "the job"} — ${qty} needed.`,
-                );
-              }}
-            />
-          )}
-        </>
+      {connectOpen && (
+        <ConnectJobDialog
+          open
+          productName={activeFg.name}
+          productUnit={activeFg.unit ?? "pcs"}
+          defaultQty={activeFg.qty ?? 1}
+          jobs={jobOptions}
+          currentJobId={activeFg.jobId}
+          onClose={() => setConnectOpen(false)}
+          onSubmit={async (jobId, qty) => {
+            await attachToJobM({ fgId: activeFg._id, jobId, qty });
+            const job = (allJobs ?? []).find((j) => j._id === jobId);
+            toast.success(
+              `“${activeFg.name}” put into ${job?.name ?? "the job"} — ${qty} needed.`,
+            );
+          }}
+        />
+      )}
+    </>
   ) : null;
 
   return (
@@ -2266,7 +2471,9 @@ export default function CostingPanel({
           <span className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
             <FileSpreadsheet className="size-3.5" />
             {activeFg.name}
-            <span className="text-xs font-normal text-primary/70">{activeFg.projectName}</span>
+            <span className="text-xs font-normal text-primary/70">
+              {activeFg.projectName}
+            </span>
             <button
               type="button"
               aria-label="Close product sheet"
@@ -2317,47 +2524,48 @@ export default function CostingPanel({
           <Suspense
             fallback={
               <AreaLoading
-                label={view.kind === "active" ? "the Active list" : "the Inactive list"}
+                label={
+                  view.kind === "active"
+                    ? "the Active list"
+                    : "the Inactive list"
+                }
               />
             }
           >
-            <ActivePanel
-              scope={view.kind}
-              onSelectView={onSelectView}
-            />
+            <ActivePanel scope={view.kind} onSelectView={onSelectView} />
           </Suspense>
         </div>
       ) : view?.kind === "materials" && canViewMaterials ? (
         <div className="mt-4">
           <Suspense fallback={<AreaLoading label="the materials sheet" />}>
-          <MaterialsSheet
-            materials={materials}
-            loading={materials === undefined}
-            canCreate={canCreateMaterial}
-            canEdit={canEditMaterial}
-            canDelete={canDeleteMaterial}
-            canImportExport={canImportExport}
-            canImport={canImport}
-          />
+            <MaterialsSheet
+              materials={materials}
+              loading={materials === undefined}
+              canCreate={canCreateMaterial}
+              canEdit={canEditMaterial}
+              canDelete={canDeleteMaterial}
+              canImportExport={canImportExport}
+              canImport={canImport}
+            />
           </Suspense>
         </div>
       ) : view === null || view?.kind === "projects" ? (
         <div className="mt-4">
           <Suspense fallback={<AreaLoading label="projects" />}>
-          <ProjectsSheet
-            finishedGoods={finishedGoods}
-            loading={loading}
-            onOpenProject={(name) => {
-              setProjectFocus(name);
-              onSelectView({ kind: "products" });
-            }}
-            onNewProject={onNewProject}
-            onEditProject={canEditProject ? onEditProject : undefined}
-            onDeleteProject={
-              canDeleteProject ? (p) => onDeleteProject?.(p) : undefined
-            }
-            onOpenProduct={(fgId) => onSelectView({ kind: "fg", fgId })}
-          />
+            <ProjectsSheet
+              finishedGoods={finishedGoods}
+              loading={loading}
+              onOpenProject={(name) => {
+                setProjectFocus(name);
+                onSelectView({ kind: "products" });
+              }}
+              onNewProject={onNewProject}
+              onEditProject={canEditProject ? onEditProject : undefined}
+              onDeleteProject={
+                canDeleteProject ? (p) => onDeleteProject?.(p) : undefined
+              }
+              onOpenProduct={(fgId) => onSelectView({ kind: "fg", fgId })}
+            />
           </Suspense>
         </div>
       ) : (view?.kind === "fg" || sheetId !== null) && activeFg ? (
@@ -2377,7 +2585,7 @@ export default function CostingPanel({
                   onClick={closeSheet}
                 >
                   <ArrowLeft className="size-3.5" />
-                  Products
+                  {deriveBackLabelFromReturn(returnTo)}
                 </Button>
                 <nav
                   aria-label="Breadcrumb"
@@ -2388,7 +2596,9 @@ export default function CostingPanel({
                     onClick={closeSheet}
                     className="truncate hover:text-foreground hover:underline"
                   >
-                    {activeFg.projectName ?? "Products"}
+                    {deriveBackLabelFromReturn(returnTo) === "Products"
+                      ? (activeFg.projectName ?? "Products")
+                      : deriveBackLabelFromReturn(returnTo)}
                   </button>
                   <ChevronRight className="size-3 shrink-0 opacity-50" />
                   <span className="truncate font-medium text-foreground">
@@ -2426,13 +2636,18 @@ export default function CostingPanel({
               finishedGoods={finishedGoods}
               activeFgId={activeFgId}
               onSelectFg={(id) => onSelectView({ kind: "fg", fgId: id })}
-              onOpenSheet={(id) => navigate(`/costing/${id}`)}
+              onOpenSheet={(id) => {
+                const base = `/costing/${id}`;
+                if (returnAddr === null) return void navigate(base);
+                return void navigate(
+                  `${base}?from=${encodeURIComponent(returnAddr)}`,
+                );
+              }}
               initialProject={view?.kind === "products" ? projectFocus : null}
             />
           </Suspense>
         </div>
       )}
-
     </div>
   );
 }

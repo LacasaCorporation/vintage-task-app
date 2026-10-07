@@ -68,13 +68,17 @@ function Field({
   return (
     <div className="space-y-1.5">
       <label className="flex items-center gap-1.5 text-xs font-medium">
-        {Icon !== undefined && <Icon className="size-3.5 text-muted-foreground" />}
+        {Icon !== undefined && (
+          <Icon className="size-3.5 text-muted-foreground" />
+        )}
         {label}
         {required === true && <span className="text-destructive">*</span>}
       </label>
       {children}
       {hint !== undefined && (
-        <p className="text-[11px] leading-snug text-muted-foreground/85">{hint}</p>
+        <p className="text-[11px] leading-snug text-muted-foreground/85">
+          {hint}
+        </p>
       )}
     </div>
   );
@@ -150,6 +154,7 @@ export default function ProductFormPage({
   initialProject,
   onSaved,
   onCancel,
+  backLabel,
 }: {
   /** The product being edited, or null for a new one. */
   editing: FgDoc | null;
@@ -162,6 +167,13 @@ export default function ProductFormPage({
   onSaved: (id: Id<"finishedGoods">) => void;
   /** Abandoned — go back to the list without saving anything. */
   onCancel: () => void;
+  /**
+   * Optional label for the back button. When missing, the default
+   * "Products" is used. Lets the user know they will return to a
+   * specific origin view (e.g. Projects, Active, Purchase · Bills)
+   * rather than to the generic product list.
+   */
+  backLabel?: string;
 }) {
   const addProduct = useMutation(api.costing.addFinishedGood);
   const updateProduct = useMutation(api.costing.updateFinishedGood);
@@ -185,7 +197,9 @@ export default function ProductFormPage({
   const [name, setName] = useState(editing?.name ?? "");
   const [code, setCode] = useState(editing?.code ?? "");
   const [unit, setUnit] = useState(editing?.unit ?? "");
-  const [qty, setQty] = useState(editing?.qty !== undefined ? String(editing.qty) : "");
+  const [qty, setQty] = useState(
+    editing?.qty !== undefined ? String(editing.qty) : "",
+  );
   const [category, setCategory] = useState(editing?.category ?? "");
   const [subCategory, setSubCategory] = useState(editing?.subCategory ?? "");
   const [note, setNote] = useState(editing?.note ?? "");
@@ -321,9 +335,10 @@ export default function ProductFormPage({
     }
   };
 
+  const resolvedBackLabel = backLabel ?? "Products";
   const crumbs = [
     "Costing",
-    "Products",
+    resolvedBackLabel,
     editing !== null ? "Edit product" : "New product",
   ];
 
@@ -339,7 +354,7 @@ export default function ProductFormPage({
             className="h-8 rounded-lg text-xs"
             onClick={onCancel}
           >
-            <ArrowLeft className="size-3.5" /> Products
+            <ArrowLeft className="size-3.5" /> {resolvedBackLabel}
           </Button>
           <nav
             aria-label="Breadcrumb"
@@ -699,10 +714,15 @@ export default function ProductFormPage({
                 </p>
               </div>
               <dl className="space-y-2.5 px-4 py-3.5 text-sm">
-                <Row label="Name" value={name.trim() === "" ? "—" : name.trim()} />
+                <Row
+                  label="Name"
+                  value={name.trim() === "" ? "—" : name.trim()}
+                />
                 <Row
                   label="Code"
-                  value={editing?.code ?? (code.trim() === "" ? "Auto" : code.trim())}
+                  value={
+                    editing?.code ?? (code.trim() === "" ? "Auto" : code.trim())
+                  }
                   mono
                 />
                 <Row
@@ -727,7 +747,10 @@ export default function ProductFormPage({
                         : `${category} › ${subCategory}`
                   }
                 />
-                <Row label="Sold per" value={unit.trim() === "" ? "pcs" : unit.trim()} />
+                <Row
+                  label="Sold per"
+                  value={unit.trim() === "" ? "pcs" : unit.trim()}
+                />
                 <Row
                   label="Batch"
                   value={num(qty) !== undefined ? String(num(qty)) : "—"}
@@ -743,7 +766,9 @@ export default function ProductFormPage({
                       ? "Not set"
                       : [
                           minNum !== undefined ? `min ${minNum}` : null,
-                          reorderNum !== undefined ? `reorder ${reorderNum}` : null,
+                          reorderNum !== undefined
+                            ? `reorder ${reorderNum}`
+                            : null,
                         ]
                           .filter((v) => v !== null)
                           .join(" · ")
