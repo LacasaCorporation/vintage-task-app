@@ -490,11 +490,7 @@ export default function ProjectDetailPanel({
                 })()}
                 max={(() => {
                   const upper: number | undefined =
-                    projectDoc !== null
-                      ? earliestJobStart
-                      : jobDoc !== null
-                        ? parentProject?.dueAt
-                        : undefined;
+                    jobDoc !== null ? parentProject?.dueAt : undefined;
                   const cross = doc.dueAt;
                   let bound = upper;
                   if (cross !== undefined) {
@@ -527,8 +523,17 @@ export default function ProjectDetailPanel({
                 </p>
               )}
               {projectDoc !== null && earliestJobStart !== undefined && (
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Cannot be after earliest job:{" "}
+                <p
+                  className={cn(
+                    "mt-1 text-[11px]",
+                    doc.startAt !== undefined && doc.startAt > earliestJobStart
+                      ? "font-medium text-amber-600 dark:text-amber-400"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {doc.startAt !== undefined && doc.startAt > earliestJobStart
+                    ? "⚠ Must be on/before earliest job: "
+                    : "Cannot be after earliest job: "}
                   {formatDueLabel(earliestJobStart)}
                 </p>
               )}
@@ -554,11 +559,7 @@ export default function ProjectDetailPanel({
                 }
                 min={(() => {
                   const lower: number | undefined =
-                    projectDoc !== null
-                      ? latestJobDue
-                      : jobDoc !== null
-                        ? parentProject?.startAt
-                        : undefined;
+                    jobDoc !== null ? parentProject?.startAt : undefined;
                   const cross = doc.startAt;
                   let bound = lower;
                   if (cross !== undefined) {
@@ -613,8 +614,18 @@ export default function ProjectDetailPanel({
                 </p>
               )}
               {projectDoc !== null && latestJobDue !== undefined && (
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Cannot be before latest job: {formatDueLabel(latestJobDue)}
+                <p
+                  className={cn(
+                    "mt-1 text-[11px]",
+                    doc.dueAt !== undefined && doc.dueAt < latestJobDue
+                      ? "font-medium text-amber-600 dark:text-amber-400"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {doc.dueAt !== undefined && doc.dueAt < latestJobDue
+                    ? "⚠ Must be on/after latest job: "
+                    : "Cannot be before latest job: "}
+                  {formatDueLabel(latestJobDue)}
                 </p>
               )}
             </Row>

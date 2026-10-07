@@ -11,7 +11,15 @@ import HomeDashboard from "@/components/HomeDashboard";
 import PrimaryNav, { type PrimarySection } from "@/components/PrimaryNav";
 import type { CostingView } from "@/components/CostingSidebar";
 import { format } from "date-fns";
-import { LogOut, Menu, NotebookPen, PanelLeftClose, PanelLeftOpen, Settings, X } from "lucide-react";
+import {
+  LogOut,
+  Menu,
+  NotebookPen,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+  X,
+} from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -19,7 +27,13 @@ import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
 import type { PromptField } from "@/components/AppDialogs";
 import { cn } from "@/lib/utils";
-import { canItem, type ActionKey, type GranularPerms, type ItemKey, type SectionKey } from "@/lib/permissions";
+import {
+  canItem,
+  type ActionKey,
+  type GranularPerms,
+  type ItemKey,
+  type SectionKey,
+} from "@/lib/permissions";
 
 /**
  * The heavy sections are fetched when you open them, not on sign-in.
@@ -105,7 +119,11 @@ export default function Dashboard() {
   /** Item-level check: can the user do `action` on a specific item? */
   const canDoItem = (item: ItemKey, action: ActionKey): boolean => {
     if (myRole === "super") return true;
-    return canItem(myAccess?.permissions as GranularPerms | undefined, item, action);
+    return canItem(
+      myAccess?.permissions as GranularPerms | undefined,
+      item,
+      action,
+    );
   };
   const sectionAllowed = (s: Section): boolean => {
     if (s === "settings") return canOpenSettings;
@@ -141,7 +159,9 @@ export default function Dashboard() {
   const renameNotebook = useMutation(api.notebooks.renameNotebook);
   const removeNotebook = useMutation(api.notebooks.removeNotebook);
   const addPage = useMutation(api.notebooks.addPage);
-  const ensureDefaultWorkbook = useMutation(api.notebooks.ensureDefaultWorkbook);
+  const ensureDefaultWorkbook = useMutation(
+    api.notebooks.ensureDefaultWorkbook,
+  );
   const updatePageRemote = useMutation(api.notebooks.updatePage);
   const removePage = useMutation(api.notebooks.removePage);
   const addTask = useMutation(api.tasks.add);
@@ -159,7 +179,9 @@ export default function Dashboard() {
   const [activeTaskView, setActiveTaskView] = useState<ActiveTaskView>(null);
 
   const nbList = notebooks ?? [];
-  const [activeNotebookId, setActiveNotebookId] = useState<NotebookId | null>(null);
+  const [activeNotebookId, setActiveNotebookId] = useState<NotebookId | null>(
+    null,
+  );
   const [activePageId, setActivePageId] = useState<PageId | null>(null);
 
   const activeNotebook =
@@ -219,7 +241,10 @@ export default function Dashboard() {
     }
   };
 
-  const handleRenameNotebook = async (nb: { _id: NotebookId; title: string }) => {
+  const handleRenameNotebook = async (nb: {
+    _id: NotebookId;
+    title: string;
+  }) => {
     const title = await prompt({
       title: "Rename notebook",
       label: "Notebook name",
@@ -238,10 +263,14 @@ export default function Dashboard() {
     }
   };
 
-  const handleDeleteNotebook = async (nb: { _id: NotebookId; title: string }) => {
+  const handleDeleteNotebook = async (nb: {
+    _id: NotebookId;
+    title: string;
+  }) => {
     const ok = await confirm({
       title: `Delete “${nb.title}”?`,
-      message: "The notebook and all of its pages will be permanently removed. This cannot be undone.",
+      message:
+        "The notebook and all of its pages will be permanently removed. This cannot be undone.",
       confirmLabel: "Delete notebook",
       danger: true,
     });
@@ -253,12 +282,17 @@ export default function Dashboard() {
       toast.success("Notebook deleted.");
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Couldn't delete the notebook.",
+        error instanceof Error
+          ? error.message
+          : "Couldn't delete the notebook.",
       );
     }
   };
 
-  const handleNewPage = async (targetNotebookId?: NotebookId, parentId?: PageId) => {
+  const handleNewPage = async (
+    targetNotebookId?: NotebookId,
+    parentId?: PageId,
+  ) => {
     const nbId = targetNotebookId ?? notebookId;
     if (!nbId) {
       toast.error("Create a notebook first.");
@@ -301,7 +335,8 @@ export default function Dashboard() {
   const handleDeletePage = async (page: { _id: PageId; title: string }) => {
     const ok = await confirm({
       title: `Delete “${page.title}”?`,
-      message: "The page and its sub-pages will be permanently removed. This cannot be undone.",
+      message:
+        "The page and its sub-pages will be permanently removed. This cannot be undone.",
       confirmLabel: "Delete page",
       danger: true,
     });
@@ -354,7 +389,9 @@ export default function Dashboard() {
       const id = await addList({ name: clean });
       setActiveTaskView(id);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't create list.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't create list.",
+      );
     }
   };
 
@@ -371,7 +408,9 @@ export default function Dashboard() {
     try {
       await renameList({ id: list._id, name: clean });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't rename list.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't rename list.",
+      );
     }
   };
 
@@ -388,7 +427,9 @@ export default function Dashboard() {
       if (activeTaskView === list._id) setActiveTaskView(null);
       toast.success("List deleted.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't delete list.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't delete list.",
+      );
     }
   };
 
@@ -411,14 +452,20 @@ export default function Dashboard() {
       await addFolderM({ name: clean });
       toast.success("Folder created.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't create folder.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't create folder.",
+      );
     }
   };
 
-  const handleDeleteFolder = async (folder: { _id: FolderId; name: string }) => {
+  const handleDeleteFolder = async (folder: {
+    _id: FolderId;
+    name: string;
+  }) => {
     const ok = await confirm({
       title: `Delete folder “${folder.name}”?`,
-      message: "The folder is removed; its lists are kept and become standalone.",
+      message:
+        "The folder is removed; its lists are kept and become standalone.",
       confirmLabel: "Delete folder",
       danger: true,
     });
@@ -427,7 +474,9 @@ export default function Dashboard() {
       await removeFolderM({ id: folder._id });
       toast.success("Folder deleted.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't delete folder.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't delete folder.",
+      );
     }
   };
 
@@ -438,7 +487,7 @@ export default function Dashboard() {
   }) => {
     const folders = taskFolders ?? [];
     if (folders.length === 0) {
-      toast.error('Create a folder first — use “New folder” in the sidebar.');
+      toast.error("Create a folder first — use “New folder” in the sidebar.");
       return;
     }
     // Simple folder picker using the styled dialog (type a number).
@@ -464,7 +513,9 @@ export default function Dashboard() {
       await setListFolderM({ id: list._id, folderId: folder._id });
       toast.success(`“${list.name}” moved to “${folder.name}”.`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't move the list.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't move the list.",
+      );
     }
   };
 
@@ -519,6 +570,7 @@ export default function Dashboard() {
     client: string;
     assignee: string;
     description: string;
+    startDate: string;
     dueDate: string;
     status: string;
     priority: string;
@@ -528,13 +580,49 @@ export default function Dashboard() {
   const projectFieldDefs = (
     initial?: Partial<ProjectFields>,
   ): PromptField[] => [
-    { key: "name", label: "Project name", placeholder: "e.g. Office renovation", required: true, initial: initial?.name },
-    { key: "client", label: "Client (optional)", placeholder: "e.g. Acme Ltd", initial: initial?.client },
-    { key: "assignee", label: "Assigned to (optional)", placeholder: "e.g. Sarah", initial: initial?.assignee },
-    { key: "dueDate", label: "Due date (optional)", type: "date", initial: initial?.dueDate },
+    {
+      key: "name",
+      label: "Project name",
+      placeholder: "e.g. Office renovation",
+      required: true,
+      initial: initial?.name,
+    },
+    {
+      key: "client",
+      label: "Client (optional)",
+      placeholder: "e.g. Acme Ltd",
+      initial: initial?.client,
+    },
+    {
+      key: "assignee",
+      label: "Assigned to (optional)",
+      placeholder: "e.g. Sarah",
+      initial: initial?.assignee,
+    },
+    {
+      key: "startDate",
+      label: "Start date (optional)",
+      type: "date",
+      initial: initial?.startDate,
+    },
+    {
+      key: "dueDate",
+      label: "Due date (optional)",
+      type: "date",
+      initial: initial?.dueDate,
+    },
     { key: "status", label: "Status", initial: initial?.status ?? "planning" },
-    { key: "priority", label: "Priority (high / medium / low)", initial: initial?.priority ?? "medium" },
-    { key: "budget", label: "Budget (optional)", type: "number", initial: initial?.budget },
+    {
+      key: "priority",
+      label: "Priority (high / medium / low)",
+      initial: initial?.priority ?? "medium",
+    },
+    {
+      key: "budget",
+      label: "Budget (optional)",
+      type: "number",
+      initial: initial?.budget,
+    },
     {
       key: "description",
       label: "Description (optional)",
@@ -553,14 +641,32 @@ export default function Dashboard() {
       toast.error("Give the project a name.");
       return;
     }
-    const statusOptions = ["planning", "in_progress", "on_hold", "completed", "cancelled"];
-    const rawStatus = (result.status ?? "planning").trim().toLowerCase().replace(/[\s-]+/g, "_");
+    const statusOptions = [
+      "planning",
+      "in_progress",
+      "on_hold",
+      "completed",
+      "cancelled",
+    ];
+    const rawStatus = (result.status ?? "planning")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
     const status = statusOptions.includes(rawStatus) ? rawStatus : "planning";
     const rawPriority = (result.priority ?? "medium").trim().toLowerCase();
     const priority = ["high", "medium", "low"].includes(rawPriority)
       ? (rawPriority as "high" | "medium" | "low")
       : undefined;
-    const dueAt = result.dueDate ? new Date(`${result.dueDate}T12:00:00`).getTime() : undefined;
+    const startAt = result.startDate
+      ? new Date(`${result.startDate}T09:00:00`).getTime()
+      : undefined;
+    const dueAt = result.dueDate
+      ? new Date(`${result.dueDate}T17:00:00`).getTime()
+      : undefined;
+    if (startAt !== undefined && dueAt !== undefined && startAt > dueAt) {
+      toast.error("Start date cannot be after the due date.");
+      return;
+    }
     const budget = result.budget ? Number(result.budget) : undefined;
     if (budget !== undefined && !Number.isFinite(budget)) {
       toast.error("Enter a valid budget.");
@@ -574,7 +680,10 @@ export default function Dashboard() {
           client: result.client,
           assignee: result.assignee,
           description: result.description,
+          startAt,
           dueAt,
+          clearStart: !result.startDate,
+          clearDue: !result.dueDate,
           status,
           priority,
           budget,
@@ -586,6 +695,7 @@ export default function Dashboard() {
           client: result.client,
           assignee: result.assignee,
           description: result.description,
+          startAt,
           dueAt,
           status,
           priority,
@@ -625,9 +735,21 @@ export default function Dashboard() {
         client: project.client ?? "",
         assignee: project.assignee ?? "",
         description: project.description ?? "",
+        startDate:
+          project.startAt !== undefined
+            ? (() => {
+                const d = new Date(project.startAt);
+                const pad = (n: number) => String(n).padStart(2, "0");
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+              })()
+            : "",
         dueDate:
           project.dueAt !== undefined
-            ? new Date(project.dueAt).toISOString().slice(0, 10)
+            ? (() => {
+                const d = new Date(project.dueAt);
+                const pad = (n: number) => String(n).padStart(2, "0");
+                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+              })()
             : "",
         status: project.status ?? "planning",
         priority: project.priority ?? "medium",
@@ -720,13 +842,31 @@ export default function Dashboard() {
       activePageId={activePage?._id ?? null}
       onSelectNotebook={handleSelectNotebook}
       onSelectPage={handleSelectPage}
-      onNewNotebook={canDoItem("notebooks", "create") ? handleNewNotebook : undefined}
-      onNewPage={canDoItem("notePages", "create") ? (nbId) => void handleNewPage(nbId) : undefined}
-      onNewSubPage={canDoItem("notePages", "create") ? (nbId, parentId) => void handleNewPage(nbId, parentId) : undefined}
-      onRenameNotebook={canDoItem("notebooks", "edit") ? handleRenameNotebook : undefined}
-      onRenamePage={canDoItem("notePages", "edit") ? handleRenamePage : undefined}
-      onDeleteNotebook={canDoItem("notebooks", "delete") ? handleDeleteNotebook : undefined}
-      onDeletePage={canDoItem("notePages", "delete") ? handleDeletePage : undefined}
+      onNewNotebook={
+        canDoItem("notebooks", "create") ? handleNewNotebook : undefined
+      }
+      onNewPage={
+        canDoItem("notePages", "create")
+          ? (nbId) => void handleNewPage(nbId)
+          : undefined
+      }
+      onNewSubPage={
+        canDoItem("notePages", "create")
+          ? (nbId, parentId) => void handleNewPage(nbId, parentId)
+          : undefined
+      }
+      onRenameNotebook={
+        canDoItem("notebooks", "edit") ? handleRenameNotebook : undefined
+      }
+      onRenamePage={
+        canDoItem("notePages", "edit") ? handleRenamePage : undefined
+      }
+      onDeleteNotebook={
+        canDoItem("notebooks", "delete") ? handleDeleteNotebook : undefined
+      }
+      onDeletePage={
+        canDoItem("notePages", "delete") ? handleDeletePage : undefined
+      }
     />
   );
 
@@ -768,7 +908,9 @@ export default function Dashboard() {
             materials={materials ?? []}
             purchaseCount={purchases?.length ?? 0}
             projectCount={projects?.length ?? 0}
-            salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
+            salesCount={
+              (salesInvoices?.length ?? 0) + (quotations?.length ?? 0)
+            }
             accountCount={ledgerAccounts?.length ?? 0}
             onSelectSection={handleSelectSection}
             onSelectView={handleSelectCostingView}
@@ -785,12 +927,24 @@ export default function Dashboard() {
               loading={taskLists === undefined}
               activeView={activeTaskView}
               onSelectView={setActiveTaskView}
-              onNewList={canDoItem("taskLists", "create") ? handleNewList : undefined}
-              onRenameList={canDoItem("taskLists", "edit") ? handleRenameList : undefined}
-              onDeleteList={canDoItem("taskLists", "delete") ? handleDeleteList : undefined}
+              onNewList={
+                canDoItem("taskLists", "create") ? handleNewList : undefined
+              }
+              onRenameList={
+                canDoItem("taskLists", "edit") ? handleRenameList : undefined
+              }
+              onDeleteList={
+                canDoItem("taskLists", "delete") ? handleDeleteList : undefined
+              }
               onMoveListToFolder={handleMoveListToFolder}
-              onNewFolder={canDoItem("taskFolders", "create") ? handleNewFolder : undefined}
-              onDeleteFolder={canDoItem("taskFolders", "delete") ? handleDeleteFolder : undefined}
+              onNewFolder={
+                canDoItem("taskFolders", "create") ? handleNewFolder : undefined
+              }
+              onDeleteFolder={
+                canDoItem("taskFolders", "delete")
+                  ? handleDeleteFolder
+                  : undefined
+              }
             />
           )}
         </div>
@@ -871,7 +1025,11 @@ export default function Dashboard() {
           <div className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col overflow-y-auto border-r border-border/60 bg-background shadow-2xl">
             <div className="flex items-center justify-between gap-2 px-4 py-4">
               <div className="flex min-w-0 items-center gap-2.5">
-                <FirmMark logo={firmLogo} className="size-8" markClassName="size-4" />
+                <FirmMark
+                  logo={firmLogo}
+                  className="size-8"
+                  markClassName="size-4"
+                />
                 <span className="min-w-0 truncate font-display text-lg font-semibold tracking-tight">
                   {brandName}
                 </span>
@@ -894,7 +1052,9 @@ export default function Dashboard() {
                 materials={materials ?? []}
                 purchaseCount={purchases?.length ?? 0}
                 projectCount={projects?.length ?? 0}
-                salesCount={(salesInvoices?.length ?? 0) + (quotations?.length ?? 0)}
+                salesCount={
+                  (salesInvoices?.length ?? 0) + (quotations?.length ?? 0)
+                }
                 accountCount={ledgerAccounts?.length ?? 0}
                 onSelectSection={handleSelectSection}
                 onSelectView={handleSelectCostingView}
@@ -960,8 +1120,15 @@ export default function Dashboard() {
               >
                 <Menu className="size-5" />
               </button>
-              <FirmMark logo={firmLogo} className="size-7" markClassName="size-3.5" />
-              <span className="max-w-40 truncate font-display font-semibold" title={brandName}>
+              <FirmMark
+                logo={firmLogo}
+                className="size-7"
+                markClassName="size-3.5"
+              />
+              <span
+                className="max-w-40 truncate font-display font-semibold"
+                title={brandName}
+              >
                 {brandName}
               </span>
             </div>
@@ -1039,34 +1206,38 @@ export default function Dashboard() {
             </Suspense>
           ) : section === "costing" ? (
             <Suspense fallback={<SectionLoading label="costing" />}>
-            <CostingPanel
-              materials={materials ?? []}
-              finishedGoods={finishedGoods ?? []}
-              loading={finishedGoods === undefined}
-              view={costingView}
-              onSelectView={setCostingView}
-                            onNewProject={canDoItem("projects", "create") ? () => void handleNewProject() : undefined}
-              onEditProject={(p) => void handleEditProject(p)}
-              onDeleteProject={(p) => void handleDeleteProject(p)}
-              canCreate={canDoItem("products", "create")}
-              canEdit={canDoItem("products", "edit")}
-              canDelete={canDoItem("products", "delete")}
-              canViewMaterials={canDoItem("materials", "view")}
-              canViewPurchase={canDoItem("purchases", "view")}
-              canViewSales={canDoItem("sales", "view")}
-              canViewAccounting={canDoItem("accounting", "view")}
-              canCreatePurchase={canDoItem("purchases", "create")}
-              canEditPurchase={canDoItem("purchases", "edit")}
-              canDeletePurchase={canDoItem("purchases", "delete")}
-              canCreateMaterial={canDoItem("materials", "create")}
-              canEditMaterial={canDoItem("materials", "edit")}
-              canDeleteMaterial={canDoItem("materials", "delete")}
-              canPrint={canDoItem("printing", "view")}
-              canImportExport={canDoItem("dataImport", "view")}
-              canImport={canDoItem("dataImport", "create")}
-              canEditProject={canDoItem("projects", "edit")}
-              canDeleteProject={canDoItem("projects", "delete")}
-            />
+              <CostingPanel
+                materials={materials ?? []}
+                finishedGoods={finishedGoods ?? []}
+                loading={finishedGoods === undefined}
+                view={costingView}
+                onSelectView={setCostingView}
+                onNewProject={
+                  canDoItem("projects", "create")
+                    ? () => void handleNewProject()
+                    : undefined
+                }
+                onEditProject={(p) => void handleEditProject(p)}
+                onDeleteProject={(p) => void handleDeleteProject(p)}
+                canCreate={canDoItem("products", "create")}
+                canEdit={canDoItem("products", "edit")}
+                canDelete={canDoItem("products", "delete")}
+                canViewMaterials={canDoItem("materials", "view")}
+                canViewPurchase={canDoItem("purchases", "view")}
+                canViewSales={canDoItem("sales", "view")}
+                canViewAccounting={canDoItem("accounting", "view")}
+                canCreatePurchase={canDoItem("purchases", "create")}
+                canEditPurchase={canDoItem("purchases", "edit")}
+                canDeletePurchase={canDoItem("purchases", "delete")}
+                canCreateMaterial={canDoItem("materials", "create")}
+                canEditMaterial={canDoItem("materials", "edit")}
+                canDeleteMaterial={canDoItem("materials", "delete")}
+                canPrint={canDoItem("printing", "view")}
+                canImportExport={canDoItem("dataImport", "view")}
+                canImport={canDoItem("dataImport", "create")}
+                canEditProject={canDoItem("projects", "edit")}
+                canDeleteProject={canDoItem("projects", "delete")}
+              />
             </Suspense>
           ) : section === "tasks" ? (
             <TasksPanel
