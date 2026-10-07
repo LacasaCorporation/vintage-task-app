@@ -473,10 +473,12 @@ export default function PrimaryNav({
           />
 
           {inCosting && view?.kind === "reports" && (
-            <ReportsSidebar
-              area={view.area}
-              onChange={(area) => onSelectView({ kind: "reports", area })}
-            />
+            <div className="ml-2 border-l border-border/60 pl-1">
+              <ReportsSidebar
+                area={view.area}
+                onChange={(area) => onSelectView({ kind: "reports", area })}
+              />
+            </div>
           )}
         </div>
       )}
