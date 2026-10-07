@@ -6,17 +6,31 @@ import ProductTagsInline from "@/components/ProductTagsInline";
 import PriorityChip from "@/components/PriorityChip";
 import StatusSelect from "@/components/StatusSelect";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Briefcase,
   CalendarDays,
   CalendarRange,
   ChartGantt,
   ChevronDown,
   Diamond,
+  Eye,
+  EyeOff,
   Flag,
   Folder,
   GripVertical,
   MoveHorizontal,
   Package,
+  Plus,
   Rows3,
   SquareKanban,
   TriangleAlert,
@@ -1348,6 +1362,13 @@ type GanttRow = {
   code?: string;
   /** 0 for the level the filter is on, 1 for its children, 2 for a product */
   depth: 0 | 1 | 2;
+  /**
+   * The key of the group this line sits inside — the project a job belongs
+   * to, the job a product belongs to. Undefined for a line that heads its own
+   * group, or one drawn flat (the Products filter), so hiding a group always
+   * puts away exactly the lines underneath it.
+   */
+  parentKey?: string;
   /** The day the bar starts: the planned start, or the day it was created. */
   start: number;
   /** The day the bar ends — the start again when nothing dates the line. */
@@ -1427,6 +1448,8 @@ export function ProjectGantt({
   selection,
   onSelect,
   canEdit = true,
+  onNewProject,
+  onNewJob,
 }: {
   mode: "projects" | "jobs" | "products";
   projects: Doc<"projects">[];
@@ -1439,6 +1462,10 @@ export function ProjectGantt({
   onSelect?: (sel: FlaggedSel) => void;
   /** False for viewers — the bars then read without offering a drag. */
   canEdit?: boolean;
+  /** Opens the page's own new-project dialog, when creating is allowed. */
+  onNewProject?: () => void;
+  /** Opens the page's own new-job dialog under the chosen project. */
+  onNewJob?: (projectId: Id<"projects">, projectLabel: string) => void;
 }) {
   const configuredStatusesQuery = useQuery(api.settings.listProjectStatuses);
   const projectStatuses = projectStatusesOrDefaults(
@@ -1454,6 +1481,9 @@ export function ProjectGantt({
   const updateFgM = useMutation(api.costing.updateFinishedGood);
   const moveProjectM = useMutation(api.costing.moveProjectTimeline);
   const moveJobM = useMutation(api.jobs.moveJobTimeline);
+  // the create menu nests a job under a project, so it offers every project
+  // rather than only the ones this board happens to be showing
+  const allProjectsQuery = useQuery(api.costing.listProjects);
   const [drag, setDrag] = useState<GanttDrag | null>(null);
   // compact by default: the chart is about seeing the whole run at once
   const [dense, setDense] = useState(() => {
@@ -1475,6 +1505,9 @@ export function ProjectGantt({
       return next;
     });
   const rowH = dense ? GANTT_ROW_H.compact : GANTT_ROW_H.comfy;
+  // the groups whose lines are put away, by row key — the label column's own
+  // hide control, so a long plan can be read one level at a time
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // the line whose bar the pointer is over — what the hover card is showing
   const [hoverKey, setHoverKey] = useState<string | null>(null);
@@ -1513,8 +1546,9 @@ export function ProjectGantt({
       depth: 0 | 1 | 2,
       job: JobDoc | undefined,
       project: Doc<"projects"> | undefined,
-      context?: string,
+      opts?: { context?: string; parentKey?: string },
     ): GanttRow => {
+      const { context, parentKey } = opts ?? {};
       const status = fgProjectStatus(fg, projectStatuses);
       const done = status === PROJECT_STATUS_FINISH;
       const fallbackStart = fg._creationTime;
@@ -1535,6 +1569,7 @@ export function ProjectGantt({
         name: fg.name,
         code: fg.code,
         depth,
+        parentKey,
         start,
         end: end ?? start,
         endKnown: end !== undefined,
@@ -1557,13 +1592,9 @@ export function ProjectGantt({
       for (const fg of sortFgs(fgs, sortMode)) {
         const job = jobOf(fg);
         const project = projectOf(job, fg);
-        const row = productRow(
-          fg,
-          0,
-          job,
-          project,
-          job?.name ?? project?.name,
-        );
+        const row = productRow(fg, 0, job, project, {
+          context: job?.name ?? project?.name,
+        });
         if (!keep(row.status, row.done)) continue;
         if (!row.endKnown) missing += 1;
         charted.push(row);
@@ -1609,7 +1640,9 @@ export function ProjectGantt({
           limits: limitsFrom(ownDates(products)),
         });
         for (const product of sortFgs(products, sortMode)) {
-          const row = productRow(product, 1, job, project);
+          const row = productRow(product, 1, job, project, {
+            parentKey: `j:${job._id}`,
+          });
           if (!keep(row.status, row.done)) continue;
           if (!row.endKnown) missing += 1;
           charted.push(row);
@@ -1673,6 +1706,7 @@ export function ProjectGantt({
           name: job.name,
           code: job.code,
           depth: 1,
+          parentKey: `p:${project._id}`,
           start: job.startAt ?? jobFallback,
           end: jobEnd ?? job.startAt ?? jobFallback,
           endKnown: jobEnd !== undefined,
@@ -1690,7 +1724,9 @@ export function ProjectGantt({
           limits: limitsFrom(ownDates(jobProducts)),
         });
         for (const product of sortFgs(jobProducts, sortMode)) {
-          const row = productRow(product, 2, job, project);
+          const row = productRow(product, 2, job, project, {
+            parentKey: `j:${job._id}`,
+          });
           if (!keep(row.status, row.done)) continue;
           if (!row.endKnown) missing += 1;
           charted.push(row);
@@ -1699,6 +1735,54 @@ export function ProjectGantt({
     }
     return { rows: charted, undated: missing };
   }, [mode, projects, jobs, fgs, projectStatuses, statusFilter, sortMode]);
+
+  /**
+   * The tree the flat rows were drawn from: which group each line sits inside,
+   * and how many lines each group holds. The hide control needs both — a click
+   * puts away everything under a group, however deep it is nested.
+   */
+  const tree = useMemo(() => {
+    const parentOf = new Map<string, string>();
+    for (const row of rows) {
+      if (row.parentKey !== undefined) parentOf.set(row.key, row.parentKey);
+    }
+    const held = new Map<string, number>();
+    for (const row of rows) {
+      let parent = row.parentKey;
+      while (parent !== undefined) {
+        held.set(parent, (held.get(parent) ?? 0) + 1);
+        parent = parentOf.get(parent);
+      }
+    }
+    return { parentOf, held };
+  }, [rows]);
+
+  /** The lines left on the chart: a hidden group takes its subtree with it. */
+  const visibleRows = useMemo(() => {
+    if (collapsed.size === 0) return rows;
+    const insideHidden = (row: GanttRow) => {
+      let parent = row.parentKey;
+      while (parent !== undefined) {
+        if (collapsed.has(parent)) return true;
+        parent = tree.parentOf.get(parent);
+      }
+      return false;
+    };
+    return rows.filter((row) => !insideHidden(row));
+  }, [rows, collapsed, tree]);
+  const hiddenCount = rows.length - visibleRows.length;
+
+  /** Put one group's lines away, or bring them back. */
+  const toggleGroup = (key: string) =>
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  /** Put away every group's lines at once, so only the top level is left. */
+  const collapseAll = () => setCollapsed(new Set(tree.held.keys()));
 
   // the days the chart has to cover, before any scale is chosen: everything on
   // it, plus today so the reader always has a "now" to measure against
@@ -2004,6 +2088,73 @@ export function ProjectGantt({
     <div>
       <>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
+            {canEdit && (onNewProject !== undefined || onNewJob !== undefined) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    title="Create a project or a job without leaving the timeline"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-dashed border-primary/40 px-2 py-0.5 font-medium text-primary transition-colors hover:bg-primary/10"
+                  >
+                    <Plus className="size-3" /> New
+                    <ChevronDown className="size-3 opacity-60" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-60">
+                  <DropdownMenuLabel className="text-[11px] tracking-wide uppercase">
+                    Add to the plan
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {onNewProject !== undefined && (
+                    <DropdownMenuItem
+                      onSelect={() => onNewProject()}
+                      className="gap-2 text-sm"
+                    >
+                      <Folder className="size-3.5 shrink-0 text-sky-500/80" />
+                      <span className="min-w-0 flex-1">New project…</span>
+                    </DropdownMenuItem>
+                  )}
+                  {onNewJob !== undefined && (
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className="gap-2 text-sm">
+                        <Briefcase className="size-3.5 shrink-0 text-amber-500/80" />
+                        <span className="min-w-0 flex-1">New job…</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="max-h-72 w-64 overflow-y-auto">
+                        {(allProjectsQuery ?? projects).length === 0 ? (
+                          <DropdownMenuItem
+                            disabled
+                            className="text-xs text-muted-foreground"
+                          >
+                            Create a project first, then jobs go under it.
+                          </DropdownMenuItem>
+                        ) : (
+                          [...(allProjectsQuery ?? projects)]
+                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .map((project) => (
+                              <DropdownMenuItem
+                                key={project._id}
+                                onSelect={() => onNewJob(project._id, project.name)}
+                                className="gap-2 text-sm"
+                              >
+                                <Folder className="size-3.5 shrink-0 text-sky-500/80" />
+                                <span className="min-w-0 flex-1 truncate">
+                                  {project.name}
+                                </span>
+                                {project.code && (
+                                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                                    {project.code}
+                                  </span>
+                                )}
+                              </DropdownMenuItem>
+                            ))
+                        )}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-card p-0.5">
               {GANTT_ZOOMS.map((entry) => (
                 <button
@@ -2047,7 +2198,12 @@ export function ProjectGantt({
               </span>
             )}
             <span className="tabular-nums">
-              {rows.length} line{rows.length === 1 ? "" : "s"}
+              {visibleRows.length} line{visibleRows.length === 1 ? "" : "s"}
+              {hiddenCount > 0 && (
+                <span className="text-muted-foreground/70">
+                  {" "}· {hiddenCount} hidden
+                </span>
+              )}
             </span>
             <span className="ml-auto inline-flex items-center gap-2">
               <span className="tabular-nums">
@@ -2061,6 +2217,24 @@ export function ProjectGantt({
                 className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-0.5 font-medium transition-colors hover:bg-accent hover:text-foreground"
               >
                 <CalendarDays className="size-3" /> Today
+              </button>
+              <button
+                type="button"
+                onClick={hiddenCount > 0 ? () => setCollapsed(new Set()) : collapseAll}
+                disabled={hiddenCount === 0 && tree.held.size === 0}
+                title={
+                  hiddenCount > 0
+                    ? `Bring the ${hiddenCount} hidden line${hiddenCount === 1 ? "" : "s"} back`
+                    : "Hide the lines under every project and job"
+                }
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2 py-0.5 font-medium transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+              >
+                {hiddenCount > 0 ? (
+                  <Eye className="size-3" />
+                ) : (
+                  <EyeOff className="size-3" />
+                )}
+                {hiddenCount > 0 ? "Show all" : "Hide all"}
               </button>
               <button
                 type="button"
@@ -2171,8 +2345,11 @@ export function ProjectGantt({
                     }}
                   />
                 )}
-                {rows.map((row) => {
+                {visibleRows.map((row) => {
                   const statusIndex = projectStatuses.indexOf(row.status);
+                  // the lines this row hides, and whether it is hiding them
+                  const held = tree.held.get(row.key) ?? 0;
+                  const isCollapsed = collapsed.has(row.key);
                   // the bar wears the colour of its level; the milestone keeps
                   // the workflow ink, so status still reads off the chart
                   const rowColor = statusColor(
@@ -2260,6 +2437,36 @@ export function ProjectGantt({
                         className="sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-card px-3"
                         style={{ width: GANTT_LABEL_W }}
                       >
+                        {/* the hide control: a group puts away everything under
+                            it, a leaf line keeps the slot empty so every name
+                            starts in the same column */}
+                        {held > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleGroup(row.key)}
+                            aria-expanded={!isCollapsed}
+                            aria-label={
+                              isCollapsed
+                                ? `Show the ${held} line${held === 1 ? "" : "s"} under “${row.name}”`
+                                : `Hide the ${held} line${held === 1 ? "" : "s"} under “${row.name}”`
+                            }
+                            title={
+                              isCollapsed
+                                ? `Show the ${held} line${held === 1 ? "" : "s"} under “${row.name}”`
+                                : `Hide the ${held} line${held === 1 ? "" : "s"} under “${row.name}”`
+                            }
+                            className="-ml-1 grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          >
+                            <ChevronDown
+                              className={cn(
+                                "size-3 transition-transform",
+                                isCollapsed && "-rotate-90",
+                              )}
+                            />
+                          </button>
+                        ) : (
+                          <span aria-hidden className="w-4 shrink-0" />
+                        )}
                         {row.fgId !== undefined ? (
                           <Package
                             className={cn(

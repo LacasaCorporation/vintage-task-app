@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import ProjectsWorkspace from "@/components/ProjectsWorkspace";
 import { DEFAULT_VIEW_BY_FILTER, type WorkspaceView } from "@/components/FlaggedViews";
 import {
@@ -39,10 +40,15 @@ import { toast } from "@/lib/toast";
 export default function ProductionsBoard({
   canEdit = true,
   sortMode = "manual",
+  onNewProject,
+  onNewJob,
 }: {
   canEdit?: boolean;
   /** Shared with the Projects page so the two lists order the same way. */
   sortMode?: SortMode;
+  /** The Projects page's own create flows, offered from the timeline. */
+  onNewProject?: () => void;
+  onNewJob?: (projectId: Id<"projects">, projectLabel: string) => void;
 }) {
   const jobs = useQuery(api.jobs.listJobs);
   const fgs = useQuery(api.costing.listFinishedGoods);
@@ -249,6 +255,8 @@ export default function ProductionsBoard({
       busyKey={busyKey}
       onToggleFg={(fg) => void handleToggleFg(fg)}
       onToggleJob={(job) => void handleToggleJob(job)}
+      onNewProject={onNewProject}
+      onNewJob={onNewJob}
     />
   );
 }

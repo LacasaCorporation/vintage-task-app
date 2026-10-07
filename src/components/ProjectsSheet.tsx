@@ -901,7 +901,16 @@ export default function ProjectsSheet({
 
       {tab === "customers" && <CustomersPanel />}
 
-      {tab === "productions" && <ProductionsBoard />}
+      {tab === "productions" && (
+        // the timeline creates through this page's own dialogs, so a project or
+        // a job made from the Gantt lands in the same place as one made above it
+        <ProductionsBoard
+          onNewProject={onNewProject}
+          onNewJob={(projectId, projectLabel) =>
+            setJobDialog({ projectId, projectLabel, job: null })
+          }
+        />
+      )}
 
       {/* listing sheet */}
       <section

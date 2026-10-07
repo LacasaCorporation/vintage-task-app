@@ -38,7 +38,7 @@ import {
   type JobDoc,
   type SortMode,
 } from "@/components/FlaggedLists";
-import type { Doc } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import type { ProjectStatusDetail } from "@/lib/project-statuses";
 import { cn } from "@/lib/utils";
 
@@ -73,6 +73,8 @@ export default function ProjectsWorkspace({
   onToggleFg,
   onToggleJob,
   canEdit = true,
+  onNewProject,
+  onNewJob,
 }: {
   projects: Doc<"projects">[] | undefined;
   jobs: JobDoc[] | undefined;
@@ -100,6 +102,10 @@ export default function ProjectsWorkspace({
   onToggleJob: (job: JobDoc) => void;
   /** False for viewers — the product's task features then read-only. */
   canEdit?: boolean;
+  /** Opens the page's own new-project dialog, offered from the timeline. */
+  onNewProject?: () => void;
+  /** Opens the page's own new-job dialog under the chosen project. */
+  onNewJob?: (projectId: Id<"projects">, projectLabel: string) => void;
 }) {
   // The chosen view is only meaningful for the level it belongs to, so a view
   // carried over from another filter falls back to that filter's default.
@@ -247,6 +253,8 @@ export default function ProjectsWorkspace({
               selection={selection}
               onSelect={onSelect}
               canEdit={canEdit}
+              onNewProject={onNewProject}
+              onNewJob={onNewJob}
             />
           ) : activeView === "hierarchy" ? (
             <ProjectHierarchy
@@ -295,6 +303,8 @@ export default function ProjectsWorkspace({
               selection={selection}
               onSelect={onSelect}
               canEdit={canEdit}
+              onNewProject={onNewProject}
+              onNewJob={onNewJob}
             />
           ) : activeView === "board" ? (
             <div className="p-3">
@@ -345,6 +355,8 @@ export default function ProjectsWorkspace({
             selection={selection}
             onSelect={onSelect}
             canEdit={canEdit}
+            onNewProject={onNewProject}
+            onNewJob={onNewJob}
           />
         ) : activeView === "hierarchy" ? (
           <FlaggedItemsList
