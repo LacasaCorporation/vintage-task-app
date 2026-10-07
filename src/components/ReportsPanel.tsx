@@ -22,6 +22,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { ReportsArea } from "@/components/CostingSidebar";
 import { useQuery } from "convex/react";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
@@ -350,8 +351,14 @@ function SubTabs<T extends string>({
 
 /* ── the page ──────────────────────────────────────────────────────── */
 
-export default function ReportsPanel() {
-  const [area, setArea] = useState<ReportArea>("financial");
+export default function ReportsPanel({
+  area = "financial",
+}: {
+  area?: ReportsArea;
+} = {}) {
+  const [localArea, setLocalArea] = useState<ReportArea>(area);
+  const effectiveArea = area !== "financial" ? area : localArea;
+  const setArea = (id: ReportArea) => setLocalArea(id);
   const [rangeKey, setRangeKey] = useState<RangeKey>("month");
   const [customFrom, setCustomFrom] = useState(() => {
     const now = new Date();
@@ -369,7 +376,7 @@ export default function ReportsPanel() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <PageTabs
           tabs={AREA_TABS}
-          value={area}
+          value={effectiveArea}
           onChange={setArea}
           label="Report areas"
           size="md"
@@ -405,10 +412,10 @@ export default function ReportsPanel() {
         </div>
       </div>
 
-      {area === "financial" && <FinancialReports range={range} />}
-      {area === "sales" && <SalesReports range={range} />}
-      {area === "purchase" && <PurchaseReports range={range} />}
-      {area === "stock" && <StockReports range={range} />}
+      {effectiveArea === "financial" && <FinancialReports range={range} />}
+      {effectiveArea === "sales" && <SalesReports range={range} />}
+      {effectiveArea === "purchase" && <PurchaseReports range={range} />}
+      {effectiveArea === "stock" && <StockReports range={range} />}
     </div>
   );
 }

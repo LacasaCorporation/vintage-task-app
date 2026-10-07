@@ -13,6 +13,9 @@ type FgDoc = Doc<"finishedGoods">;
  * The navigation itself lives in `PrimaryNav`; this type is shared between
  * the sidebar, the costing panel and the page that owns the state.
  */
+export type ReportsArea = "financial" | "sales" | "purchase" | "stock";
+
+/** Reports is now a sub-tabbed area on the Reports page. */
 export type CostingView =
   | { kind: "materials" }
   /** Everything carrying the Active mark, gathered in one list. */
@@ -27,5 +30,6 @@ export type CostingView =
   | { kind: "projects" }
   | { kind: "fg"; fgId: FgDoc["_id"] }
   | { kind: "accounting"; tab: AccountingTab }
-  | { kind: "reports" }
+  | { kind: "reports"; area: ReportsArea }
   | null;
+

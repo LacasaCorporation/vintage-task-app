@@ -14,7 +14,8 @@ import {
   ShoppingCart,
 } from "lucide-react";
 import { useState } from "react";
-import type { CostingView } from "@/components/CostingSidebar";
+import type { CostingView, ReportsArea } from "@/components/CostingSidebar";
+import ReportsSidebar from "@/components/ReportsSidebar";
 import { ACCOUNTING_TABS } from "@/lib/accounting-tabs";
 import { PURCHASE_TABS } from "@/lib/purchase-tabs";
 import { SALES_TABS } from "@/lib/sales-tabs";
@@ -463,12 +464,21 @@ export default function PrimaryNav({
 
       {/* reports: what the whole set of books says, read four ways */}
       {canViewAccounting && (
-        <NavRow
-          label="Reports"
-          Icon={FileBarChart}
-          active={inCosting && view?.kind === "reports"}
-          onClick={() => onSelectView({ kind: "reports" })}
-        />
+        <div>
+          <NavRow
+            label="Reports"
+            Icon={FileBarChart}
+            active={inCosting && view?.kind === "reports"}
+            onClick={() => onSelectView({ kind: "reports", area: "financial" })}
+          />
+
+          {inCosting && view?.kind === "reports" && (
+            <ReportsSidebar
+              area={view.area}
+              onChange={(area) => onSelectView({ kind: "reports", area })}
+            />
+          )}
+        </div>
       )}
 
       {/* inventory: what you stock and what you sell, as one collapsible group */}

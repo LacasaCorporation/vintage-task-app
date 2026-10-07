@@ -252,7 +252,7 @@ export default function HomeDashboard({
             </button>
             <button
               type="button"
-              onClick={() => onGoView({ kind: "reports" })}
+              onClick={() => onGoView({ kind: "reports", area: "financial" })}
               className="inline-flex items-center gap-1.5 rounded-xl border bg-background/70 px-3.5 py-2 text-sm font-medium text-foreground backdrop-blur transition-colors hover:bg-accent"
             >
               <ChartColumn className="size-3.5" />
