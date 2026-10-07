@@ -842,11 +842,23 @@ export function ProjectKanban({
               done: products.filter((product) => product.isCompleted).length,
               total: products.length,
             },
-            // a job's percentage is the ratio of its products finished
+            // a job's percentage is the average completion of its products
             percent:
               products.length > 0
-                ? (products.filter((product) => product.isCompleted).length * 100)
-                    / products.length
+                ? Math.round(
+                    products.reduce((sum, p) => {
+                      if (p.isCompleted) return sum + 100;
+                      const s = fgProjectStatus(p, projectStatuses);
+                      if (s === PROJECT_STATUS_FINISH) return sum + 100;
+                      const idx = projectStatuses.indexOf(s);
+                      return (
+                        sum +
+                        (idx >= 0
+                          ? statusCompletion(statusDetails, s, idx, projectStatuses.length)
+                          : 0)
+                      );
+                    }, 0) / products.length,
+                  )
                 : undefined,
           },
         ];
@@ -874,15 +886,24 @@ export function ProjectKanban({
           done,
           jobs: projectJobs.length,
           products: products.length,
-          // the project's percentage moves with its products too: how many
-          // of them are finished, over how many there are — an exact ratio, so a
-          // project with 1 of 3 products made reads as 33.3% and the labels that
-          // round may show 33% while the exact figure stays held
+          // the project's percentage moves with its products too
           progress: undefined,
           percent:
             products.length > 0
-              ? (products.filter((product) => product.isCompleted).length * 100)
-                  / products.length
+              ? Math.round(
+                  products.reduce((sum, p) => {
+                    if (p.isCompleted) return sum + 100;
+                    const s = fgProjectStatus(p, projectStatuses);
+                    if (s === PROJECT_STATUS_FINISH) return sum + 100;
+                    const idx = projectStatuses.indexOf(s);
+                    return (
+                      sum +
+                      (idx >= 0
+                        ? statusCompletion(statusDetails, s, idx, projectStatuses.length)
+                        : 0)
+                    );
+                  }, 0) / products.length,
+                )
               : undefined,
         },
       ];
@@ -1612,6 +1633,26 @@ export function ProjectGantt({
      * A product line. Its dates are its own, else its job's, else its project's
      * — the same order its due chips already resolve them in.
      */
+    /** Completion percentage of a finished good product, based on its status or done flag. */
+    const fgPercent = (fg: FgDoc): number => {
+      if (fg.isCompleted) return 100;
+      const status = fgProjectStatus(fg, projectStatuses);
+      if (status === PROJECT_STATUS_FINISH) return 100;
+      const statusIndex = projectStatuses.indexOf(status);
+      return statusIndex >= 0
+        ? statusCompletion(
+            statusDetails,
+            status,
+            statusIndex,
+            projectStatuses.length,
+          )
+        : 0;
+    };
+
+    /**
+     * A product line. Its dates are its own, else its job's, else its project's
+     * — the same order its due chips already resolve them in.
+     */
     const productRow = (
       fg: FgDoc,
       depth: 0 | 1 | 2,
@@ -1622,20 +1663,7 @@ export function ProjectGantt({
       const { context, parentKey } = opts ?? {};
       const status = fgProjectStatus(fg, projectStatuses);
       const done = status === PROJECT_STATUS_FINISH;
-      // how far along the product reads: the completion the status it sits in
-      // counts, which is the number that moves as the product moves up the
-      // workflow — and 100 the moment it is finished
-      const statusIndex = projectStatuses.indexOf(status);
-      const percent = done
-        ? 100
-        : statusIndex >= 0
-          ? statusCompletion(
-              statusDetails,
-              status,
-              statusIndex,
-              projectStatuses.length,
-            )
-          : 0;
+      const percent = fgPercent(fg);
       const fallbackStart = fg._creationTime;
       const start =
         fg.startAt ?? job?.startAt ?? job?._creationTime ?? fallbackStart;
@@ -1705,6 +1733,12 @@ export function ProjectGantt({
         const fallbackStart = job._creationTime;
         const end = job.dueAt ?? project?.dueAt;
         if (end === undefined) missing += 1;
+        const percent =
+          products.length > 0
+            ? products.reduce((sum, p) => sum + fgPercent(p), 0) / products.length
+            : done
+              ? 100
+              : 0;
         charted.push({
           key: `j:${job._id}`,
           level: "job",
@@ -1721,20 +1755,8 @@ export function ProjectGantt({
           status,
           done,
           meta,
-          // exactly how much of the job is done: how many of its products
-          // are finished, over how many there are — a number, not a stage.
-          // displayed rounded only on the arrow badge; everywhere else a job
-          // may render the true value (e.g. 1 of 3 = 33.333...%)
-          percent:
-            products.length > 0
-              ? (finished * 100) / products.length
-              : done
-                ? 100
-                : 0,
-          // the progress ring is only how the job is styled while it is
-          // still open — it is not the completion percentage, so it may be
-          // empty even when the job already reads as partly done
-          progress: undefined,
+          percent,
+          progress: { done: finished, total: products.length },
           bounds: windowOf(project?.startAt, project?.dueAt),
           limits: limitsFrom(ownDates(products)),
         });
@@ -1762,21 +1784,28 @@ export function ProjectGantt({
       const products = fgs.filter((fg) =>
         productJobIds(fg).some((jobId) => jobIds.has(String(jobId))),
       );
-      // exactly how much of the project is done: how many of its products
-      // are finished, over how many it has — counting the product count in
-      // the project, one by one, like a workshop reading how many are made.
-      // If a project has no products yet, it is read through its jobs
-      // the same way: how many jobs are finished, over how many there are.
       const jobsFinished = projectJobs.filter((job) =>
         isStageDone(jobProjectStatus(job, projectStatuses)),
       ).length;
       const finished = products.filter((product) => product.isCompleted).length;
       const percent =
         products.length > 0
-          ? (finished * 100) / products.length
+          ? products.reduce((sum, p) => sum + fgPercent(p), 0) / products.length
           : projectJobs.length > 0
-            ? (jobsFinished * 100) / projectJobs.length
-            : 0;
+            ? projectJobs.reduce((sum, j) => {
+                const jProducts = productsOfJob(fgs, j._id);
+                const jDone = isStageDone(jobProjectStatus(j, projectStatuses));
+                const jPct =
+                  jProducts.length > 0
+                    ? jProducts.reduce((s, p) => s + fgPercent(p), 0) / jProducts.length
+                    : jDone
+                      ? 100
+                      : 0;
+                return sum + jPct;
+              }, 0) / projectJobs.length
+            : done
+              ? 100
+              : 0;
       const meta = `${plural(projectJobs.length, "job")} · ${plural(products.length, "product")}`;
       const fallbackStart = project._creationTime;
       if (project.dueAt === undefined) missing += 1;
@@ -1812,6 +1841,12 @@ export function ProjectGantt({
         const jobFinished = jobProducts.filter(
           (product) => product.isCompleted,
         ).length;
+        const jobPercent =
+          jobProducts.length > 0
+            ? jobProducts.reduce((sum, p) => sum + fgPercent(p), 0) / jobProducts.length
+            : jobDone
+              ? 100
+              : 0;
         if (jobEnd === undefined) missing += 1;
         charted.push({
           key: `j:${job._id}`,
@@ -1829,6 +1864,7 @@ export function ProjectGantt({
           ownEnd: job.dueAt,
           status: jobStatus,
           done: jobDone,
+          percent: jobPercent,
           meta:
             jobProducts.length > 0
               ? `${jobFinished}/${jobProducts.length} products`
@@ -2644,9 +2680,9 @@ export function ProjectGantt({
                             {row.percent !== undefined && (
                               <span
                                 className="shrink-0 font-semibold tabular-nums"
-                                title={`${row.percent}% complete — products finished over total products in the job`}
+                                title={`${Math.round(row.percent)}% complete`}
                               >
-                                {row.percent}%
+                                {Math.round(row.percent)}%
                               </span>
                             )}
                             {row.code && (
@@ -2774,13 +2810,13 @@ export function ProjectGantt({
                                 when the project holds none). It is printed rounded on the
                                 bar pill and in the hover card only; the inlay's true width is
                                 the exact value so a bar for 1 of 3 still reads as a third. */}
-                            {row.percent !== undefined && (
+                            {row.percent !== undefined && row.percent > 0 && (
                               <span
                                 aria-hidden
                                 className="absolute inset-y-0 left-0 rounded-full"
                                 style={{
-                                  width: `${(row.percent / 100) * (to - from)}%`,
-                                  opacity: 0.25 + (row.percent / 100) * 0.75,
+                                  width: `${Math.min(100, Math.max(0, row.percent))}%`,
+                                  opacity: Math.min(0.65, 0.25 + (Math.min(100, Math.max(0, row.percent)) / 100) * 0.75),
                                   backgroundColor: '#000000',
                                 }}
                               />
@@ -2913,14 +2949,12 @@ export function ProjectGantt({
                                       · {row.progress.done}/{row.progress.total} products done
                                     </span>
                                   )}
+                                {percentLabel !== undefined && (
+                                  <span>· {percentLabel}%</span>
+                                )}
                                 <span>
-                                · {row.percent}
-                                  {percentLabel !== undefined
-                                    ? `%
-                                      {startPlanned ? "own start" : "start not planned"}{" "}
-                                      / {endPlanned ? "own end" : "end not planned"}`
-                                    : "start not planned / end not planned"}
-                              </span>
+                                  · {startPlanned ? "own start" : "start not planned"} / {endPlanned ? "own end" : "end not planned"}
+                                </span>
                             </span>
                           </span>
                         )}
