@@ -721,10 +721,18 @@ export function FlaggedProjectsList({
         const done = isStageDone(status);
         const projectJobs = jobsOf(project._id);
         const projectFgs = productsOf(project);
-        // a project completes through its jobs, so its percentage is theirs
+        // the percentage moves with the products: how many are finished over
+        // how many there are, falling back to the jobs when it holds none
         const jobsFinished = projectJobs.filter((job) =>
           isStageDone(jobProjectStatus(job, projectStatuses)),
         ).length;
+        const productsFinished = projectFgs.filter(
+          (f) => f.isCompleted === true,
+        ).length;
+        const percent =
+          projectFgs.length > 0
+            ? rollupCompletion(productsFinished, projectFgs.length)
+            : rollupCompletion(jobsFinished, projectJobs.length);
         return (
           <li
             key={project._id}
@@ -769,17 +777,21 @@ export function FlaggedProjectsList({
             >
               {projectJobs.length} job{projectJobs.length === 1 ? "" : "s"}
             </span>
-            {projectJobs.length > 0 && (
+            {(projectFgs.length > 0 || projectJobs.length > 0) && (
               <span
                 className={cn(
                   "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                  jobsFinished === projectJobs.length
+                  percent >= 100
                     ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                     : "bg-muted text-muted-foreground",
                 )}
-                title={`${jobsFinished} of ${projectJobs.length} jobs completed`}
+                title={
+                  projectFgs.length > 0
+                    ? `${productsFinished} of ${projectFgs.length} products finished`
+                    : `${jobsFinished} of ${projectJobs.length} jobs completed`
+                }
               >
-                {rollupCompletion(jobsFinished, projectJobs.length)}%
+                {percent}%
               </span>
             )}
             <span

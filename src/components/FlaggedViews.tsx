@@ -227,13 +227,26 @@ export function ProjectHierarchy({
         const status = projectDocStatus(project, projectStatuses);
         const projectDone = isStageDone(status);
         const isCollapsed = collapsed.has(project._id);
-        // the whole completion of a project, counted from its jobs
+        // the project's completion, counted from the products under it: how
+        // many are finished over how many there are (its jobs when it holds
+        // no products at all)
         const allProjectJobs = jobs.filter(
           (job) => job.projectId === project._id,
         );
         const jobsFinished = allProjectJobs.filter((job) =>
           isStageDone(jobProjectStatus(job, projectStatuses)),
         ).length;
+        const allJobIds = new Set(allProjectJobs.map((job) => String(job._id)));
+        const projectFgs = fgs.filter((fg) =>
+          productJobIds(fg).some((jid) => allJobIds.has(String(jid))),
+        );
+        const productsFinished = projectFgs.filter(
+          (fg) => fg.isCompleted === true,
+        ).length;
+        const percent =
+          projectFgs.length > 0
+            ? rollupCompletion(productsFinished, projectFgs.length)
+            : rollupCompletion(jobsFinished, allProjectJobs.length);
         const projectJobs = sortJobs(
           jobs.filter(
             (job) =>
@@ -306,17 +319,21 @@ export function ProjectHierarchy({
               <span className="shrink-0 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-sky-700 dark:text-sky-400">
                 {projectJobs.length} job{projectJobs.length === 1 ? "" : "s"}
               </span>
-              {allProjectJobs.length > 0 && (
+              {(projectFgs.length > 0 || allProjectJobs.length > 0) && (
                 <span
                   className={cn(
                     "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                    jobsFinished === allProjectJobs.length
+                    percent >= 100
                       ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                       : "bg-muted text-muted-foreground",
                   )}
-                  title={`${jobsFinished} of ${allProjectJobs.length} jobs completed`}
+                  title={
+                    projectFgs.length > 0
+                      ? `${productsFinished} of ${projectFgs.length} products finished`
+                      : `${jobsFinished} of ${allProjectJobs.length} jobs completed`
+                  }
                 >
-                  {rollupCompletion(jobsFinished, allProjectJobs.length)}%
+                  {percent}%
                 </span>
               )}
               <span className="shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-violet-700 dark:text-violet-400">
@@ -736,6 +753,8 @@ type BoardCard = {
   products?: number;
   /** products finished out of the products linked to a job */
   progress?: { done: number; total: number };
+  /** completion, 0–100: the ratio of the products that are finished */
+  percent?: number;
 };
 
 /**
@@ -817,6 +836,14 @@ export function ProjectKanban({
               done: products.filter((product) => product.isCompleted).length,
               total: products.length,
             },
+            // a job's percentage is the ratio of its products finished
+            percent:
+              products.length > 0
+                ? rollupCompletion(
+                    products.filter((product) => product.isCompleted).length,
+                    products.length,
+                  )
+                : undefined,
           },
         ];
       });
@@ -843,14 +870,19 @@ export function ProjectKanban({
           done,
           jobs: projectJobs.length,
           products: products.length,
-          // how much of the project is done, counted the only way it can be:
-          // its jobs, which each stand for the products under them
+          // the project's percentage moves with its products too: how many
+          // of them are finished, over how many there are
           progress: {
-            done: projectJobs.filter((job) =>
-              isStageDone(jobProjectStatus(job, projectStatuses)),
-            ).length,
-            total: projectJobs.length,
+            done: products.filter((product) => product.isCompleted).length,
+            total: products.length,
           },
+          percent:
+            products.length > 0
+              ? rollupCompletion(
+                  products.filter((product) => product.isCompleted).length,
+                  products.length,
+                )
+              : undefined,
         },
       ];
     });
@@ -1029,45 +1061,42 @@ export function ProjectKanban({
                           </span>
                           <span className="flex flex-wrap items-center gap-1">
                             {card.jobs !== undefined && (
-                              <span
-                                className={cn(
-                                  "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                                  card.done
-                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                    : "bg-sky-500/10 text-sky-700 dark:text-sky-400",
-                                )}
-                                title={
-                                  card.progress !== undefined &&
-                                  card.progress.total > 0
-                                    ? "Jobs completed in this project"
-                                    : "Jobs in this project"
-                                }
-                              >
-                                {card.progress !== undefined &&
-                                card.progress.total > 0
-                                  ? `${card.progress.done}/${card.progress.total} jobs`
-                                  : `${card.jobs} job${card.jobs === 1 ? "" : "s"}`}
+                              <span className="shrink-0 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-sky-700 dark:text-sky-400">
+                                {card.jobs} job{card.jobs === 1 ? "" : "s"}
                               </span>
                             )}
                             {card.products !== undefined &&
-                              card.jobs !== undefined && (
+                              (card.progress === undefined ||
+                                card.progress.total === 0) && (
                                 <span className="shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-violet-700 dark:text-violet-400">
                                   {card.products} product{card.products === 1 ? "" : "s"}
                                 </span>
                               )}
                             {card.progress !== undefined &&
-                              card.jobs === undefined &&
                               card.progress.total > 0 && (
+                                <span
+                                  className={cn(
+                                    "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                                    card.done
+                                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                      : "bg-muted text-muted-foreground",
+                                  )}
+                                  title="Products finished"
+                                >
+                                  {card.progress.done}/{card.progress.total} products
+                                </span>
+                              )}
+                            {card.percent !== undefined && (
                               <span
                                 className={cn(
                                   "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
-                                  card.done
+                                  card.percent >= 100
                                     ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                                     : "bg-muted text-muted-foreground",
                                 )}
-                                title="Products completed"
+                                title="Completion, from the products finished"
                               >
-                                {card.progress.done}/{card.progress.total} products
+                                {card.percent}%
                               </span>
                             )}
                             <DueChips dueAt={card.dueAt} />
@@ -1418,6 +1447,14 @@ type GanttRow = {
   meta?: string;
   /** Products finished out of the products this line carries. */
   progress?: { done: number; total: number };
+  /**
+   * How complete this line reads, 0–100: a product from the status it sits
+   * in, a job or a project from the ratio of the products under them that are
+   * finished. It is what the inlay on the bar fills to and the number the bar
+   * carries — never the stage's own percentage, which a job or project does
+   * not have.
+   */
+  percent?: number;
   /** The window the line has to stay inside: its parent's planned dates. */
   bounds?: DateWindow;
   /** What the line's own children stop it being shrunk past. */
@@ -1584,6 +1621,20 @@ export function ProjectGantt({
       const { context, parentKey } = opts ?? {};
       const status = fgProjectStatus(fg, projectStatuses);
       const done = status === PROJECT_STATUS_FINISH;
+      // how far along the product reads: the completion the status it sits in
+      // counts, which is the number that moves as the product moves up the
+      // workflow — and 100 the moment it is finished
+      const statusIndex = projectStatuses.indexOf(status);
+      const percent = done
+        ? 100
+        : statusIndex >= 0
+          ? statusCompletion(
+              statusDetails,
+              status,
+              statusIndex,
+              projectStatuses.length,
+            )
+          : 0;
       const fallbackStart = fg._creationTime;
       const start =
         fg.startAt ?? job?.startAt ?? job?._creationTime ?? fallbackStart;
@@ -1612,6 +1663,7 @@ export function ProjectGantt({
         status,
         done,
         meta: meta.length > 0 ? meta : undefined,
+        percent,
         // a product is planned between its job's dates — the job's own, or the
         // project's where the job has none of its own
         bounds: windowOf(
@@ -1668,6 +1720,13 @@ export function ProjectGantt({
           status,
           done,
           meta,
+          // a job's percentage is the ratio of its products finished
+          percent:
+            products.length > 0
+              ? rollupCompletion(finished, products.length)
+              : done
+                ? 100
+                : 0,
           progress: { done: finished, total: products.length },
           bounds: windowOf(project?.startAt, project?.dueAt),
           limits: limitsFrom(ownDates(products)),
@@ -1696,10 +1755,17 @@ export function ProjectGantt({
       const products = fgs.filter((fg) =>
         productJobIds(fg).some((jobId) => jobIds.has(String(jobId))),
       );
-      // a project's completion is its jobs: it finishes when they all do
+      // a project's completion moves with its products: finished products
+      // over all of them, falling back to the jobs when it carries no
+      // products at all — a project finishes when its jobs do
       const jobsFinished = projectJobs.filter((job) =>
         isStageDone(jobProjectStatus(job, projectStatuses)),
       ).length;
+      const finished = products.filter((product) => product.isCompleted).length;
+      const percent =
+        products.length > 0
+          ? rollupCompletion(finished, products.length)
+          : rollupCompletion(jobsFinished, projectJobs.length);
       const meta = `${plural(projectJobs.length, "job")} · ${plural(products.length, "product")}`;
       const fallbackStart = project._creationTime;
       if (project.dueAt === undefined) missing += 1;
@@ -1719,7 +1785,8 @@ export function ProjectGantt({
         status,
         done,
         meta,
-        progress: { done: jobsFinished, total: projectJobs.length },
+        percent,
+        progress: { done: finished, total: products.length },
         // the project cannot be pulled in past the jobs it carries
         limits: limitsFrom(ownDates(projectJobs)),
       });
@@ -1770,7 +1837,17 @@ export function ProjectGantt({
       }
     }
     return { rows: charted, undated: missing };
-  }, [mode, projects, jobs, fgs, projectStatuses, statusFilter, sortMode]);
+  }, [
+    mode,
+    projects,
+    jobs,
+    fgs,
+    projectStatuses,
+    // a product's percentage is read off the status details it is built with
+    statusDetails,
+    statusFilter,
+    sortMode,
+  ]);
 
   /**
    * The tree the flat rows were drawn from: which group each line sits inside,
@@ -2400,25 +2477,10 @@ export function ProjectGantt({
                         )
                       : stageStatusColor(row.status);
                   const ink = rowColor.ink;
-                  // how far along this line is, for the card below: a product
-                  // from its status, a job from its products, a project from
-                  // its jobs — a stage itself carries no percentage
-                  const rowCompletion =
-                    row.level === "product"
-                      ? statusIndex >= 0
-                        ? statusCompletion(
-                            statusDetails,
-                            row.status,
-                            statusIndex,
-                            projectStatuses.length,
-                          )
-                        : null
-                      : row.progress !== undefined && row.progress.total > 0
-                        ? rollupCompletion(
-                            row.progress.done,
-                            row.progress.total,
-                          )
-                        : null;
+                  // how far along this line is, for the card below: worked
+                  // out where the rows are built — a product from its status,
+                  // a job and a project from the ratio of their products
+                  const rowCompletion = row.percent ?? null;
                   const rowOwner = statusAssignee(statusDetails, row.status);
                   const dragging = drag !== null && drag.key === row.key;
                   const hovering = hoverKey === row.key && !dragging;
@@ -2452,11 +2514,12 @@ export function ProjectGantt({
                   const startPlanned = row.ownStart !== undefined;
                   const endPlanned = row.ownEnd !== undefined;
                   const doneLabel =
-                    row.progress !== undefined && row.progress.total > 0
-                      ? `, ${row.progress.done}/${row.progress.total} ${
-                          row.level === "project" ? "jobs" : "products"
-                        } done`
-                      : "";
+                    (row.progress !== undefined && row.progress.total > 0
+                      ? `, ${row.progress.done}/${row.progress.total} products done`
+                      : "") +
+                    (row.percent !== undefined
+                      ? `, ${row.percent}% complete`
+                      : "");
                   const datesLabel = hasEnd
                     ? `${new Date(start).toLocaleDateString()} to ${new Date(end).toLocaleDateString()}`
                     : "no end date yet";
@@ -2562,6 +2625,14 @@ export function ProjectGantt({
                             >
                               {durationDays}d
                             </span>
+                            {row.percent !== undefined && (
+                              <span
+                                className="shrink-0 font-medium text-foreground/70 tabular-nums"
+                                title={`${row.percent}% complete`}
+                              >
+                                {row.percent}%
+                              </span>
+                            )}
                             {row.code && (
                               <span className="shrink-0 font-mono text-muted-foreground/70">
                                 {row.code}
@@ -2677,16 +2748,25 @@ export function ProjectGantt({
                                 : `${row.status} — ${datesLabel}, ${durationDays} day${durationDays === 1 ? "" : "s"}${doneLabel}${overdue ? ", overdue" : ""}`
                             }
                           >
-                            {/* how much of the line is already made, as an inlay
-                                on the bar rather than a second bar */}
-                            {row.progress !== undefined && row.progress.total > 0 && (
+                            {/* how much of the line is already made, as an
+                                inlay on the bar — and the percentage itself,
+                                printed on the bar, so the movement of a
+                                product's completion is read at a glance rather
+                                than only under the pointer */}
+                            {row.percent !== undefined && (
                               <span
                                 aria-hidden
                                 className="absolute inset-y-0 left-0 rounded-full bg-black/25"
-                                style={{
-                                  width: `${(row.progress.done / row.progress.total) * 100}%`,
-                                }}
+                                style={{ width: `${row.percent}%` }}
                               />
+                            )}
+                            {row.percent !== undefined && to - from >= 6 && (
+                              <span
+                                aria-hidden
+                                className="absolute inset-y-0 right-2.5 flex items-center text-[8px] font-bold tabular-nums text-white/95 drop-shadow-[0_1px_1px_rgba(0,0,0,0.7)]"
+                              >
+                                {row.percent}%
+                              </span>
                             )}
                             {/* the two ends as handles: what the reader grabs to
                                 change one date without moving the other */}
