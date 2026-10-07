@@ -15,8 +15,11 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
+  isStageDone,
+  PROJECT_STATUS_COMPLETED,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
+  stageStatusOf,
 } from "../lib/project-statuses";
 import { shiftDates, withinRefusal } from "../lib/schedule-window";
 import { assertPlanNests } from "./scheduleRules";
@@ -78,6 +81,43 @@ async function assertJobProductsDone(
     `${open.length} product${open.length === 1 ? " is" : "s are"} still not finished (${nameSome(
       open.map((f) => f.name),
     )}). Finish the products first, then the job.`,
+  );
+}
+
+/**
+ * Keep a project's completion honest, from its jobs the way a job's is kept
+ * honest from its products: a project reads Completed only while every job in
+ * it is completed (a cancelled job counts as closed), and jobs that are all
+ * completed complete the project by themselves. An open job — including one
+ * added to a finished project — takes it straight back off Completed.
+ */
+export async function syncProjectCompletion(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  projectId: Id<"projects">,
+): Promise<void> {
+  const project = await ctx.db.get(projectId);
+  if (project === null || project.ownerId !== userId) return;
+  // a closed project stays closed whatever happens to the jobs inside it
+  if (project.status === "cancelled") return;
+  const jobs = (
+    await ctx.db
+      .query("projectJobs")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect()
+  ).filter((job) => job.status !== "cancelled");
+  if (jobs.length === 0) return;
+  const everyDone = jobs.every(
+    (job) => job.status === "completed" || isStageDone(job.projectStatus),
+  );
+  const finished =
+    project.status === "completed" || isStageDone(project.projectStatus);
+  if (everyDone === finished) return;
+  await ctx.db.patch(
+    projectId,
+    everyDone
+      ? { projectStatus: PROJECT_STATUS_COMPLETED, status: "completed" }
+      : { projectStatus: undefined, status: "in_progress" },
   );
 }
 
@@ -192,7 +232,7 @@ export const addJob = mutation({
     const name = opts.name.trim();
     if (name.length === 0) throw new Error("Give the job a name.");
     const code = await nextJobCode(ctx, userId);
-    return await ctx.db.insert("projectJobs", {
+    const id = await ctx.db.insert("projectJobs", {
       ownerId: userId,
       projectId: opts.projectId,
       isActive: true,
@@ -206,6 +246,9 @@ export const addJob = mutation({
       status: normalizeStatus(opts.status) ?? "planning",
       priority: opts.priority,
     });
+    // an open job added to a finished project takes it off Completed again
+    await syncProjectCompletion(ctx, userId, opts.projectId);
+    return id;
   },
 });
 
@@ -268,6 +311,9 @@ export const updateJob = mutation({
     }
     if (patch.priority !== undefined) clean.priority = patch.priority;
     await ctx.db.patch(id, clean);
+    // a job that just closed or reopened changes what its project may read as
+    if (patch.status !== undefined)
+      await syncProjectCompletion(ctx, userId, job.projectId);
   },
 });
 
@@ -319,22 +365,27 @@ export const setJobProjectStatus = mutation({
       throw new Error("That job no longer exists.");
     const clean = status.trim().replace(/\s+/g, " ");
     if (!clean) throw new Error("Choose a status.");
-    const isFinish = clean === PROJECT_STATUS_FINISH;
-    const isStart = clean === PROJECT_STATUS_START;
+    // a job only ever sits in one of its three stages — Listed, In progress,
+    // Completed — and the stage carries no percentage of its own; the job's
+    // completion is its products'
+    const stage = stageStatusOf(clean);
+    const isFinish = stage === PROJECT_STATUS_COMPLETED;
+    const isStart = stage === PROJECT_STATUS_START;
     if (isFinish) {
       await assertNoOpenIssues(ctx, "job", id, "job");
       await assertJobProductsDone(ctx, userId, id);
     }
-    const wasFinished =
-      job.projectStatus === PROJECT_STATUS_FINISH || job.status === "completed";
+    const wasFinished = isStageDone(job.projectStatus) || job.status === "completed";
     await ctx.db.patch(id, {
-      projectStatus: clean,
+      projectStatus: stage,
       status: isFinish ? "completed" : isStart ? "planning" : "in_progress",
       completedAt: isFinish ? job.completedAt ?? Date.now() : undefined,
       pausedAt: undefined,
     });
     // a repeating job lays down its next occurrence once, on finishing
     if (isFinish && !wasFinished) await spawnNextOccurrence(ctx, "job", job);
+    // the project above completes through its jobs, in both directions
+    await syncProjectCompletion(ctx, userId, job.projectId);
   },
 });
 
@@ -383,8 +434,7 @@ export const completeJob = mutation({
       throw new Error("That job no longer exists.");
     await assertNoOpenIssues(ctx, "job", id, "job");
     await assertJobProductsDone(ctx, userId, id);
-    const wasFinished =
-      job.projectStatus === PROJECT_STATUS_FINISH || job.status === "completed";
+    const wasFinished = isStageDone(job.projectStatus) || job.status === "completed";
     await ctx.db.patch(id, {
       status: "completed",
       completedAt: Date.now(),
@@ -392,6 +442,8 @@ export const completeJob = mutation({
     });
     // a repeating job lays down its next occurrence once, on finishing
     if (!wasFinished) await spawnNextOccurrence(ctx, "job", job);
+    // every job done is the project done
+    await syncProjectCompletion(ctx, userId, job.projectId);
   },
 });
 
@@ -410,6 +462,8 @@ export const reopenJob = mutation({
       pausedAt: undefined,
       startedAt: job.startedAt ?? Date.now(),
     });
+    // a project cannot stay completed over a job that is open again
+    await syncProjectCompletion(ctx, userId, job.projectId);
   },
 });
 
@@ -496,8 +550,11 @@ export const removeJob = mutation({
       throw new Error(
         `This job still has ${linked.length} product${linked.length === 1 ? "" : "s"}. Delete the products first, then the job.`,
       );
+    const projectId = job.projectId;
     await purgeNode(ctx, "job", id);
     await ctx.db.delete(id);
+    // one less job to count: what is left may now be the whole project done
+    await syncProjectCompletion(ctx, userId, projectId);
   },
 });
 

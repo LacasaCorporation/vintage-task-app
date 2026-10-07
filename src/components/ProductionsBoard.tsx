@@ -16,9 +16,11 @@ import {
 } from "@/components/FlaggedLists";
 import {
   finishBlockedReason,
-  PROJECT_STATUS_FINISH,
+  isStageDone,
+  PROJECT_STATUS_COMPLETED,
   PROJECT_STATUS_START,
   projectStatusDetailsOrDefaults,
+  remapStatusFilter,
   type ProjectStatusDetail,
 } from "@/lib/project-statuses";
 import { isFlaggedProjectWork } from "@/lib/project-work";
@@ -210,10 +212,9 @@ export default function ProductionsBoard({
     try {
       await setJobProjectStatusM({
         id: job._id,
-        status:
-          jobProjectStatus(job, projectStatuses) === PROJECT_STATUS_FINISH
-            ? PROJECT_STATUS_START
-            : PROJECT_STATUS_FINISH,
+        status: isStageDone(jobProjectStatus(job, projectStatuses))
+          ? PROJECT_STATUS_START
+          : PROJECT_STATUS_COMPLETED,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't update the job.");
@@ -233,6 +234,16 @@ export default function ProductionsBoard({
       onFilterChange={(next) => {
         setFilter(next);
         setView(DEFAULT_VIEW_BY_FILTER[next] ?? "list");
+        // projects and jobs filter on their three stages, products on the
+        // workflow — carry the chosen status across so it still means the
+        // same thing after the switch
+        setStatus((current) =>
+          remapStatusFilter(
+            current,
+            next === "products" ? "product" : "stage",
+            projectStatuses,
+          ),
+        );
       }}
       status={status}
       onStatusChange={setStatus}

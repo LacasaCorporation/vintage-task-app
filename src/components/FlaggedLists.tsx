@@ -50,11 +50,19 @@ import { cn } from "@/lib/utils";
 import {
   DEFAULT_PROJECT_STATUSES,
   finishBlockedReason,
+  isStageDone,
+  isStageStatus,
   middleProjectStatuses,
+  PROJECT_STATUS_COMPLETED,
   PROJECT_STATUS_FINISH,
+  PROJECT_STATUS_IN_PROGRESS,
   PROJECT_STATUS_START,
   projectStatusesOrDefaults,
   projectStatusDetailsOrDefaults,
+  rollupCompletion,
+  stageStatusColor,
+  stageStatusOf,
+  STAGE_STATUSES,
   statusColor,
   productLockedReason,
 } from "@/lib/project-statuses";
@@ -112,10 +120,23 @@ export type FlagStatusFilter = "all" | string;
 
 type ProjectStatus = string;
 
+/**
+ * A job's status: one of the three stages — Listed, In progress, Completed —
+ * however the row was written. A status kept from before jobs had stages of
+ * their own collapses onto them, and a job with nothing stored still reads off
+ * its legacy status.
+ */
 export function jobProjectStatus(job: JobDoc, statuses: string[]): ProjectStatus {
-  if (job.projectStatus && statuses.includes(job.projectStatus)) return job.projectStatus;
-  if (job.status === "completed" || job.status === "cancelled") return PROJECT_STATUS_FINISH;
-  if (job.status === "in_progress" || job.status === "paused") return statuses[1] ?? PROJECT_STATUS_START;
+  const stored = job.projectStatus;
+  if (stored) {
+    // a status written while jobs shared the product workflow is read against
+    // that workflow's own ends — its last stage is Completed, its first Listed
+    if (statuses.length > 0 && stored === statuses[statuses.length - 1])
+      return PROJECT_STATUS_COMPLETED;
+    return stageStatusOf(stored);
+  }
+  if (job.status === "completed" || job.status === "cancelled") return PROJECT_STATUS_COMPLETED;
+  if (job.status === "in_progress" || job.status === "paused") return PROJECT_STATUS_IN_PROGRESS;
   return PROJECT_STATUS_START;
 }
 
@@ -124,16 +145,21 @@ export function fgProjectStatus(fg: FgDoc, statuses: string[]): ProjectStatus {
   return fg.isCompleted ? PROJECT_STATUS_FINISH : PROJECT_STATUS_START;
 }
 
+/** A project's status, from the same three stages a job sits in. */
 export function projectDocStatus(
   project: Doc<"projects">,
   statuses: string[],
 ): ProjectStatus {
-  if (project.projectStatus && statuses.includes(project.projectStatus))
-    return project.projectStatus;
+  const stored = project.projectStatus;
+  if (stored) {
+    if (statuses.length > 0 && stored === statuses[statuses.length - 1])
+      return PROJECT_STATUS_COMPLETED;
+    return stageStatusOf(stored);
+  }
   if (project.status === "completed" || project.status === "cancelled")
-    return PROJECT_STATUS_FINISH;
+    return PROJECT_STATUS_COMPLETED;
   if (project.status === "in_progress" || project.status === "on_hold")
-    return statuses[1] ?? PROJECT_STATUS_START;
+    return PROJECT_STATUS_IN_PROGRESS;
   return PROJECT_STATUS_START;
 }
 
@@ -208,8 +234,14 @@ export function StatusChip({ status }: { status: string }) {
     useQuery(api.settings.listProjectStatusDetails),
   );
   const index = details.findIndex((entry) => entry.name === status);
+  // a job or project stage the product workflow does not carry wears its own
+  // colour, so Completed never falls back to a plain chip
   const color =
-    index >= 0 ? statusColor(details, status, index, details.length) : null;
+    index >= 0
+      ? statusColor(details, status, index, details.length)
+      : isStageStatus(status)
+        ? stageStatusColor(status)
+        : null;
   return <span className={cn(tagChip, color?.soft, color?.softInk)}>{status}</span>;
 }
 
@@ -322,7 +354,7 @@ export function FlaggedItemsList({
         const jobProducts = allFgs
           .filter((f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id))
           .filter((f) => matchesStatusFilter(statusFilter ?? "all", fgProjectStatus(f, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]), f.isCompleted ?? false));
-        const done = jobProjectStatus(job, projectStatuses) === PROJECT_STATUS_FINISH;
+        const done = isStageDone(jobProjectStatus(job, projectStatuses));
         const allFlaggedProducts = allFgs.filter(
           (f) => f.jobId === job._id || (f.jobIds ?? []).includes(job._id),
         );
@@ -686,9 +718,13 @@ export function FlaggedProjectsList({
     <ul className="divide-y divide-border/70">
       {visible.map((project) => {
         const status = projectDocStatus(project, projectStatuses);
-        const done = status === PROJECT_STATUS_FINISH;
+        const done = isStageDone(status);
         const projectJobs = jobsOf(project._id);
         const projectFgs = productsOf(project);
+        // a project completes through its jobs, so its percentage is theirs
+        const jobsFinished = projectJobs.filter((job) =>
+          isStageDone(jobProjectStatus(job, projectStatuses)),
+        ).length;
         return (
           <li
             key={project._id}
@@ -733,6 +769,19 @@ export function FlaggedProjectsList({
             >
               {projectJobs.length} job{projectJobs.length === 1 ? "" : "s"}
             </span>
+            {projectJobs.length > 0 && (
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                  jobsFinished === projectJobs.length
+                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : "bg-muted text-muted-foreground",
+                )}
+                title={`${jobsFinished} of ${projectJobs.length} jobs completed`}
+              >
+                {rollupCompletion(jobsFinished, projectJobs.length)}%
+              </span>
+            )}
             <span
               className={cn(
                 "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
@@ -1969,7 +2018,7 @@ export function FlaggedDetail({
                     disabled={busy}
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                   >
-                    {projectStatuses.map((status) => (
+                    {STAGE_STATUSES.map((status) => (
                       <option key={status} value={status}>
                         {status}
                       </option>
@@ -2197,7 +2246,7 @@ export function FlaggedDetail({
                     disabled={busy}
                     className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
                   >
-                    {projectStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                    {STAGE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                   </select>
                 </DetailRow>
 

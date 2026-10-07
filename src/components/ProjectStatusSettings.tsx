@@ -68,7 +68,9 @@ export default function ProjectStatusSettings({
           <p className="text-xs font-semibold">Custom Projects statuses</p>
           <p className="text-[11px] text-muted-foreground">
             {PROJECT_STATUS_START} and {PROJECT_STATUS_FINISH} stay fixed. Starting
-            production moves a product to the first status between them.
+            production moves a product to the first status between them. These
+            statuses belong to products: jobs and projects always read Listed →
+            In progress → Completed, from the work inside them.
           </p>
         </div>
         <button

@@ -5,7 +5,10 @@ import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import {
   projectStatusesOrDefaults,
+  PROJECT_STATUS_COMPLETED,
   PROJECT_STATUS_FINISH,
+  stageStatusOf,
+  STAGE_STATUSES,
 } from "@/lib/project-statuses";
 import { formatDueLabel } from "@/lib/task-utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
@@ -71,8 +74,12 @@ export function buildPrintRows(
     legacy: string | undefined,
     completed: boolean,
     inProduction: boolean,
+    /** Jobs and projects read through their three stages instead of the
+     *  product workflow — their stages carry no percentages of their own. */
+    stage = false,
   ) => {
-    if (completed) return PROJECT_STATUS_FINISH;
+    if (completed) return stage ? PROJECT_STATUS_COMPLETED : PROJECT_STATUS_FINISH;
+    if (stage && status) return stageStatusOf(status);
     if (inProduction) return "In production";
     if (status && projectStatuses.includes(status)) return status;
     return LEGACY_STATUS_LABEL[legacy ?? "planning"] ?? legacy ?? "Planning";
@@ -118,6 +125,7 @@ export function buildPrintRows(
           job.status,
           job.status === "completed",
           false,
+          true,
         ),
       };
     });
@@ -143,6 +151,7 @@ export function buildPrintRows(
         project.status,
         project.status === "completed" || project.status === "cancelled",
         false,
+        true,
       ),
     };
   });
@@ -190,7 +199,9 @@ export default function ProjectsPrintSheet({
   }, [onPrinted]);
 
   // workflow order first, anything custom after, then alphabetical
-  const order = [...projectStatuses, "In production"];
+  const order = [
+    ...new Set([...projectStatuses, ...STAGE_STATUSES, "In production"]),
+  ];
   const rank = (status: string) => {
     const index = order.indexOf(status);
     return index === -1 ? order.length : index;

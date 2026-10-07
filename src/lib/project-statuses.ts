@@ -9,6 +9,26 @@ export const DEFAULT_PROJECT_STATUSES = [
 export const PROJECT_STATUS_START = "Listed";
 export const PROJECT_STATUS_FINISH = "Finish";
 
+/** The middle and last of the three statuses a job or project sits in. */
+export const PROJECT_STATUS_IN_PROGRESS = "In progress";
+export const PROJECT_STATUS_COMPLETED = "Completed";
+
+/**
+ * The only three statuses a job or a project can have: Listed, In progress,
+ * Completed.
+ *
+ * They are stages, not percentages — nothing about how far along they are is
+ * read off the stage itself. A job's completion comes from its products and a
+ * project's from its jobs, so both are always the roll-up of the work inside
+ * them. Products are the level that keeps the full workflow below, with its
+ * colours and its per-status completion.
+ */
+export const STAGE_STATUSES: readonly string[] = [
+  PROJECT_STATUS_START,
+  PROJECT_STATUS_IN_PROGRESS,
+  PROJECT_STATUS_COMPLETED,
+];
+
 /**
  * A status as the editor saves it: its name plus how that status is worn.
  *
@@ -205,6 +225,75 @@ export function statusAssignee(
 ): string | null {
   const own = details?.find((entry) => entry.name === name)?.assignee;
   return own === undefined || own.trim() === "" ? null : own.trim();
+}
+
+/** Whether a name is one of the three stages a job or project sits in. */
+export function isStageStatus(status: string): boolean {
+  return STAGE_STATUSES.includes(status);
+}
+
+/**
+ * Whether a job or project status reads as completed: its own third stage, or
+ * the end status rows written before jobs and projects had stages of their
+ * own still carry.
+ */
+export function isStageDone(status: string | undefined): boolean {
+  return status === PROJECT_STATUS_COMPLETED || status === PROJECT_STATUS_FINISH;
+}
+
+/**
+ * Any status name collapsed onto the three stages, so a row written while
+ * jobs and projects still shared the product workflow reads the same today:
+ * the workflow's end status is Completed, its first is Listed, everything in
+ * between is In progress.
+ */
+export function stageStatusOf(status: string): string {
+  const clean = status.trim().replace(/\s+/g, " ");
+  if (isStageStatus(clean)) return clean;
+  if (clean === PROJECT_STATUS_FINISH) return PROJECT_STATUS_COMPLETED;
+  if (clean === PROJECT_STATUS_START || clean === LEGACY_PROJECT_STATUS_START)
+    return PROJECT_STATUS_START;
+  return PROJECT_STATUS_IN_PROGRESS;
+}
+
+/**
+ * The colour a stage wears: the same two-ends rule the workflow uses, worked
+ * out over the three stages alone, so Listed is sky, In progress violet and
+ * Completed emerald however the product workflow is configured.
+ */
+export function stageStatusColor(status: string): StatusColor {
+  const index = STAGE_STATUSES.indexOf(status);
+  return positionalColor(index < 0 ? STAGE_STATUSES.length - 1 : index, STAGE_STATUSES.length);
+}
+
+/**
+ * How far along a job or project is, from the work inside it — a job from its
+ * products, a project from its jobs. The stages themselves carry no number.
+ */
+export function rollupCompletion(done: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.round((Math.max(0, done) / total) * 100);
+}
+
+/**
+ * Carry the status filter across the workspace levels. The three stages and
+ * the product workflow name the same points differently (Completed is called
+ * Finish on a product), so a filter picked on one level still means the same
+ * thing after switching to the other.
+ */
+export function remapStatusFilter(
+  filter: string,
+  to: "stage" | "product",
+  productStatuses: readonly string[],
+): string {
+  if (filter === "all" || filter === "open" || filter === "done") return filter;
+  if (to === "stage") return stageStatusOf(filter);
+  if (productStatuses.includes(filter)) return filter;
+  if (filter === PROJECT_STATUS_COMPLETED || filter === PROJECT_STATUS_FINISH)
+    return PROJECT_STATUS_FINISH;
+  if (filter === PROJECT_STATUS_IN_PROGRESS)
+    return productStatuses[1] ?? PROJECT_STATUS_IN_PROGRESS;
+  return PROJECT_STATUS_START;
 }
 
 /**

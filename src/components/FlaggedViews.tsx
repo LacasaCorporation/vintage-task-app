@@ -39,11 +39,15 @@ import {
 import { useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
+  isStageDone,
   middleProjectStatuses,
   PROJECT_STATUS_FINISH,
   projectStatusDetailsOrDefaults,
   projectStatusesOrDefaults,
   productLockedReason,
+  rollupCompletion,
+  stageStatusColor,
+  STAGE_STATUSES,
   statusAssignee,
   statusColor,
   statusCompletion,
@@ -221,8 +225,15 @@ export function ProjectHierarchy({
     <ul className="divide-y divide-border/70">
       {visible.map((project) => {
         const status = projectDocStatus(project, projectStatuses);
-        const projectDone = status === PROJECT_STATUS_FINISH;
+        const projectDone = isStageDone(status);
         const isCollapsed = collapsed.has(project._id);
+        // the whole completion of a project, counted from its jobs
+        const allProjectJobs = jobs.filter(
+          (job) => job.projectId === project._id,
+        );
+        const jobsFinished = allProjectJobs.filter((job) =>
+          isStageDone(jobProjectStatus(job, projectStatuses)),
+        ).length;
         const projectJobs = sortJobs(
           jobs.filter(
             (job) =>
@@ -295,6 +306,19 @@ export function ProjectHierarchy({
               <span className="shrink-0 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-sky-700 dark:text-sky-400">
                 {projectJobs.length} job{projectJobs.length === 1 ? "" : "s"}
               </span>
+              {allProjectJobs.length > 0 && (
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                    jobsFinished === allProjectJobs.length
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                  title={`${jobsFinished} of ${allProjectJobs.length} jobs completed`}
+                >
+                  {rollupCompletion(jobsFinished, allProjectJobs.length)}%
+                </span>
+              )}
               <span className="shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-violet-700 dark:text-violet-400">
                 {projectProducts.length} product
                 {projectProducts.length === 1 ? "" : "s"}
@@ -372,7 +396,7 @@ function JobRow({
     ),
     "manual",
   );
-  const done = jobProjectStatus(job, projectStatuses) === PROJECT_STATUS_FINISH;
+  const done = isStageDone(jobProjectStatus(job, projectStatuses));
   const allProductsDone =
     allProducts.length > 0 && allProducts.every((f) => f.isCompleted);
   const disabled = busyKey !== null || (!done && !allProductsDone);
@@ -598,7 +622,7 @@ export function JobFlatList({
   return (
     <ul className="divide-y divide-border/70">
       {rows.map((job) => {
-        const done = jobProjectStatus(job, projectStatuses) === PROJECT_STATUS_FINISH;
+        const done = isStageDone(jobProjectStatus(job, projectStatuses));
         const allProducts = productsOfJob(allFgs, job._id);
         const allProductsDone =
           allProducts.length > 0 && allProducts.every((f) => f.isCompleted);
@@ -775,7 +799,7 @@ export function ProjectKanban({
       );
       return sortJobs(jobs, sortMode).flatMap((job) => {
         const status = jobProjectStatus(job, projectStatuses);
-        const done = status === PROJECT_STATUS_FINISH;
+        const done = isStageDone(status);
         if (!keep(status, done)) return [];
         const products = productsOfJob(fgs, job._id);
         return [
@@ -800,7 +824,7 @@ export function ProjectKanban({
 
     return projects.flatMap((project) => {
       const status = projectDocStatus(project, projectStatuses);
-      const done = status === PROJECT_STATUS_FINISH;
+      const done = isStageDone(status);
       if (!keep(status, done)) return [];
       const projectJobs = jobs.filter((job) => job.projectId === project._id);
       const jobIds = new Set(projectJobs.map((job) => String(job._id)));
@@ -819,6 +843,14 @@ export function ProjectKanban({
           done,
           jobs: projectJobs.length,
           products: products.length,
+          // how much of the project is done, counted the only way it can be:
+          // its jobs, which each stand for the products under them
+          progress: {
+            done: projectJobs.filter((job) =>
+              isStageDone(jobProjectStatus(job, projectStatuses)),
+            ).length,
+            total: projectJobs.length,
+          },
         },
       ];
     });
@@ -866,21 +898,13 @@ export function ProjectKanban({
   return (
     <div className="overflow-x-auto p-3">
       <ul className="flex min-w-max items-start gap-3">
-        {projectStatuses.map((status, index) => {
+        {STAGE_STATUSES.map((status) => {
           const column = cards.filter((card) => card.status === status);
-          const color = statusColor(
-            statusDetails,
-            status,
-            index,
-            projectStatuses.length,
-          );
+          // a job or project stage wears its own colour; unlike a product's
+          // status it carries no percentage of completion — that number is
+          // always the roll-up of the work inside the row
+          const color = stageStatusColor(status);
           const accent = color.fill;
-          const completion = statusCompletion(
-            statusDetails,
-            status,
-            index,
-            projectStatuses.length,
-          );
           const owner = statusAssignee(statusDetails, status);
           const isTarget = dragging !== null && dropTarget === status;
           return (
@@ -921,20 +945,10 @@ export function ProjectKanban({
                   {column.length}
                 </span>
               </div>
-              {/* what the stage itself says: how far a product in it counts,
-                  and who the stage belongs to when somebody was given */}
-              <div className="flex items-center gap-1.5 px-3 pb-2 text-[10px] text-muted-foreground">
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-1.5 py-0.5 font-medium tabular-nums",
-                    color.soft,
-                    color.softInk,
-                  )}
-                  title={`A product in ${status} counts ${completion}% complete`}
-                >
-                  {completion}%
-                </span>
-                {owner !== null && (
+              {/* who the stage belongs to, when somebody was given — the
+                  stages carry no percentage of their own */}
+              {owner !== null && (
+                <div className="flex items-center gap-1.5 px-3 pb-2 text-[10px] text-muted-foreground">
                   <span
                     className="inline-flex min-w-0 items-center gap-1"
                     title={`${status} is owned by ${owner}`}
@@ -942,8 +956,8 @@ export function ProjectKanban({
                     <UserRound className="size-3 shrink-0" />
                     <span className="truncate">{owner}</span>
                   </span>
-                )}
-              </div>
+                </div>
+              )}
               <ul className="flex min-h-16 flex-col gap-2 px-2 pb-2">
                 {column.length === 0 ? (
                   <li className="grid flex-1 place-items-center rounded-lg border border-dashed border-border/70 px-3 py-6 text-center text-[11px] text-muted-foreground">
@@ -1015,16 +1029,35 @@ export function ProjectKanban({
                           </span>
                           <span className="flex flex-wrap items-center gap-1">
                             {card.jobs !== undefined && (
-                              <span className="shrink-0 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-sky-700 dark:text-sky-400">
-                                {card.jobs} job{card.jobs === 1 ? "" : "s"}
+                              <span
+                                className={cn(
+                                  "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
+                                  card.done
+                                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                    : "bg-sky-500/10 text-sky-700 dark:text-sky-400",
+                                )}
+                                title={
+                                  card.progress !== undefined &&
+                                  card.progress.total > 0
+                                    ? "Jobs completed in this project"
+                                    : "Jobs in this project"
+                                }
+                              >
+                                {card.progress !== undefined &&
+                                card.progress.total > 0
+                                  ? `${card.progress.done}/${card.progress.total} jobs`
+                                  : `${card.jobs} job${card.jobs === 1 ? "" : "s"}`}
                               </span>
                             )}
-                            {card.products !== undefined && card.progress === undefined && (
-                              <span className="shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-violet-700 dark:text-violet-400">
-                                {card.products} product{card.products === 1 ? "" : "s"}
-                              </span>
-                            )}
-                            {card.progress !== undefined && card.progress.total > 0 && (
+                            {card.products !== undefined &&
+                              card.jobs !== undefined && (
+                                <span className="shrink-0 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-violet-700 dark:text-violet-400">
+                                  {card.products} product{card.products === 1 ? "" : "s"}
+                                </span>
+                              )}
+                            {card.progress !== undefined &&
+                              card.jobs === undefined &&
+                              card.progress.total > 0 && (
                               <span
                                 className={cn(
                                   "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
@@ -1043,7 +1076,7 @@ export function ProjectKanban({
                         <div className="flex items-center justify-between gap-2 border-t border-border/60 bg-muted/30 px-2 py-1">
                           <StatusSelect
                             value={card.status}
-                            statuses={projectStatuses}
+                            statuses={[...STAGE_STATUSES]}
                             projectColors
                             disabled={!canEdit || busyKey !== null}
                             title={
@@ -1605,7 +1638,7 @@ export function ProjectGantt({
     if (mode === "jobs") {
       for (const job of sortJobs(jobs, sortMode)) {
         const status = jobProjectStatus(job, projectStatuses);
-        const done = status === PROJECT_STATUS_FINISH;
+        const done = isStageDone(status);
         if (!keep(status, done)) continue;
         const project = projectOf(job);
         const products = productsOfJob(fgs, job._id);
@@ -1653,7 +1686,7 @@ export function ProjectGantt({
 
     for (const project of projects) {
       const status = projectDocStatus(project, projectStatuses);
-      const done = status === PROJECT_STATUS_FINISH;
+      const done = isStageDone(status);
       if (!keep(status, done)) continue;
       const projectJobs = sortJobs(
         jobs.filter((job) => job.projectId === project._id),
@@ -1663,7 +1696,10 @@ export function ProjectGantt({
       const products = fgs.filter((fg) =>
         productJobIds(fg).some((jobId) => jobIds.has(String(jobId))),
       );
-      const finished = products.filter((product) => product.isCompleted).length;
+      // a project's completion is its jobs: it finishes when they all do
+      const jobsFinished = projectJobs.filter((job) =>
+        isStageDone(jobProjectStatus(job, projectStatuses)),
+      ).length;
       const meta = `${plural(projectJobs.length, "job")} · ${plural(products.length, "product")}`;
       const fallbackStart = project._creationTime;
       if (project.dueAt === undefined) missing += 1;
@@ -1683,13 +1719,13 @@ export function ProjectGantt({
         status,
         done,
         meta,
-        progress: { done: finished, total: products.length },
+        progress: { done: jobsFinished, total: projectJobs.length },
         // the project cannot be pulled in past the jobs it carries
         limits: limitsFrom(ownDates(projectJobs)),
       });
       for (const job of projectJobs) {
         const jobStatus = jobProjectStatus(job, projectStatuses);
-        const jobDone = jobStatus === PROJECT_STATUS_FINISH;
+        const jobDone = isStageDone(jobStatus);
         if (!keep(jobStatus, jobDone)) continue;
         // a job with no dates of its own is planned against its project
         const jobFallback = job._creationTime;
@@ -2351,24 +2387,38 @@ export function ProjectGantt({
                   const held = tree.held.get(row.key) ?? 0;
                   const isCollapsed = collapsed.has(row.key);
                   // the bar wears the colour of its level; the milestone keeps
-                  // the workflow ink, so status still reads off the chart
-                  const rowColor = statusColor(
-                    statusDetails,
-                    row.status,
-                    statusIndex,
-                    projectStatuses.length,
-                  );
-                  const ink = rowColor.ink;
-                  // what the stage says about this line, for the card below
-                  const rowCompletion =
+                  // the workflow ink, so status still reads off the chart. A
+                  // stage the product workflow does not carry takes its own
+                  // colour instead of falling back to the first one
+                  const rowColor =
                     statusIndex >= 0
-                      ? statusCompletion(
+                      ? statusColor(
                           statusDetails,
                           row.status,
                           statusIndex,
                           projectStatuses.length,
                         )
-                      : null;
+                      : stageStatusColor(row.status);
+                  const ink = rowColor.ink;
+                  // how far along this line is, for the card below: a product
+                  // from its status, a job from its products, a project from
+                  // its jobs — a stage itself carries no percentage
+                  const rowCompletion =
+                    row.level === "product"
+                      ? statusIndex >= 0
+                        ? statusCompletion(
+                            statusDetails,
+                            row.status,
+                            statusIndex,
+                            projectStatuses.length,
+                          )
+                        : null
+                      : row.progress !== undefined && row.progress.total > 0
+                        ? rollupCompletion(
+                            row.progress.done,
+                            row.progress.total,
+                          )
+                        : null;
                   const rowOwner = statusAssignee(statusDetails, row.status);
                   const dragging = drag !== null && drag.key === row.key;
                   const hovering = hoverKey === row.key && !dragging;
@@ -2403,7 +2453,9 @@ export function ProjectGantt({
                   const endPlanned = row.ownEnd !== undefined;
                   const doneLabel =
                     row.progress !== undefined && row.progress.total > 0
-                      ? `, ${row.progress.done}/${row.progress.total} products done`
+                      ? `, ${row.progress.done}/${row.progress.total} ${
+                          row.level === "project" ? "jobs" : "products"
+                        } done`
                       : "";
                   const datesLabel = hasEnd
                     ? `${new Date(start).toLocaleDateString()} to ${new Date(end).toLocaleDateString()}`

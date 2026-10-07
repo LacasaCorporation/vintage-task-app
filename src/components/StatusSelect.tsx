@@ -2,7 +2,9 @@ import { ChevronDown } from "lucide-react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import {
+  isStageStatus,
   projectStatusDetailsOrDefaults,
+  stageStatusColor,
   statusColor,
 } from "@/lib/project-statuses";
 import { cn } from "@/lib/utils";
@@ -50,10 +52,15 @@ export default function StatusSelect({
   // very same status wears
   const workflow = details.map((detail) => detail.name);
   const index = workflow.indexOf(value);
-  const color =
-    projectColors && index >= 0
+  const color = !projectColors
+    ? null
+    : index >= 0
       ? statusColor(details, value, index, workflow.length)
-      : null;
+      : // a job or project stage the product workflow does not carry takes
+        // the colour of the stage itself
+        isStageStatus(value)
+        ? stageStatusColor(value)
+        : null;
   return (
     <span
       className="relative inline-flex shrink-0 items-center"

@@ -43,9 +43,11 @@ import {
 } from "@/lib/task-utils";
 import { assigneeLabel, assigneesOfTask } from "@/lib/task-people";
 import {
-  PROJECT_STATUS_FINISH,
+  PROJECT_STATUS_COMPLETED,
   PROJECT_STATUS_START,
+  isStageDone,
   projectStatusesOrDefaults,
+  STAGE_STATUSES,
 } from "@/lib/project-statuses";
 import { cn } from "@/lib/utils";
 
@@ -171,7 +173,7 @@ export default function ProjectDetailPanel({
     projectDoc !== null
       ? projectDocStatus(projectDoc, projectStatuses)
       : jobProjectStatus(jobDoc as Doc<"projectJobs">, projectStatuses);
-  const isFinished = currentStatus === PROJECT_STATUS_FINISH;
+  const isFinished = isStageDone(currentStatus);
 
   // the role gates the panel; the item's own grant narrows it
   const mayEdit = canEdit && (rights?.canEdit ?? true);
@@ -304,7 +306,7 @@ export default function ProjectDetailPanel({
               disabled={!mayComplete}
               onCheckedChange={() =>
                 void changeStatus(
-                  isFinished ? PROJECT_STATUS_START : PROJECT_STATUS_FINISH,
+                  isFinished ? PROJECT_STATUS_START : PROJECT_STATUS_COMPLETED,
                 )
               }
               aria-label={isFinished ? "Reopen" : "Mark as finished"}
@@ -594,7 +596,7 @@ export default function ProjectDetailPanel({
                 disabled={busy}
                 className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
               >
-                {projectStatuses.map((status) => (
+                {STAGE_STATUSES.map((status) => (
                   <option key={status} value={status}>
                     {status}
                   </option>

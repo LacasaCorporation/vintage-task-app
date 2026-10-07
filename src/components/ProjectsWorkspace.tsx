@@ -39,7 +39,10 @@ import {
   type SortMode,
 } from "@/components/FlaggedLists";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import type { ProjectStatusDetail } from "@/lib/project-statuses";
+import {
+  STAGE_STATUSES,
+  type ProjectStatusDetail,
+} from "@/lib/project-statuses";
 import { cn } from "@/lib/utils";
 
 /**
@@ -143,7 +146,11 @@ export default function ProjectsWorkspace({
             {/* the statuses live in one dropdown rather than a strip of chips */}
             <StatusSelect
               value={status}
-              statuses={projectStatuses}
+              statuses={
+                filter === "products"
+                  ? projectStatuses
+                  : [...STAGE_STATUSES]
+              }
               allLabel="Any status"
               size="md"
               title="Filter by status"

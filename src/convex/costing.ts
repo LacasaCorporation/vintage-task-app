@@ -24,12 +24,15 @@ import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import {
+  isStageDone,
+  PROJECT_STATUS_COMPLETED,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
+  stageStatusOf,
 } from "../lib/project-statuses";
 import { currencySymbol } from "../lib/currency";
 import { defaultTaxPct } from "./accountingDefaults";
-import { isProductDone, productsOfJob } from "./jobs";
+import { isProductDone, productsOfJob, syncProjectCompletion } from "./jobs";
 import { requireUnusedMaterial, requireUnusedProduct } from "./usage";
 import { assertPlanNests } from "./scheduleRules";
 import { shiftDates } from "../lib/schedule-window";
@@ -1115,7 +1118,12 @@ export const setProjectProjectStatus = mutation({
       throw new Error("That project no longer exists.");
     const clean = status.trim().replace(/\s+/g, " ");
     if (!clean) throw new Error("Choose a status.");
-    if (clean === PROJECT_STATUS_FINISH) {
+    // a project sits in one of its three stages only — Listed, In progress,
+    // Completed — and the stage carries no percentage: the project's
+    // completion is always its jobs'
+    const stage = stageStatusOf(clean);
+    const isFinish = stage === PROJECT_STATUS_COMPLETED;
+    if (isFinish) {
       await assertNoOpenIssues(ctx, "project", id, "project");
       const jobs = await ctx.db
         .query("projectJobs")
@@ -1125,7 +1133,7 @@ export const setProjectProjectStatus = mutation({
         (j) =>
           j.status !== "completed" &&
           j.status !== "cancelled" &&
-          j.projectStatus !== PROJECT_STATUS_FINISH,
+          !isStageDone(j.projectStatus),
       );
       if (open.length > 0) {
         const names = open.map((j) => j.name);
@@ -1138,15 +1146,13 @@ export const setProjectProjectStatus = mutation({
         );
       }
     }
-    const wasFinished =
-      project.projectStatus === PROJECT_STATUS_FINISH ||
-      project.status === "completed";
+    const wasFinished = isStageDone(project.projectStatus) || project.status === "completed";
     await ctx.db.patch(id, {
-      projectStatus: clean,
-      status: clean === PROJECT_STATUS_FINISH ? "completed" : clean === PROJECT_STATUS_START ? "planning" : "in_progress",
+      projectStatus: stage,
+      status: isFinish ? "completed" : stage === PROJECT_STATUS_START ? "planning" : "in_progress",
     });
     // a repeating project lays down its next occurrence once, on finishing
-    if (clean === PROJECT_STATUS_FINISH && !wasFinished)
+    if (isFinish && !wasFinished)
       await spawnNextOccurrence(ctx, "project", project);
   },
 });
@@ -1559,7 +1565,7 @@ async function syncJobCompletion(
   const job = await ctx.db.get(jobId);
   if (job === null || job.ownerId !== userId) return;
   const finished =
-    job.status === "completed" || job.projectStatus === PROJECT_STATUS_FINISH;
+    job.status === "completed" || isStageDone(job.projectStatus);
   if (!finished) return;
   const open = (await productsOfJob(ctx, userId, jobId)).filter(
     (f) => !isProductDone(f),
@@ -1575,8 +1581,7 @@ async function syncJobCompletion(
   if (
     project !== null &&
     project.ownerId === userId &&
-    (project.status === "completed" ||
-      project.projectStatus === PROJECT_STATUS_FINISH)
+    (project.status === "completed" || isStageDone(project.projectStatus))
   ) {
     await ctx.db.patch(project._id, {
       status: "in_progress",
@@ -1973,13 +1978,23 @@ export const setFgProjectStatus = mutation({
       if (products.length === 0) continue;
       const everyDone = products.every(isProductDone);
       await ctx.db.patch(jid, {
-        projectStatus: everyDone ? PROJECT_STATUS_FINISH : job.projectStatus === PROJECT_STATUS_FINISH ? undefined : job.projectStatus,
+        projectStatus: everyDone
+          ? PROJECT_STATUS_COMPLETED
+          : isStageDone(job.projectStatus)
+            ? undefined
+            : job.projectStatus,
         status: everyDone ? "completed" : job.status === "completed" ? "in_progress" : job.status,
         completedAt: everyDone ? job.completedAt ?? Date.now() : undefined,
       });
     }
     // and if any product under the job is still open, it cannot read as done
     for (const jid of jobIds) await syncJobCompletion(ctx, userId, jid);
+    // the jobs above may have just all finished — the project follows them
+    for (const jid of jobIds) {
+      const job = await ctx.db.get(jid);
+      if (job !== null && job.ownerId === userId)
+        await syncProjectCompletion(ctx, userId, job.projectId);
+    }
   },
 });
 
@@ -2041,7 +2056,7 @@ export const setFgCompleted = mutation({
       const everyDone = products.every((f) => f.isCompleted === true);
       if (everyDone && job.status !== "completed") {
         await ctx.db.patch(jid, {
-          projectStatus: PROJECT_STATUS_FINISH,
+          projectStatus: PROJECT_STATUS_COMPLETED,
           status: "completed",
           completedAt: Date.now(),
         });
@@ -2055,6 +2070,13 @@ export const setFgCompleted = mutation({
     }
     // and if any product under the job is still open, it cannot read as done
     for (const jid of jobIds) await syncJobCompletion(ctx, userId, jid);
+    // the last product finishing is what finishes the job's job list — the
+    // project above completes from its jobs, in the same direction
+    for (const jid of jobIds) {
+      const job = await ctx.db.get(jid);
+      if (job !== null && job.ownerId === userId)
+        await syncProjectCompletion(ctx, userId, job.projectId);
+    }
   },
 });
 
