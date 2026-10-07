@@ -45,7 +45,6 @@ import {
   projectStatusDetailsOrDefaults,
   projectStatusesOrDefaults,
   productLockedReason,
-  rollupCompletion,
   stageStatusColor,
   STAGE_STATUSES,
   statusAssignee,
@@ -846,10 +845,8 @@ export function ProjectKanban({
             // a job's percentage is the ratio of its products finished
             percent:
               products.length > 0
-                ? rollupCompletion(
-                    products.filter((product) => product.isCompleted).length,
-                    products.length,
-                  )
+                ? (products.filter((product) => product.isCompleted).length * 100)
+                    / products.length
                 : undefined,
           },
         ];
@@ -878,17 +875,14 @@ export function ProjectKanban({
           jobs: projectJobs.length,
           products: products.length,
           // the project's percentage moves with its products too: how many
-          // of them are finished, over how many there are
-          progress: {
-            done: products.filter((product) => product.isCompleted).length,
-            total: products.length,
-          },
+          // of them are finished, over how many there are — an exact ratio, so a
+          // project with 1 of 3 products made reads as 33.3% and the labels that
+          // round may show 33% while the exact figure stays held
+          progress: undefined,
           percent:
             products.length > 0
-              ? rollupCompletion(
-                  products.filter((product) => product.isCompleted).length,
-                  products.length,
-                )
+              ? (products.filter((product) => product.isCompleted).length * 100)
+                  / products.length
               : undefined,
         },
       ];
@@ -1728,15 +1722,19 @@ export function ProjectGantt({
           done,
           meta,
           // exactly how much of the job is done: how many of its products
-          // are finished, over how many there are — not a fixed middle step.
-          // One of two finished is half done, three of five is 60%, etc.
+          // are finished, over how many there are — a number, not a stage.
+          // displayed rounded only on the arrow badge; everywhere else a job
+          // may render the true value (e.g. 1 of 3 = 33.333...%)
           percent:
             products.length > 0
               ? (finished * 100) / products.length
               : done
                 ? 100
                 : 0,
-          progress: { done: finished, total: products.length },
+          // the progress ring is only how the job is styled while it is
+          // still open — it is not the completion percentage, so it may be
+          // empty even when the job already reads as partly done
+          progress: undefined,
           bounds: windowOf(project?.startAt, project?.dueAt),
           limits: limitsFrom(ownDates(products)),
         });
@@ -2526,12 +2524,17 @@ export function ProjectGantt({
                   const durationDays = Math.max(1, Math.round((end - start) / DAY_MS));
                   const startPlanned = row.ownStart !== undefined;
                   const endPlanned = row.ownEnd !== undefined;
+                  // the exact completion behind any rounded label: for a job or
+                  // a project it is the ratio of the things that are finished over
+                  // the things there are, counted by the things that move them
+                  const percentLabel =
+                    row.percent !== undefined ? Math.round(row.percent) : undefined;
                   const doneLabel =
                     (row.progress !== undefined && row.progress.total > 0
                       ? `, ${row.progress.done}/${row.progress.total} products done`
                       : "") +
-                    (row.percent !== undefined
-                      ? `, ${row.percent}% complete`
+                    (percentLabel !== undefined
+                      ? `, ${percentLabel}% complete — products finished over total`
                       : "");
                   const datesLabel = hasEnd
                     ? `${new Date(start).toLocaleDateString()} to ${new Date(end).toLocaleDateString()}`
@@ -2753,6 +2756,10 @@ export function ProjectGantt({
                             )}
                             style={{
                               left: `${from}%`,
+                              // the bar's size is the span of the line's planned dates.
+                              // It is not the job's completion percentage — that is shown
+                              // on the bar itself wherever it fits, from the products that
+                              // are finished over the ones that are not.
                               width: `${Math.max(to - from, 0.6)}%`,
                             }}
                             title={
@@ -2761,16 +2768,17 @@ export function ProjectGantt({
                                 : `${row.status} — ${datesLabel}, ${durationDays} day${durationDays === 1 ? "" : "s"}${doneLabel}${overdue ? ", overdue" : ""}`
                             }
                           >
-                            {/* how much of the line is already made, as an
-                                inlay on the bar — and the percentage itself,
-                                printed on the bar, so the movement of a
-                                product's completion is read at a glance rather
-                                than only under the pointer */}
+                            {/* the exact completion of the line, shown on the bar
+                                wherever it fits. A job's percentage is finished products over
+                                total products; a project's is the same ratio (or the jobs',
+                                when the project holds none). It is printed rounded on the
+                                bar pill and in the hover card only; the inlay's true width is
+                                the exact value so a bar for 1 of 3 still reads as a third. */}
                             {row.percent !== undefined && (
                               <span
                                 aria-hidden
                                 className="absolute inset-y-0 left-0 rounded-full bg-black/25"
-                                style={{ width: `${row.percent}%` }}
+                                style={{ width: `${(row.percent / 100) * (to - from)}%` }}
                               />
                             )}
                             {row.percent !== undefined && to - from >= 6 && (
@@ -2778,7 +2786,7 @@ export function ProjectGantt({
                                 aria-hidden
                                 className="absolute inset-y-0 right-2.5 flex items-center text-[8px] font-bold tabular-nums text-white/95 drop-shadow-[0_1px_1px_rgba(0,0,0,0.7)]"
                               >
-                                {row.percent}%
+                                {Math.round(row.percent)}%
                               </span>
                             )}
                             {/* the two ends as handles: what the reader grabs to
@@ -2902,8 +2910,12 @@ export function ProjectGantt({
                                     </span>
                                   )}
                                 <span>
-                                · {row.percent}%|{startPlanned ? "own start" : "start not planned"}{" "}
-                                / {endPlanned ? "own end" : "end not planned"}
+                                · {row.percent}
+                                  {percentLabel !== undefined
+                                    ? `%
+                                      {startPlanned ? "own start" : "start not planned"}{" "}
+                                      / {endPlanned ? "own end" : "end not planned"}`
+                                    : "start not planned / end not planned"}
                               </span>
                             </span>
                           </span>
