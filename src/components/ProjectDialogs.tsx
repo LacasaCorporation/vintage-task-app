@@ -49,6 +49,26 @@ export function JobDialog({
 }) {
   const addJob = useMutation(api.jobs.addJob);
   const updateJob = useMutation(api.jobs.updateJob);
+  const project = useQuery(api.costing.listProjects)?.find(
+    (p) => p._id === projectId,
+  );  const dueHint =
+    (project?.startAt ?? job?.startAt) !== undefined ||
+    (project?.dueAt ?? job?.dueAt) !== undefined
+      ? `Job dates stay inside ${projectLabel}’s dates.`
+      : undefined;
+  const projectWindow =
+    project
+      ? { startAt: project.startAt, dueAt: project.dueAt }
+      : { startAt: job.startAt ?? null, dueAt: job.dueAt ?? null };
+  const allowedWindow: { start: Date; end: Date } | null =
+    (project?.startAt ?? job?.startAt) !== undefined ||
+    (project?.dueAt ?? job?.dueAt) !== undefined
+      ? {
+          start: new Date(projectWindow.startAt ?? projectWindow.dueAt!),
+          end: new Date(projectWindow.dueAt ?? projectWindow.startAt!),
+        }
+      : null;
+
   const [name, setName] = useState(job?.name ?? "");
   const [description, setDescription] = useState(job?.description ?? "");
   const [assignee, setAssignee] = useState(job?.assignee ?? "");
@@ -60,7 +80,24 @@ export function JobDialog({
   );
   const [saving, setSaving] = useState(false);
 
-  const handleSave = async (e: React.FormEvent) => {
+  const clampDueToProjectWindow = (raw: string): string => {
+    if (!allowedWindow || raw === "") return raw;
+    const picked = new Date(raw + "T00:00:00").getTime();
+    const from = allowedWindow.start.getTime();
+    const to = allowedWindow.end.getTime();
+    if (picked < from) return allowedWindow.start.toISOString().slice(0, 10);
+    if (picked > to) return allowedWindow.end.toISOString().slice(0, 10);
+    return raw;
+  };
+
+  const handleDueChange = (next: string) => {
+    setDueDate(clampDueToProjectWindow(next));
+  };
+
+  const dueHint =
+    hasProjectWindow
+      ? `Job dates stay inside ${projectLabel}’s dates.`
+      : undefined;  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       toast.error("Give the job a name.");
@@ -137,12 +174,22 @@ export function JobDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium">Due date</label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium">Due date</label>
+                {dueHint && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {dueHint}
+                  </span>
+                )}
+              </div>
               <Input
                 type="date"
+                min={allowedWindow?.start.toISOString().slice(0, 10)}
+                max={allowedWindow?.end.toISOString().slice(0, 10)}
                 value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
+                onChange={(e) => handleDueChange(e.target.value)}
                 className={inputCls}
+                aria-describedby={dueHint ? "job-due-hint" : undefined}
               />
             </div>
           </div>
@@ -208,6 +255,22 @@ export function AddProductToJobDialog({
   const addFg = useMutation(api.costing.addFinishedGood);
   const cloneFg = useMutation(api.costing.cloneFinishedGood);
   const attachJobs = useMutation(api.costing.setFgJobs);
+  const project = useQuery(api.costing.listProjects)?.find((p) => p._id === job.projectId);
+  const hasProjectWindow =
+    (project?.startAt ?? job.startAt) !== undefined ||
+    (project?.dueAt ?? job.dueAt) !== undefined;
+  const projectWindow =
+    project
+      ? { startAt: project.startAt, dueAt: project.dueAt }
+      : { startAt: job.startAt, dueAt: job.dueAt };
+  const allowedWindow: { start: Date; end: Date } | null =
+    hasProjectWindow
+      ? {
+          start: new Date(projectWindow.startAt ?? projectWindow.dueAt!),
+          end: new Date(projectWindow.dueAt ?? projectWindow.startAt!),
+        }
+      : null;
+
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("");
   const [qty, setQty] = useState("");
@@ -231,20 +294,39 @@ export function AddProductToJobDialog({
       .slice(0, 6);
   }, [allProducts, existingSearch]);
 
+  const [productDueDate, setProductDueDate] = useState("");
+
+  const clampProductDueToJobWindow = (raw: string): string => {
+    if (!allowedWindow || raw === "") return raw;
+    const picked = new Date(raw + "T00:00:00").getTime();
+    const from = allowedWindow.start.getTime();
+    const to = allowedWindow.end.getTime();
+    if (picked < from) return allowedWindow.start.toISOString().slice(0, 10);
+    if (picked > to) return allowedWindow.end.toISOString().slice(0, 10);
+    return raw;
+  };
+
+  const handleProductDueChange = (next: string) => {
+    setProductDueDate(clampProductDueToJobWindow(next));
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const clean = name.trim();
     if (!clean) {
       toast.error("Give the product a name.");
       return;
-    }
-    setSaving(true);
+    }    setSaving(true);
     try {
+
       await addFg({
         jobId: job._id,
         name: clean,
         qty: Number.isFinite(Number(qty)) && Number(qty) > 0 ? Number(qty) : undefined,
         unit: unit.trim() || undefined,
+        dueAt: productDueDate
+          ? new Date(`${productDueDate}T12:00:00`).getTime()
+          : undefined,
       });
       toast.success(`“${clean}” added to job “${job.name}”.`);
       onClose();
@@ -340,6 +422,19 @@ export function AddProductToJobDialog({
                   {unit.trim()}
                 </span>
               )}
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Due date</label>
+              <Input
+                type="date"
+                min={allowedWindow?.start.toISOString().slice(0, 10)}
+                max={allowedWindow?.end.toISOString().slice(0, 10)}
+                value={productDueDate}
+                onChange={(e) => handleProductDueChange(e.target.value)}
+                className={inputCls}
+              />
             </div>
           </div>
           {/* margin and cost are worked out by the costing sheet, so they are
@@ -528,9 +623,9 @@ export function EditProductDialog({
     }
     // A connected product keeps the project and job it is on. Only one with
     // nothing attached yet gets to choose, and that choice is fixed on save.
-    const chosenJob = jobId === "" ? null : allJobs.find((j) => j._id === jobId) ?? null;
-    setSaving(true);
+    const chosenJob = jobId === "" ? null : allJobs.find((j) => j._id === jobId) ?? null;    setSaving(true);
     try {
+
       await updateFg({
         id: fg._id,
         name: clean,
