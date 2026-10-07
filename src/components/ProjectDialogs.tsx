@@ -49,16 +49,31 @@ export function JobDialog({
 }) {
   const addJob = useMutation(api.jobs.addJob);
   const updateJob = useMutation(api.jobs.updateJob);
+  const projects = useQuery(api.costing.listProjects);
+  const parentProject =
+    projectId !== null
+      ? (projects ?? []).find((p) => p._id === projectId)
+      : undefined;
   const [name, setName] = useState(job?.name ?? "");
   const [description, setDescription] = useState(job?.description ?? "");
   const [assignee, setAssignee] = useState(job?.assignee ?? "");
   const [dueDate, setDueDate] = useState(
-    job?.dueAt !== undefined ? new Date(job.dueAt).toISOString().slice(0, 10) : "",
+    job?.dueAt !== undefined
+      ? new Date(job.dueAt).toISOString().slice(0, 10)
+      : "",
   );
   const [priority, setPriority] = useState<"high" | "medium" | "low">(
     job?.priority ?? "medium",
   );
   const [saving, setSaving] = useState(false);
+  const minDueDate =
+    parentProject?.startAt !== undefined
+      ? new Date(parentProject.startAt).toISOString().slice(0, 10)
+      : undefined;
+  const maxDueDate =
+    parentProject?.dueAt !== undefined
+      ? new Date(parentProject.dueAt).toISOString().slice(0, 10)
+      : undefined;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,11 +106,15 @@ export function JobDialog({
           dueAt,
           priority: priority as "high" | "medium" | "low",
         });
-        toast.success(`Job “${name.trim()}” created — add products to it next.`);
+        toast.success(
+          `Job “${name.trim()}” created — add products to it next.`,
+        );
       }
       onClose();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save the job.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't save the job.",
+      );
     } finally {
       setSaving(false);
     }
@@ -141,9 +160,24 @@ export function JobDialog({
               <Input
                 type="date"
                 value={dueDate}
+                min={minDueDate}
+                max={maxDueDate}
                 onChange={(e) => setDueDate(e.target.value)}
                 className={inputCls}
               />
+              {(minDueDate !== undefined || maxDueDate !== undefined) && (
+                <p className="text-[11px] text-muted-foreground">
+                  {minDueDate !== undefined && (
+                    <>From project start: {minDueDate}</>
+                  )}
+                  {minDueDate !== undefined &&
+                    maxDueDate !== undefined &&
+                    " · "}
+                  {maxDueDate !== undefined && (
+                    <>To project due: {maxDueDate}</>
+                  )}
+                </p>
+              )}
             </div>
           </div>
           <div className="space-y-1.5">
@@ -180,8 +214,17 @@ export function JobDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" size="sm" className="rounded-lg" disabled={saving}>
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+            <Button
+              type="submit"
+              size="sm"
+              className="rounded-lg"
+              disabled={saving}
+            >
+              {saving ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Plus className="size-3.5" />
+              )}
               {job ? "Save changes" : "Create job"}
             </Button>
           </DialogFooter>
@@ -243,13 +286,18 @@ export function AddProductToJobDialog({
       await addFg({
         jobId: job._id,
         name: clean,
-        qty: Number.isFinite(Number(qty)) && Number(qty) > 0 ? Number(qty) : undefined,
+        qty:
+          Number.isFinite(Number(qty)) && Number(qty) > 0
+            ? Number(qty)
+            : undefined,
         unit: unit.trim() || undefined,
       });
       toast.success(`“${clean}” added to job “${job.name}”.`);
       onClose();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't add the product.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't add the product.",
+      );
     } finally {
       setSaving(false);
     }
@@ -267,7 +315,9 @@ export function AddProductToJobDialog({
       onOpenProduct(cloneId);
       onClose();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't clone the product.");
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't clone the product.",
+      );
     } finally {
       setCloneBusy(null);
     }
@@ -376,8 +426,17 @@ export function AddProductToJobDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" size="sm" className="rounded-lg" disabled={saving}>
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+            <Button
+              type="submit"
+              size="sm"
+              className="rounded-lg"
+              disabled={saving}
+            >
+              {saving ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Plus className="size-3.5" />
+              )}
               Add product
             </Button>
           </DialogFooter>
@@ -419,8 +478,14 @@ export function AddProductToJobDialog({
                     <Package className="size-3.5 shrink-0 text-muted-foreground/70" />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-1.5">
-                        <span className="min-w-0 truncate font-medium">{fg.name}</span>
-                        <ProductQtyInline qty={fg.qty} unit={fg.unit} className="text-[10px]" />
+                        <span className="min-w-0 truncate font-medium">
+                          {fg.name}
+                        </span>
+                        <ProductQtyInline
+                          qty={fg.qty}
+                          unit={fg.unit}
+                          className="text-[10px]"
+                        />
                       </span>
                       <span className="block truncate text-[10px] text-muted-foreground/80">
                         From: {fg.projectName ?? "Standalone"}
@@ -528,7 +593,8 @@ export function EditProductDialog({
     }
     // A connected product keeps the project and job it is on. Only one with
     // nothing attached yet gets to choose, and that choice is fixed on save.
-    const chosenJob = jobId === "" ? null : allJobs.find((j) => j._id === jobId) ?? null;
+    const chosenJob =
+      jobId === "" ? null : (allJobs.find((j) => j._id === jobId) ?? null);
     setSaving(true);
     try {
       await updateFg({
@@ -619,7 +685,9 @@ export function EditProductDialog({
                   className={cn(selectCls, "disabled:opacity-60")}
                 >
                   <option value="">
-                    {projectJobs.length === 0 ? "No jobs in this project" : "No specific job"}
+                    {projectJobs.length === 0
+                      ? "No jobs in this project"
+                      : "No specific job"}
                   </option>
                   {projectJobs.map((j) => (
                     <option key={j._id} value={j._id}>
@@ -700,7 +768,12 @@ export function EditProductDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" size="sm" className="rounded-lg" disabled={saving}>
+            <Button
+              type="submit"
+              size="sm"
+              className="rounded-lg"
+              disabled={saving}
+            >
               {saving ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : (

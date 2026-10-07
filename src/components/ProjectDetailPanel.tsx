@@ -28,7 +28,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import AssignDialog, { targetOf } from "@/components/AssignDialog";
 import NodeComments from "@/components/NodeComments";
 import NodeIssues from "@/components/NodeIssues";
-import { jobProjectStatus, projectDocStatus, tagChip } from "@/components/FlaggedLists";
+import {
+  jobProjectStatus,
+  projectDocStatus,
+  tagChip,
+} from "@/components/FlaggedLists";
 import { messageFrom } from "@/lib/errors";
 import { toast } from "@/lib/toast";
 import {
@@ -140,6 +144,8 @@ export default function ProjectDetailPanel({
   const groupsData = useQuery(api.userGroups.list);
   const statusesQuery = useQuery(api.settings.listProjectStatuses);
   const projectStatuses = projectStatusesOrDefaults(statusesQuery);
+  const allProjects = useQuery(api.costing.listProjects);
+  const allJobs = useQuery(api.jobs.listJobs);
 
   const [assignOpen, setAssignOpen] = useState(false);
   const [stepDraft, setStepDraft] = useState("");
@@ -155,20 +161,53 @@ export default function ProjectDetailPanel({
   const fileInput = useRef<HTMLInputElement>(null);
 
   const peopleById = useMemo(
-    () => new Map((peopleData?.people ?? []).map((p) => [p.userId, p] as const)),
+    () =>
+      new Map((peopleData?.people ?? []).map((p) => [p.userId, p] as const)),
     [peopleData],
   );
   const groupsById = useMemo(
     () => new Map((groupsData ?? []).map((g) => [g._id, g] as const)),
     [groupsData],
   );
-  const assignees = useMemo(() => assigneesOfTask(doc, peopleById), [doc, peopleById]);
+  const assignees = useMemo(
+    () => assigneesOfTask(doc, peopleById),
+    [doc, peopleById],
+  );
   const groupIds = doc.groupIds ?? [];
-  const attachments = useMemo(() => parseAttachments(doc.attachments), [doc.attachments]);
+  const attachments = useMemo(
+    () => parseAttachments(doc.attachments),
+    [doc.attachments],
+  );
   const doneSteps = (steps ?? []).filter((s) => s.isCompleted).length;
 
   const projectDoc = kind === "project" ? (doc as Doc<"projects">) : null;
   const jobDoc = kind === "job" ? (doc as Doc<"projectJobs">) : null;
+  const parentProject =
+    jobDoc !== null
+      ? (allProjects ?? []).find((p) => p._id === jobDoc.projectId)
+      : undefined;
+  const containedJobs =
+    projectDoc !== null
+      ? (allJobs ?? []).filter((j) => j.projectId === projectDoc._id)
+      : [];
+  const earliestJobStart = containedJobs.reduce<number | undefined>(
+    (acc, j) =>
+      j.startAt !== undefined
+        ? acc === undefined
+          ? j.startAt
+          : Math.min(acc, j.startAt)
+        : acc,
+    undefined,
+  );
+  const latestJobDue = containedJobs.reduce<number | undefined>(
+    (acc, j) =>
+      j.dueAt !== undefined
+        ? acc === undefined
+          ? j.dueAt
+          : Math.max(acc, j.dueAt)
+        : acc,
+    undefined,
+  );
   const currentStatus =
     projectDoc !== null
       ? projectDocStatus(projectDoc, projectStatuses)
@@ -195,9 +234,15 @@ export default function ProjectDetailPanel({
   const changeStatus = async (status: string) => {
     try {
       if (kind === "job") {
-        await setStatusJobM({ id: doc._id as Doc<"projectJobs">["_id"], status });
+        await setStatusJobM({
+          id: doc._id as Doc<"projectJobs">["_id"],
+          status,
+        });
       } else {
-        await setStatusProjectM({ id: doc._id as Doc<"projects">["_id"], status });
+        await setStatusProjectM({
+          id: doc._id as Doc<"projects">["_id"],
+          status,
+        });
       }
     } catch (error) {
       toast.error(messageFrom(error, "Couldn't change that status."));
@@ -339,7 +384,10 @@ export default function ProjectDetailPanel({
               className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
             >
               <Star
-                className={cn("size-4", doc.starred && "fill-amber-400 text-amber-500")}
+                className={cn(
+                  "size-4",
+                  doc.starred && "fill-amber-400 text-amber-500",
+                )}
               />
             </button>
           </div>
@@ -349,7 +397,7 @@ export default function ProjectDetailPanel({
             ) : (
               <Briefcase className="mr-1 inline size-3 text-sky-500/80" />
             )}
-            {kind === "project" ? "Project" : parentLabel ?? "Job"}
+            {kind === "project" ? "Project" : (parentLabel ?? "Job")}
             {doc.code ? ` · ${doc.code}` : ""}
           </p>
 
@@ -368,7 +416,9 @@ export default function ProjectDetailPanel({
                 <UserRound
                   className={cn(
                     "size-3.5 shrink-0",
-                    assignees.length > 0 ? "text-primary" : "text-muted-foreground",
+                    assignees.length > 0
+                      ? "text-primary"
+                      : "text-muted-foreground",
                   )}
                 />
                 <span className="min-w-0 flex-1 truncate">
@@ -413,15 +463,53 @@ export default function ProjectDetailPanel({
               label="Start date"
               locked={!mayOptions}
               onClear={
-                doc.startAt !== undefined ? () => void patch({ clearStart: true }) : undefined
+                doc.startAt !== undefined
+                  ? () => void patch({ clearStart: true })
+                  : undefined
               }
             >
               <input
                 type="datetime-local"
-                value={doc.startAt !== undefined ? toLocalInput(new Date(doc.startAt)) : ""}
+                value={
+                  doc.startAt !== undefined
+                    ? toLocalInput(new Date(doc.startAt))
+                    : ""
+                }
+                min={(() => {
+                  const lower: number | undefined =
+                    jobDoc !== null ? parentProject?.startAt : undefined;
+                  const cross = doc.dueAt;
+                  let bound = lower;
+                  if (cross !== undefined) {
+                    bound =
+                      bound === undefined ? cross : Math.max(bound, cross);
+                  }
+                  return bound !== undefined
+                    ? toLocalInput(new Date(bound))
+                    : undefined;
+                })()}
+                max={(() => {
+                  const upper: number | undefined =
+                    projectDoc !== null
+                      ? earliestJobStart
+                      : jobDoc !== null
+                        ? parentProject?.dueAt
+                        : undefined;
+                  const cross = doc.dueAt;
+                  let bound = upper;
+                  if (cross !== undefined) {
+                    bound =
+                      bound === undefined ? cross : Math.min(bound, cross);
+                  }
+                  return bound !== undefined
+                    ? toLocalInput(new Date(bound))
+                    : undefined;
+                })()}
                 onChange={(e) =>
                   void patch({
-                    startAt: e.target.value ? new Date(e.target.value).getTime() : undefined,
+                    startAt: e.target.value
+                      ? new Date(e.target.value).getTime()
+                      : undefined,
                     clearStart: e.target.value === "",
                   })
                 }
@@ -432,6 +520,18 @@ export default function ProjectDetailPanel({
                   Not set — the Gantt runs it from the day it was created
                 </p>
               )}
+              {jobDoc !== null && parentProject?.startAt !== undefined && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Earliest allowed (project start):{" "}
+                  {formatDueLabel(parentProject.startAt)}
+                </p>
+              )}
+              {projectDoc !== null && earliestJobStart !== undefined && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Cannot be after earliest job:{" "}
+                  {formatDueLabel(earliestJobStart)}
+                </p>
+              )}
             </Row>
 
             {/* due date */}
@@ -440,15 +540,53 @@ export default function ProjectDetailPanel({
               label="Due date"
               locked={!mayOptions}
               onClear={
-                doc.dueAt !== undefined ? () => void patch({ clearDue: true }) : undefined
+                doc.dueAt !== undefined
+                  ? () => void patch({ clearDue: true })
+                  : undefined
               }
             >
               <input
                 type="datetime-local"
-                value={doc.dueAt !== undefined ? toLocalInput(new Date(doc.dueAt)) : ""}
+                value={
+                  doc.dueAt !== undefined
+                    ? toLocalInput(new Date(doc.dueAt))
+                    : ""
+                }
+                min={(() => {
+                  const lower: number | undefined =
+                    projectDoc !== null
+                      ? latestJobDue
+                      : jobDoc !== null
+                        ? parentProject?.startAt
+                        : undefined;
+                  const cross = doc.startAt;
+                  let bound = lower;
+                  if (cross !== undefined) {
+                    bound =
+                      bound === undefined ? cross : Math.max(bound, cross);
+                  }
+                  return bound !== undefined
+                    ? toLocalInput(new Date(bound))
+                    : undefined;
+                })()}
+                max={(() => {
+                  const upper: number | undefined =
+                    jobDoc !== null ? parentProject?.dueAt : undefined;
+                  const cross = doc.startAt;
+                  let bound = upper;
+                  if (cross !== undefined) {
+                    bound =
+                      bound === undefined ? cross : Math.min(bound, cross);
+                  }
+                  return bound !== undefined
+                    ? toLocalInput(new Date(bound))
+                    : undefined;
+                })()}
                 onChange={(e) =>
                   void patch({
-                    dueAt: e.target.value ? new Date(e.target.value).getTime() : undefined,
+                    dueAt: e.target.value
+                      ? new Date(e.target.value).getTime()
+                      : undefined,
                     clearDue: e.target.value === "",
                   })
                 }
@@ -466,6 +604,17 @@ export default function ProjectDetailPanel({
                   >
                     {daysLeftLabel(doc.dueAt).text}
                   </span>
+                </p>
+              )}
+              {jobDoc !== null && parentProject?.dueAt !== undefined && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Latest allowed (project due):{" "}
+                  {formatDueLabel(parentProject.dueAt)}
+                </p>
+              )}
+              {projectDoc !== null && latestJobDue !== undefined && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Cannot be before latest job: {formatDueLabel(latestJobDue)}
                 </p>
               )}
             </Row>
@@ -571,7 +720,9 @@ export default function ProjectDetailPanel({
                       )}
                       onClick={() =>
                         void patch(
-                          active === r ? { clearRecurrence: true } : { recurrence: r },
+                          active === r
+                            ? { clearRecurrence: true }
+                            : { recurrence: r },
                         )
                       }
                     >
@@ -582,14 +733,18 @@ export default function ProjectDetailPanel({
               </div>
               {doc.recurrence !== undefined && (
                 <p className="mt-1 text-[11px] text-muted-foreground">
-                  When {kind === "job" ? "the job" : "the project"} is completed,
-                  the next one is created automatically.
+                  When {kind === "job" ? "the job" : "the project"} is
+                  completed, the next one is created automatically.
                 </p>
               )}
             </Row>
 
             {/* status */}
-            <Row icon={Check} label="Status" locked={!mayOptions && !mayComplete}>
+            <Row
+              icon={Check}
+              label="Status"
+              locked={!mayOptions && !mayComplete}
+            >
               <select
                 value={currentStatus}
                 onChange={(e) => void changeStatus(e.target.value)}
@@ -627,10 +782,14 @@ export default function ProjectDetailPanel({
                     disabled={!mayOptions}
                     onBlur={(e) => {
                       const next =
-                        e.target.value === "" ? undefined : Number(e.target.value);
+                        e.target.value === ""
+                          ? undefined
+                          : Number(e.target.value);
                       if (next === projectDoc.budget) return;
                       void patch(
-                        next === undefined ? { clearBudget: true } : { budget: next },
+                        next === undefined
+                          ? { clearBudget: true }
+                          : { budget: next },
                       );
                     }}
                     placeholder="Planned budget"
@@ -671,10 +830,16 @@ export default function ProjectDetailPanel({
                   {(doc.tags ?? []).map((tag) => (
                     <span
                       key={tag}
-                      className={cn(tagChip, "gap-1", mayEdit && "cursor-pointer hover:line-through")}
+                      className={cn(
+                        tagChip,
+                        "gap-1",
+                        mayEdit && "cursor-pointer hover:line-through",
+                      )}
                       onClick={() =>
                         mayEdit &&
-                        void patch({ tags: (doc.tags ?? []).filter((t) => t !== tag) })
+                        void patch({
+                          tags: (doc.tags ?? []).filter((t) => t !== tag),
+                        })
                       }
                     >
                       {tag}
@@ -724,8 +889,14 @@ export default function ProjectDetailPanel({
                           checked={step.isCompleted}
                           disabled={!mayComplete || busy}
                           onCheckedChange={() =>
-                            void toggleStepM({ kind, stepId: step._id }).catch((error) =>
-                              toast.error(messageFrom(error, "Couldn't update that step.")),
+                            void toggleStepM({ kind, stepId: step._id }).catch(
+                              (error) =>
+                                toast.error(
+                                  messageFrom(
+                                    error,
+                                    "Couldn't update that step.",
+                                  ),
+                                ),
                             )
                           }
                           aria-label={`Mark “${step.text}” as ${step.isCompleted ? "not done" : "done"}`}
@@ -750,10 +921,13 @@ export default function ProjectDetailPanel({
                               setStepRenameDraft(step.text);
                               setRenamingStep(step._id);
                             }}
-                            title={mayEdit ? "Double-click to rename" : undefined}
+                            title={
+                              mayEdit ? "Double-click to rename" : undefined
+                            }
                             className={cn(
                               "min-w-0 flex-1 truncate text-sm",
-                              step.isCompleted && "text-muted-foreground line-through",
+                              step.isCompleted &&
+                                "text-muted-foreground line-through",
                             )}
                           >
                             {step.text}
@@ -764,8 +938,16 @@ export default function ProjectDetailPanel({
                             type="button"
                             aria-label={`Remove step ${step.text}`}
                             onClick={() =>
-                              void removeStepM({ kind, stepId: step._id }).catch((error) =>
-                                toast.error(messageFrom(error, "Couldn't remove that step.")),
+                              void removeStepM({
+                                kind,
+                                stepId: step._id,
+                              }).catch((error) =>
+                                toast.error(
+                                  messageFrom(
+                                    error,
+                                    "Couldn't remove that step.",
+                                  ),
+                                ),
                               )
                             }
                             className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:text-destructive"
@@ -797,7 +979,9 @@ export default function ProjectDetailPanel({
                     />
                     <button
                       type="button"
-                      disabled={!mayEdit || busy || stepDraft.trim().length === 0}
+                      disabled={
+                        !mayEdit || busy || stepDraft.trim().length === 0
+                      }
                       onClick={() => void submitStep()}
                       className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
                       aria-label="Add step"
@@ -829,7 +1013,11 @@ export default function ProjectDetailPanel({
                           title={`Open ${a.name}`}
                           className="size-8 shrink-0 overflow-hidden rounded border bg-muted"
                         >
-                          <img src={a.data} alt={a.name} className="size-full object-cover" />
+                          <img
+                            src={a.data}
+                            alt={a.name}
+                            className="size-full object-cover"
+                          />
                         </a>
                       ) : (
                         <FileText className="size-3.5 shrink-0 text-muted-foreground" />
@@ -848,8 +1036,12 @@ export default function ProjectDetailPanel({
                           aria-label={`Remove ${a.name}`}
                           className="hidden size-5 shrink-0 place-items-center rounded text-muted-foreground hover:text-destructive group-hover/at:grid"
                           onClick={() =>
-                            void removeAttachmentM({ kind, id, attachmentId: a.id }).catch(
-                              () => toast.error("Couldn't remove the file."),
+                            void removeAttachmentM({
+                              kind,
+                              id,
+                              attachmentId: a.id,
+                            }).catch(() =>
+                              toast.error("Couldn't remove the file."),
                             )
                           }
                         >

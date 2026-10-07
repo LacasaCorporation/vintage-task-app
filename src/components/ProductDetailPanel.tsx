@@ -147,7 +147,8 @@ export default function ProductDetailPanel({
   const fileInput = useRef<HTMLInputElement>(null);
 
   const peopleById = useMemo(
-    () => new Map((peopleData?.people ?? []).map((p) => [p.userId, p] as const)),
+    () =>
+      new Map((peopleData?.people ?? []).map((p) => [p.userId, p] as const)),
     [peopleData],
   );
   const groupsById = useMemo(
@@ -164,7 +165,8 @@ export default function ProductDetailPanel({
   const project = parentJob
     ? projects.find((p) => p._id === parentJob.projectId)
     : undefined;
-  const currentStatus = fg.projectStatus ?? (fg.isCompleted ? "Finish" : "Listed");
+  const currentStatus =
+    fg.projectStatus ?? (fg.isCompleted ? "Finish" : "Listed");
   // once production has started, Listed and Finish are off limits: they are
   // reached by starting production and by finishing the job
   const offeredStatuses =
@@ -177,7 +179,9 @@ export default function ProductDetailPanel({
   const finishable = finishBlockedReason(fg) === null;
   const statusChoices = offeredStatuses.filter(
     (status) =>
-      status !== PROJECT_STATUS_FINISH || finishable || status === currentStatus,
+      status !== PROJECT_STATUS_FINISH ||
+      finishable ||
+      status === currentStatus,
   );
 
   // the role gates the panel; the product's own grant narrows it
@@ -290,7 +294,13 @@ export default function ProductDetailPanel({
         id: fg._id,
         attachments: JSON.stringify([
           ...attachments,
-          { id: crypto.randomUUID(), name: file.name, type: file.type, size: file.size, data },
+          {
+            id: crypto.randomUUID(),
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            data,
+          },
         ]),
       } as never);
     } catch (error) {
@@ -304,7 +314,9 @@ export default function ProductDetailPanel({
     try {
       await updateFg({
         id: fg._id,
-        attachments: JSON.stringify(attachments.filter((a) => a.id !== attachmentId)),
+        attachments: JSON.stringify(
+          attachments.filter((a) => a.id !== attachmentId),
+        ),
       } as never);
     } catch (error) {
       toast.error(messageFrom(error, "Couldn't remove the file."));
@@ -373,10 +385,12 @@ export default function ProductDetailPanel({
               title={
                 fg.isCompleted === true
                   ? "Reopen this product — you'll be asked to confirm"
-                  : finishBlockedReason(fg) ?? "Mark this product as done"
+                  : (finishBlockedReason(fg) ?? "Mark this product as done")
               }
               onCheckedChange={() => void toggleCompleted()}
-              aria-label={fg.isCompleted ? "Reopen product" : "Mark product as done"}
+              aria-label={
+                fg.isCompleted ? "Reopen product" : "Mark product as done"
+              }
               className="mt-1 size-5 shrink-0 rounded-full border-2 border-border data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:size-3"
             />
             <input
@@ -434,7 +448,9 @@ export default function ProductDetailPanel({
                 <UserRound
                   className={cn(
                     "size-3.5 shrink-0",
-                    assignees.length > 0 ? "text-primary" : "text-muted-foreground",
+                    assignees.length > 0
+                      ? "text-primary"
+                      : "text-muted-foreground",
                   )}
                 />
                 <span className="min-w-0 flex-1 truncate">
@@ -479,7 +495,27 @@ export default function ProductDetailPanel({
             >
               <input
                 type="datetime-local"
-                value={fg.startAt !== undefined ? toLocalInput(new Date(fg.startAt)) : ""}
+                value={
+                  fg.startAt !== undefined
+                    ? toLocalInput(new Date(fg.startAt))
+                    : ""
+                }
+                min={
+                  (parentJob?.startAt ?? project?.startAt) !== undefined
+                    ? toLocalInput(
+                        new Date((parentJob?.startAt ?? project?.startAt)!),
+                      )
+                    : undefined
+                }
+                max={
+                  fg.dueAt !== undefined
+                    ? toLocalInput(new Date(fg.dueAt))
+                    : (parentJob?.dueAt ?? project?.dueAt) !== undefined
+                      ? toLocalInput(
+                          new Date((parentJob?.dueAt ?? project?.dueAt)!),
+                        )
+                      : undefined
+                }
                 onChange={(e) =>
                   void patch({
                     startAt: e.target.value
@@ -493,6 +529,12 @@ export default function ProductDetailPanel({
               {fg.startAt === undefined && parentJob?.startAt !== undefined && (
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   Starting with its job: {formatDueLabel(parentJob.startAt)}
+                </p>
+              )}
+              {(parentJob?.startAt ?? project?.startAt) !== undefined && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Earliest allowed:{" "}
+                  {formatDueLabel(parentJob?.startAt ?? project?.startAt!)}
                 </p>
               )}
             </Row>
@@ -510,7 +552,25 @@ export default function ProductDetailPanel({
             >
               <input
                 type="datetime-local"
-                value={fg.dueAt !== undefined ? toLocalInput(new Date(fg.dueAt)) : ""}
+                value={
+                  fg.dueAt !== undefined ? toLocalInput(new Date(fg.dueAt)) : ""
+                }
+                min={
+                  fg.startAt !== undefined
+                    ? toLocalInput(new Date(fg.startAt))
+                    : (parentJob?.startAt ?? project?.startAt) !== undefined
+                      ? toLocalInput(
+                          new Date((parentJob?.startAt ?? project?.startAt)!),
+                        )
+                      : undefined
+                }
+                max={
+                  (parentJob?.dueAt ?? project?.dueAt) !== undefined
+                    ? toLocalInput(
+                        new Date((parentJob?.dueAt ?? project?.dueAt)!),
+                      )
+                    : undefined
+                }
                 onChange={(e) =>
                   void patch({
                     dueAt: e.target.value
@@ -524,6 +584,12 @@ export default function ProductDetailPanel({
               {parentJob?.dueAt !== undefined && (
                 <p className="mt-1 text-[11px] text-muted-foreground">
                   Job due: {formatDueLabel(parentJob.dueAt)}
+                </p>
+              )}
+              {(parentJob?.dueAt ?? project?.dueAt) !== undefined && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Latest allowed:{" "}
+                  {formatDueLabel(parentJob?.dueAt ?? project?.dueAt!)}
                 </p>
               )}
             </Row>
@@ -576,11 +642,16 @@ export default function ProductDetailPanel({
                         : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                     onClick={() =>
-                      void patch({ priority: fg.priority === p ? undefined : p })
+                      void patch({
+                        priority: fg.priority === p ? undefined : p,
+                      })
                     }
                   >
                     <span
-                      className={cn("mr-1 inline-block size-1.5 rounded-full", PRIORITY_META[p].dot)}
+                      className={cn(
+                        "mr-1 inline-block size-1.5 rounded-full",
+                        PRIORITY_META[p].dot,
+                      )}
                     />
                     {p[0]!.toUpperCase() + p.slice(1)}
                   </button>
@@ -615,7 +686,9 @@ export default function ProductDetailPanel({
                       )}
                       onClick={() =>
                         void patch(
-                          active === r ? { clearRecurrence: true } : { recurrence: r },
+                          active === r
+                            ? { clearRecurrence: true }
+                            : { recurrence: r },
                         )
                       }
                     >
@@ -658,7 +731,9 @@ export default function ProductDetailPanel({
                 onChange={(e) =>
                   patch({
                     qty:
-                      e.target.value.trim() === "" ? undefined : Number(e.target.value),
+                      e.target.value.trim() === ""
+                        ? undefined
+                        : Number(e.target.value),
                   })
                 }
                 placeholder="e.g. 12"
@@ -711,12 +786,13 @@ export default function ProductDetailPanel({
                       className={cn(
                         tagChip,
                         "gap-1",
-                        mayOptions &&
-                          "cursor-pointer hover:line-through",
+                        mayOptions && "cursor-pointer hover:line-through",
                       )}
                       onClick={() =>
                         mayOptions &&
-                        void patch({ tags: (fg.tags ?? []).filter((t) => t !== tag) })
+                        void patch({
+                          tags: (fg.tags ?? []).filter((t) => t !== tag),
+                        })
                       }
                     >
                       {tag}
@@ -739,7 +815,10 @@ export default function ProductDetailPanel({
             </Row>
 
             {/* steps */}
-            <Row icon={ListTodo} label={`Steps${steps ? ` (${doneSteps}/${steps.length})` : ""}`}>
+            <Row
+              icon={ListTodo}
+              label={`Steps${steps ? ` (${doneSteps}/${steps.length})` : ""}`}
+            >
               {steps === undefined ? (
                 <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Loader2 className="size-3 animate-spin" />
@@ -757,10 +836,14 @@ export default function ProductDetailPanel({
                           checked={step.isCompleted === true}
                           disabled={!mayComplete || busy}
                           onCheckedChange={() =>
-                            void toggleStep({ stepId: step._id }).catch((error) =>
-                              toast.error(
-                                messageFrom(error, "Couldn't update that step."),
-                              ),
+                            void toggleStep({ stepId: step._id }).catch(
+                              (error) =>
+                                toast.error(
+                                  messageFrom(
+                                    error,
+                                    "Couldn't update that step.",
+                                  ),
+                                ),
                             )
                           }
                           aria-label={`Mark “${step.text}” as ${step.isCompleted ? "not done" : "done"}`}
@@ -780,10 +863,14 @@ export default function ProductDetailPanel({
                             type="button"
                             aria-label={`Remove step ${step.text}`}
                             onClick={() =>
-                              void removeStep({ stepId: step._id }).catch((error) =>
-                                toast.error(
-                                  messageFrom(error, "Couldn't remove that step."),
-                                ),
+                              void removeStep({ stepId: step._id }).catch(
+                                (error) =>
+                                  toast.error(
+                                    messageFrom(
+                                      error,
+                                      "Couldn't remove that step.",
+                                    ),
+                                  ),
                               )
                             }
                             className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:text-destructive"
@@ -815,7 +902,9 @@ export default function ProductDetailPanel({
                     />
                     <button
                       type="button"
-                      disabled={!mayEdit || busy || stepDraft.trim().length === 0}
+                      disabled={
+                        !mayEdit || busy || stepDraft.trim().length === 0
+                      }
                       onClick={() => void submitStep()}
                       className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground disabled:opacity-50"
                       aria-label="Add step"
@@ -847,7 +936,11 @@ export default function ProductDetailPanel({
                           title={`Open ${a.name}`}
                           className="size-8 shrink-0 overflow-hidden rounded border bg-muted"
                         >
-                          <img src={a.data} alt={a.name} className="size-full object-cover" />
+                          <img
+                            src={a.data}
+                            alt={a.name}
+                            className="size-full object-cover"
+                          />
                         </a>
                       ) : (
                         <FileText className="size-3.5 shrink-0 text-muted-foreground" />
@@ -900,7 +993,11 @@ export default function ProductDetailPanel({
             </Row>
 
             {/* issues raised on the product */}
-            <NodeIssues kind="product" id={String(fg._id)} canEdit={mayEdit || mayComplete} />
+            <NodeIssues
+              kind="product"
+              id={String(fg._id)}
+              canEdit={mayEdit || mayComplete}
+            />
 
             {/* the conversation */}
             <div className="mt-4 border-t border-border/60 pt-4">
@@ -910,22 +1007,25 @@ export default function ProductDetailPanel({
         </div>
 
         {/* footer */}
-        {((mayEdit && (parentJob !== undefined || fg.projectName !== undefined)) ||
+        {((mayEdit &&
+          (parentJob !== undefined || fg.projectName !== undefined)) ||
           (mayDelete && onDelete)) && (
           <div className="space-y-1 border-t border-border/60 p-3">
-            {mayEdit && (parentJob !== undefined || fg.projectName !== undefined) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full rounded-lg text-xs"
-                title="Take it out of the project — the product stays in Products"
-                onClick={() => void removeFromProject()}
-              >
-                <PackageMinus className="size-3.5" />
-                Remove from {parentJob !== undefined ? "this job" : "this project"}
-              </Button>
-            )}
+            {mayEdit &&
+              (parentJob !== undefined || fg.projectName !== undefined) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full rounded-lg text-xs"
+                  title="Take it out of the project — the product stays in Products"
+                  onClick={() => void removeFromProject()}
+                >
+                  <PackageMinus className="size-3.5" />
+                  Remove from{" "}
+                  {parentJob !== undefined ? "this job" : "this project"}
+                </Button>
+              )}
             {mayDelete && onDelete && (
               <Button
                 type="button"
