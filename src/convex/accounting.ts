@@ -55,7 +55,7 @@ export type EntryRow = {
   credit: number;
 };
 
-function signFor(type: AccountType): number {
+export function signFor(type: AccountType): number {
   return type === "income" || type === "liability" || type === "equity" ? 1 : -1;
 }
 

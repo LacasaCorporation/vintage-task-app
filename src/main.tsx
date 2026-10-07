@@ -51,6 +51,9 @@ const SalesDocumentPage = lazyRoute(
 const MaterialPage = lazyRoute(() => import("./pages/MaterialPage.tsx"));
 const ProductPage = lazyRoute(() => import("./pages/ProductPage.tsx"));
 const CostingPage = lazyRoute(() => import("./pages/CostingPage.tsx"));
+const UnitsCategoriesPage = lazyRoute(
+  () => import("./pages/UnitsCategoriesPage.tsx"),
+);
 const NotFound = lazyRoute(() => import("./pages/NotFound.tsx"));
 
 // Simple loading fallback for route transitions
@@ -216,6 +219,14 @@ createRoot(document.getElementById("root")!).render(
                   element={
                     <RequireAuth>
                       <MaterialPage />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/units-categories"
+                  element={
+                    <RequireAuth>
+                      <UnitsCategoriesPage />
                     </RequireAuth>
                   }
                 />
