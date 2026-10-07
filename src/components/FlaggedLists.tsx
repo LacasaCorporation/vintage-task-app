@@ -59,7 +59,6 @@ import {
   PROJECT_STATUS_START,
   projectStatusesOrDefaults,
   projectStatusDetailsOrDefaults,
-  rollupCompletion,
   stageStatusColor,
   stageStatusOf,
   STAGE_STATUSES,
@@ -721,8 +720,10 @@ export function FlaggedProjectsList({
         const done = isStageDone(status);
         const projectJobs = jobsOf(project._id);
         const projectFgs = productsOf(project);
-        // the percentage moves with the products: how many are finished over
-        // how many there are, falling back to the jobs when it holds none
+        // exactly how much of the project is done: how many of its products
+        // are finished, over how many it has — counted product by product, like
+        // a shop floor reading how many are made. If it has no products yet, it
+        // is read through its jobs the same way: finished jobs over total jobs.
         const jobsFinished = projectJobs.filter((job) =>
           isStageDone(jobProjectStatus(job, projectStatuses)),
         ).length;
@@ -731,8 +732,10 @@ export function FlaggedProjectsList({
         ).length;
         const percent =
           projectFgs.length > 0
-            ? rollupCompletion(productsFinished, projectFgs.length)
-            : rollupCompletion(jobsFinished, projectJobs.length);
+            ? (productsFinished * 100) / projectFgs.length
+            : projectJobs.length > 0
+              ? (jobsFinished * 100) / projectJobs.length
+              : 0;
         return (
           <li
             key={project._id}

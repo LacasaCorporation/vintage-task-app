@@ -243,10 +243,17 @@ export function ProjectHierarchy({
         const productsFinished = projectFgs.filter(
           (fg) => fg.isCompleted === true,
         ).length;
+        // exactly how much of the project is done: products finished over
+        // the products in the project — each product counting as one — with
+        // the same ratio falling back to the jobs when the project holds
+        // none. Two of five products made is 40%, three of three jobs done
+        // is 100%, etc.
         const percent =
           projectFgs.length > 0
-            ? rollupCompletion(productsFinished, projectFgs.length)
-            : rollupCompletion(jobsFinished, allProjectJobs.length);
+            ? (productsFinished / projectFgs.length) * 100
+            : allProjectJobs.length > 0
+              ? (jobsFinished / allProjectJobs.length) * 100
+              : 0;
         const projectJobs = sortJobs(
           jobs.filter(
             (job) =>
@@ -1720,10 +1727,12 @@ export function ProjectGantt({
           status,
           done,
           meta,
-          // a job's percentage is the ratio of its products finished
+          // exactly how much of the job is done: how many of its products
+          // are finished, over how many there are — not a fixed middle step.
+          // One of two finished is half done, three of five is 60%, etc.
           percent:
             products.length > 0
-              ? rollupCompletion(finished, products.length)
+              ? (finished * 100) / products.length
               : done
                 ? 100
                 : 0,
@@ -1755,17 +1764,21 @@ export function ProjectGantt({
       const products = fgs.filter((fg) =>
         productJobIds(fg).some((jobId) => jobIds.has(String(jobId))),
       );
-      // a project's completion moves with its products: finished products
-      // over all of them, falling back to the jobs when it carries no
-      // products at all — a project finishes when its jobs do
+      // exactly how much of the project is done: how many of its products
+      // are finished, over how many it has — counting the product count in
+      // the project, one by one, like a workshop reading how many are made.
+      // If a project has no products yet, it is read through its jobs
+      // the same way: how many jobs are finished, over how many there are.
       const jobsFinished = projectJobs.filter((job) =>
         isStageDone(jobProjectStatus(job, projectStatuses)),
       ).length;
       const finished = products.filter((product) => product.isCompleted).length;
       const percent =
         products.length > 0
-          ? rollupCompletion(finished, products.length)
-          : rollupCompletion(jobsFinished, projectJobs.length);
+          ? (finished * 100) / products.length
+          : projectJobs.length > 0
+            ? (jobsFinished * 100) / projectJobs.length
+            : 0;
       const meta = `${plural(projectJobs.length, "job")} · ${plural(products.length, "product")}`;
       const fallbackStart = project._creationTime;
       if (project.dueAt === undefined) missing += 1;
@@ -2627,8 +2640,8 @@ export function ProjectGantt({
                             </span>
                             {row.percent !== undefined && (
                               <span
-                                className="shrink-0 font-medium text-foreground/70 tabular-nums"
-                                title={`${row.percent}% complete`}
+                                className="shrink-0 font-semibold tabular-nums"
+                                title={`${row.percent}% complete — products finished over total products in the job`}
                               >
                                 {row.percent}%
                               </span>
@@ -2875,20 +2888,21 @@ export function ProjectGantt({
                             <span className="max-w-[260px] truncate font-medium text-foreground">
                               {row.name}
                               {row.code ? ` · ${row.code}` : ""}
-                            </span>
-                            <span className="flex items-center gap-1 whitespace-nowrap text-muted-foreground tabular-nums">
-                              <span>{windowDate(start)}</span>
-                              <span>→</span>
-                              <span>{hasEnd ? windowDate(end) : "no end yet"}</span>
-                              <span>· {durationDays}d</span>
-                              {row.progress !== undefined &&
-                                row.progress.total > 0 && (
-                                  <span>
-                                    · {row.progress.done}/{row.progress.total} done
-                                  </span>
-                                )}
-                              <span>
-                                · {startPlanned ? "own start" : "start not planned"}{" "}
+                            </span>                              <span
+                                className="flex items-center gap-1 whitespace-nowrap text-muted-foreground tabular-nums"
+                              >
+                                <span>{windowDate(start)}</span>
+                                <span>→</span>
+                                <span>{hasEnd ? windowDate(end) : "no end yet"}</span>
+                                <span>· {durationDays}d</span>
+                                {row.progress !== undefined &&
+                                  row.progress.total > 0 && (
+                                    <span>
+                                      · {row.progress.done}/{row.progress.total} products done
+                                    </span>
+                                  )}
+                                <span>
+                                · {row.percent}%|{startPlanned ? "own start" : "start not planned"}{" "}
                                 / {endPlanned ? "own end" : "end not planned"}
                               </span>
                             </span>
