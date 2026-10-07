@@ -2777,8 +2777,12 @@ export function ProjectGantt({
                             {row.percent !== undefined && (
                               <span
                                 aria-hidden
-                                className="absolute inset-y-0 left-0 rounded-full bg-black/25"
-                                style={{ width: `${(row.percent / 100) * (to - from)}%` }}
+                                className="absolute inset-y-0 left-0 rounded-full"
+                                style={{
+                                  width: `${(row.percent / 100) * (to - from)}%`,
+                                  opacity: 0.25 + (row.percent / 100) * 0.75,
+                                  backgroundColor: '#000000',
+                                }}
                               />
                             )}
                             {row.percent !== undefined && to - from >= 6 && (
