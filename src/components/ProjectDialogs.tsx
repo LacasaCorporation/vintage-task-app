@@ -57,6 +57,11 @@ export function JobDialog({
   const [name, setName] = useState(job?.name ?? "");
   const [description, setDescription] = useState(job?.description ?? "");
   const [assignee, setAssignee] = useState(job?.assignee ?? "");
+  const [startDate, setStartDate] = useState(
+    job?.startAt !== undefined
+      ? new Date(job.startAt).toISOString().slice(0, 10)
+      : "",
+  );
   const [dueDate, setDueDate] = useState(
     job?.dueAt !== undefined
       ? new Date(job.dueAt).toISOString().slice(0, 10)
@@ -66,10 +71,22 @@ export function JobDialog({
     job?.priority ?? "medium",
   );
   const [saving, setSaving] = useState(false);
-  const minDueDate =
+  const minStartDate =
     parentProject?.startAt !== undefined
       ? new Date(parentProject.startAt).toISOString().slice(0, 10)
       : undefined;
+  const maxStartDate =
+    dueDate !== ""
+      ? dueDate
+      : parentProject?.dueAt !== undefined
+        ? new Date(parentProject.dueAt).toISOString().slice(0, 10)
+        : undefined;
+  const minDueDate =
+    startDate !== ""
+      ? startDate
+      : parentProject?.startAt !== undefined
+        ? new Date(parentProject.startAt).toISOString().slice(0, 10)
+        : undefined;
   const maxDueDate =
     parentProject?.dueAt !== undefined
       ? new Date(parentProject.dueAt).toISOString().slice(0, 10)
@@ -84,8 +101,11 @@ export function JobDialog({
     if (projectId === null) return;
     setSaving(true);
     try {
+      const startAt = startDate
+        ? new Date(`${startDate}T09:00:00`).getTime()
+        : undefined;
       const dueAt = dueDate
-        ? new Date(`${dueDate}T12:00:00`).getTime()
+        ? new Date(`${dueDate}T17:00:00`).getTime()
         : undefined;
       if (job) {
         await updateJob({
@@ -93,7 +113,10 @@ export function JobDialog({
           name: name.trim(),
           description: description.trim() || undefined,
           assignee: assignee.trim() || undefined,
+          startAt,
           dueAt,
+          clearStart: startDate === "" && job.startAt !== undefined,
+          clearDue: dueDate === "" && job.dueAt !== undefined,
           priority: priority as "high" | "medium" | "low",
         });
         toast.success("Job updated.");
@@ -103,6 +126,7 @@ export function JobDialog({
           name: name.trim(),
           description: description.trim() || undefined,
           assignee: assignee.trim() || undefined,
+          startAt,
           dueAt,
           priority: priority as "high" | "medium" | "low",
         });
@@ -156,6 +180,43 @@ export function JobDialog({
               />
             </div>
             <div className="space-y-1.5">
+              <label className="text-xs font-medium">Priority</label>
+              <select
+                value={priority}
+                onChange={(e) =>
+                  setPriority(e.target.value as "high" | "medium" | "low")
+                }
+                aria-label="Priority"
+                className={inputCls}
+              >
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Start date</label>
+              <Input
+                type="date"
+                value={startDate}
+                min={minStartDate}
+                max={maxStartDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className={inputCls}
+              />
+              {(minStartDate !== undefined || maxStartDate !== undefined) && (
+                <p className="text-[11px] text-muted-foreground">
+                  {minStartDate !== undefined && <>Earliest: {minStartDate}</>}
+                  {minStartDate !== undefined &&
+                    maxStartDate !== undefined &&
+                    " · "}
+                  {maxStartDate !== undefined && <>Latest: {maxStartDate}</>}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
               <label className="text-xs font-medium">Due date</label>
               <Input
                 type="date"
@@ -167,33 +228,14 @@ export function JobDialog({
               />
               {(minDueDate !== undefined || maxDueDate !== undefined) && (
                 <p className="text-[11px] text-muted-foreground">
-                  {minDueDate !== undefined && (
-                    <>From project start: {minDueDate}</>
-                  )}
+                  {minDueDate !== undefined && <>Earliest: {minDueDate}</>}
                   {minDueDate !== undefined &&
                     maxDueDate !== undefined &&
                     " · "}
-                  {maxDueDate !== undefined && (
-                    <>To project due: {maxDueDate}</>
-                  )}
+                  {maxDueDate !== undefined && <>Latest: {maxDueDate}</>}
                 </p>
               )}
             </div>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium">Priority</label>
-            <select
-              value={priority}
-              onChange={(e) =>
-                setPriority(e.target.value as "high" | "medium" | "low")
-              }
-              aria-label="Priority"
-              className={inputCls}
-            >
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium">Description</label>
