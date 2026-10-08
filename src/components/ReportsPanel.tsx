@@ -1,5 +1,6 @@
 import { api } from "@/convex/_generated/api";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
+import { TradingAccount } from "./TradingAccount";
 import { Input } from "@/components/ui/input";
 import {
   AlertTriangle,
@@ -20,6 +21,8 @@ import {
   Tags,
   TrendingDown,
   TrendingUp,
+  Warehouse,
+  Scale,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ReportsArea } from "@/components/CostingSidebar";
@@ -445,6 +448,7 @@ const FIN_TABS: readonly PageTab<FinTab>[] = [
 
 const GAIN = "text-emerald-600 dark:text-emerald-400";
 const LOSS = "text-rose-600 dark:text-rose-400";
+const SUBHEAD = "px-3 py-2 text-xs font-medium";
 
 function FinancialReports({ range }: { range: Range }) {
   const [tab, setTab] = useState<FinTab>("trial");
@@ -458,7 +462,7 @@ function FinancialReports({ range }: { range: Range }) {
       />
       {tab === "trial" && <TrialBalance range={range} />}
       {tab === "position" && <BalanceSheet range={range} />}
-      {tab === "pl" && <ProfitAndLoss range={range} />}
+      {tab === "pl" && <TradingAccount range={range} />}
       {tab === "day" && <DayBook range={range} />}
       {tab === "cash" && <CashFlowReport range={range} />}
       {tab === "receivable" && <AgeingReport side="receivable" />}
@@ -736,7 +740,7 @@ function BalanceSheet({ range }: { range: Range }) {
 
 type PlLine = { _id: string; code: string; name: string; amount: number };
 
-function ProfitAndLoss({ range }: { range: Range }) {
+export function ProfitAndLoss({ range }: { range: Range }) {
   const { format: money } = useWorkspaceCurrency();
   const data = useQuery(api.reports.profitAndLoss, {
     from: range.from,

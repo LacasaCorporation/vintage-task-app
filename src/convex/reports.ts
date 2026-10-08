@@ -1541,6 +1541,141 @@ export const agedBalances = query({
   },
 });
 
+/**
+ * Opening and closing stock valuation for a date window.
+ *
+ * The trading account needs what stock was worth at the start of the period
+ * and what it was worth at the end. Those two figures are not in the journal —
+ * stock is counted, not posted — so they have to be recomputed from the same
+ * shelves and rates the stock report uses, evaluated at two moments instead of
+ * one.
+ *
+ * Opening stock = what was on the shelves the instant before the period began.
+ * Closing stock = what was on the shelves at the end of the period.
+ */
+export const accountingValuation = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, { from, to }): Promise<{
+    opening: number;
+    closing: number;
+  }> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return { opening: 0, closing: 0 };
+
+    const round = (n: number) => Math.round(n * 1e2) / 1e2;
+
+    const materials = await ctx.db
+      .query("rawMaterials")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const products = await ctx.db
+      .query("finishedGoods")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+
+    const billLines = await ctx.db
+      .query("purchaseLines")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const averages = new Map<
+      Id<"rawMaterials">,
+      { value: number; qty: number; last: number }
+    >();
+    for (const line of billLines) {
+      const a = averages.get(line.materialId) ?? {
+        value: 0,
+        qty: 0,
+        last: 0,
+      };
+      a.value += line.qty * line.unitCost;
+      a.qty += line.qty;
+      a.last = line.unitCost;
+      averages.set(line.materialId, a);
+    }
+    const weighted = (id: Id<"rawMaterials">, fallback: number) => {
+      const a = averages.get(id);
+      return a !== undefined && a.qty > 0 ? round(a.value / a.qty) : fallback;
+    };
+
+    const items = await ctx.db
+      .query("costingItems")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const materialById0 = new Map(materials.map((m) => [m._id, m]));
+    const sheetCost = new Map<Id<"finishedGoods">, number>();
+    for (const item of items) {
+      if (item.fgId === undefined) continue;
+      const unit =
+        item.materialId !== undefined
+          ? weighted(
+              item.materialId,
+              materialById0.get(item.materialId)?.pricePerUnit ?? 0,
+            )
+          : item.unitPrice;
+      sheetCost.set(
+        item.fgId,
+        (sheetCost.get(item.fgId) ?? 0) + item.qty * unit,
+      );
+    }
+
+    const materialRate = new Map<
+      Id<"rawMaterials">,
+      number
+    >();
+    for (const m of materials) {
+      materialRate.set(m._id, weighted(m._id, round(m.pricePerUnit)));
+    }
+    const productRate = new Map<Id<"finishedGoods">, number>();
+    for (const p of products) {
+      productRate.set(p._id, round(sheetCost.get(p._id) ?? 0));
+    }
+
+    const stockMovements = await ctx.db
+      .query("stockMovements")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const productMovements = await ctx.db
+      .query("productMovements")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+
+    const materialById = new Map(materials.map((m) => [m._id, m]));
+    const productById = new Map(products.map((p) => [p._id, p]));
+
+    /** Stock on hand at a moment, valued at current rates. */
+    const valueAt = (at: number) => {
+      const mm = new Map<Id<"rawMaterials">, number>();
+      for (const m of materials) {
+        let qty = m.stock ?? 0;
+        for (const mv of stockMovements) {
+          if (mv.materialId !== m._id) continue;
+          if (mv.at >= at) continue;
+          qty += mv.direction === "in" ? mv.qty : -mv.qty;
+        }
+        mm.set(m._id, round((qty ?? 0) * (materialRate.get(m._id) ?? 0)));
+      }
+      const pp = new Map<Id<"finishedGoods">, number>();
+      for (const p of products) {
+        let qty = p.stock ?? 0;
+        for (const mv of productMovements) {
+          if (mv.productId !== p._id) continue;
+          if (mv.at >= at) continue;
+          qty += mv.direction === "in" ? mv.qty : -mv.qty;
+        }
+        pp.set(p._id, round((qty ?? 0) * (productRate.get(p._id) ?? 0)));
+      }
+      let total = 0;
+      for (const v of mm.values()) total += v;
+      for (const v of pp.values()) total += v;
+      return round(total);
+    };
+
+    const opening = valueAt(from);
+    const closing = valueAt(to + 1);
+    return { opening, closing };
+  },
+});
+
 /* ── tax ───────────────────────────────────────────────────────────── */
 
 export type TaxPeriodRow = {
