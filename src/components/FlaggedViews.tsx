@@ -54,6 +54,7 @@ import {
 import {
   DueChips,
   ProductionButton,
+  RemoveFromProductionButton,
   fgProjectStatus,
   jobProjectStatus,
   matchesStatusFilter,
@@ -348,6 +349,12 @@ export function ProjectHierarchy({
               </span>
               <DueChips dueAt={project.dueAt} />
               <span className={tagChip}>{status}</span>
+              <RemoveFromProductionButton
+                kind="project"
+                id={project._id}
+                name={project.name}
+                inside={projectFgs.length}
+              />
             </div>
 
             {isCollapsed ? null : (
@@ -491,6 +498,12 @@ function JobRow({
         )}
         <DueChips dueAt={job.dueAt} />
         <span className={tagChip}>{jobProjectStatus(job, projectStatuses)}</span>
+        <RemoveFromProductionButton
+          kind="job"
+          id={job._id}
+          name={job.name}
+          inside={allProducts.length}
+        />
       </div>
 
       {open && products.length > 0 && (
@@ -567,6 +580,11 @@ function JobRow({
                 onChange={(status) => void changeFgStatus(fg, status)}
               />
               <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
+              <RemoveFromProductionButton
+                kind="product"
+                id={fg._id}
+                name={fg.name}
+              />
             </li>
           ))}
         </ul>
@@ -719,6 +737,12 @@ export function JobFlatList({
             <DueChips dueAt={job.dueAt} />
             <span className={tagChip}>{data.projectNameOf(job)}</span>
             <span className={tagChip}>{jobProjectStatus(job, projectStatuses)}</span>
+            <RemoveFromProductionButton
+              kind="job"
+              id={job._id}
+              name={job.name}
+              inside={allProducts.length}
+            />
           </li>
         );
       })}

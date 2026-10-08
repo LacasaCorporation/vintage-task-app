@@ -124,6 +124,134 @@ export async function clearStaleProductFlag(
   await clearAncestorsIfOrphaned(ctx, userId, affectedJobIds);
 }
 
+/** What came off a row: flags cleared, and how many of them were products. */
+export type RemovedFlags = { removed: number; products: number };
+
+/**
+ * The first product under these jobs whose run is still going.
+ *
+ * Work on the line cannot simply be taken off the board: its materials are
+ * already out of stock, and `production.stop` is what puts them back. Every
+ * removal checks for it first, so a run is never left half-visible.
+ */
+async function runningUnder(
+  ctx: Ctx,
+  userId: Id<"users">,
+  jobIds: readonly Id<"projectJobs">[],
+): Promise<Doc<"finishedGoods"> | undefined> {
+  const wanted = new Set(jobIds.map(String));
+  if (wanted.size === 0) return undefined;
+  const all = await ctx.db
+    .query("finishedGoods")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .collect();
+  return all.find(
+    (f) =>
+      f.productionStartedAt !== undefined &&
+      jobIdsOf(f).some((id) => wanted.has(String(id))),
+  );
+}
+
+/**
+ * Take a product off the production board: its own flag, then its parents if
+ * nothing flagged is left under them.
+ */
+export async function unflagProductTree(
+  ctx: Ctx,
+  userId: Id<"users">,
+  fgId: Id<"finishedGoods">,
+): Promise<RemovedFlags> {
+  const fg = await ctx.db.get(fgId);
+  if (fg === null || fg.ownerId !== userId)
+    throw new Error("That product no longer exists.");
+  if (fg.productionStartedAt !== undefined)
+    throw new Error(`“${fg.name}” is in production — stop the run first.`);
+  if (fg.isFlagged !== true) return { removed: 0, products: 0 };
+  const jobIds = jobIdsOf(fg);
+  await ctx.db.patch(fgId, { isFlagged: undefined, flaggedAt: undefined });
+  await clearAncestorsIfOrphaned(ctx, userId, jobIds);
+  return { removed: 1, products: 1 };
+}
+
+/**
+ * Take a job off the production board, with everything under it.
+ *
+ * A job sits on that board because a flagged product inside it put it there,
+ * so clearing the job alone would leave it standing — flagged straight back by
+ * the products it still holds. The products go first, then the job, then its
+ * project if nothing else is keeping that.
+ */
+export async function unflagJobTree(
+  ctx: Ctx,
+  userId: Id<"users">,
+  jobId: Id<"projectJobs">,
+): Promise<RemovedFlags> {
+  const job = await ctx.db.get(jobId);
+  if (job === null || job.ownerId !== userId)
+    throw new Error("That job no longer exists.");
+  const busy = await runningUnder(ctx, userId, [jobId]);
+  if (busy !== undefined)
+    throw new Error(`“${busy.name}” is in production — stop the run first.`);
+
+  const flagged = await flaggedProducts(ctx, userId);
+  let removed = 0;
+  let products = 0;
+  for (const fg of flagged) {
+    if (!jobIdsOf(fg).includes(jobId)) continue;
+    await ctx.db.patch(fg._id, { isFlagged: undefined, flaggedAt: undefined });
+    removed += 1;
+    products += 1;
+  }
+  if (job.isFlagged === true) {
+    await ctx.db.patch(jobId, { isFlagged: undefined, flaggedAt: undefined });
+    removed += 1;
+  }
+  await clearAncestorsIfOrphaned(ctx, userId, [jobId]);
+  return { removed, products };
+}
+
+/**
+ * Take a project off the production board, with every job and product under
+ * it — the same rule as a job, one level further up. Walked through the jobs
+ * so the flags come off in the order the hierarchy is built.
+ */
+export async function unflagProjectTree(
+  ctx: Ctx,
+  userId: Id<"users">,
+  projectId: Id<"projects">,
+): Promise<RemovedFlags> {
+  const project = await ctx.db.get(projectId);
+  if (project === null || project.ownerId !== userId)
+    throw new Error("That project no longer exists.");
+  const jobs = (
+    await ctx.db
+      .query("projectJobs")
+      .withIndex("by_project", (q) => q.eq("projectId", projectId))
+      .collect()
+  ).filter((job) => job.ownerId === userId);
+
+  const busy = await runningUnder(
+    ctx,
+    userId,
+    jobs.map((job) => job._id),
+  );
+  if (busy !== undefined)
+    throw new Error(`“${busy.name}” is in production — stop the run first.`);
+
+  let removed = 0;
+  let products = 0;
+  for (const job of jobs) {
+    const gone = await unflagJobTree(ctx, userId, job._id);
+    removed += gone.removed;
+    products += gone.products;
+  }
+  if (project.isFlagged === true) {
+    await ctx.db.patch(projectId, { isFlagged: undefined, flaggedAt: undefined });
+    removed += 1;
+  }
+  return { removed, products };
+}
+
 /**
  * Drop the flag from a job and its project once nothing flagged is left under
  * them. Called after a leaf unflags itself, so the parents follow it down.

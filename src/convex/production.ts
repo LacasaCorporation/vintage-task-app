@@ -1,7 +1,14 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { getSettings } from "./settings";
-import { flagAncestors, jobIdsOf } from "./flagCascade";
+import {
+  flagAncestors,
+  jobIdsOf,
+  unflagJobTree,
+  unflagProductTree,
+  unflagProjectTree,
+  type RemovedFlags,
+} from "./flagCascade";
 import { stockIn, stockOut } from "./stock";
 import { produceStock, reverseProduction } from "./productStock";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -108,6 +115,41 @@ export async function syncProductionConsumption(
     })),
   });
 }
+
+/**
+ * Take work off the production board.
+ *
+ * The board is the flag, so this clears it: the product, job or project stays
+ * exactly where it is — nothing is deleted, and its units, cost and history
+ * are untouched. A job or a project leaves with everything under it, because
+ * that is the only reason it was there: a parent sits on the board while a
+ * product inside it is flagged, so taking the parent off alone would put it
+ * straight back.
+ *
+ * Work already running is refused rather than quietly dropped — its materials
+ * are out of stock, and `stop` is what puts them back.
+ */
+export const removeFromProduction = mutation({
+  args: {
+    kind: v.union(
+      v.literal("project"),
+      v.literal("job"),
+      v.literal("product"),
+    ),
+    id: v.string(),
+  },
+  handler: async (ctx, { kind, id }): Promise<RemovedFlags> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    // the rules — what a removal takes with it, and why a run under way is
+    // refused — live with the cascade itself, so this stays a dispatch
+    if (kind === "product")
+      return await unflagProductTree(ctx, userId, id as Id<"finishedGoods">);
+    if (kind === "job")
+      return await unflagJobTree(ctx, userId, id as Id<"projectJobs">);
+    return await unflagProjectTree(ctx, userId, id as Id<"projects">);
+  },
+});
 
 /**
  * Start production on a product: it is flagged so it opens in the Projects

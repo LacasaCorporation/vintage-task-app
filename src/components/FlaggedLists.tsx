@@ -8,6 +8,7 @@ import ProductTagsInline from "@/components/ProductTagsInline";
 import PriorityChip from "@/components/PriorityChip";
 import StatusSelect from "@/components/StatusSelect";
 import AssigneeChip from "@/components/AssigneeChip";
+import { useAppDialogs } from "@/components/AppDialogs";
 import { assigneesOfTask } from "@/lib/task-people";
 import { isFlaggedProjectWork } from "@/lib/project-work";
 import { useFgStatusChange } from "@/lib/useFgStatusChange";
@@ -30,6 +31,7 @@ import {
   Circle,
   FileText,
   Flag,
+  FlagOff,
   Folder,
   GanttChartSquare,
   GripVertical,
@@ -460,6 +462,12 @@ export function FlaggedItemsList({
               <DueChips dueAt={job.dueAt} empty />
               <span className={tagChip}>{data.projectNameOf(job)}</span>
               <StatusChip status={jobProjectStatus(job, projectStatuses)} />
+              <RemoveFromProductionButton
+                kind="job"
+                id={job._id}
+                name={job.name}
+                inside={allFlaggedProducts.length}
+              />
             </div>
             {jobProducts.length > 0 && (
               <ul
@@ -543,6 +551,11 @@ export function FlaggedItemsList({
                       onChange={(status) => void changeFgStatus(fg, status)}
                     />
                     <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
+                    <RemoveFromProductionButton
+                      kind="product"
+                      id={fg._id}
+                      name={fg.name}
+                    />
                   </li>
                 ))}
               </ul>
@@ -631,6 +644,11 @@ export function FlaggedItemsList({
                   inherited={fg.dueAt === undefined && parentJob?.dueAt !== undefined}
                 />
                 <ProductionButton fg={fg} jobId={parentJob?._id} />
+                <RemoveFromProductionButton
+                  kind="product"
+                  id={fg._id}
+                  name={fg.name}
+                />
               </div>
             </li>
           );
@@ -810,6 +828,12 @@ export function FlaggedProjectsList({
             </span>
             <DueChips dueAt={project.dueAt} />
             <StatusChip status={status} />
+            <RemoveFromProductionButton
+              kind="project"
+              id={project._id}
+              name={project.name}
+              inside={projectFgs.length}
+            />
           </li>
         );
       })}
@@ -953,9 +977,99 @@ export function FlaggedProductsList({
             onChange={(status) => void changeFgStatus(fg, status)}
           />
           <ProductionButton fg={fg} jobId={parentJob?._id} hideStatusPill />
+          <RemoveFromProductionButton
+            kind="product"
+            id={fg._id}
+            name={fg.name}
+          />
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * Take a row off the production board.
+ *
+ * The board is the flag, so removing is clearing it — nothing is deleted, and
+ * the product, job or project stays exactly where it is in the project. A job
+ * or a project leaves with everything under it, since a parent only sits on
+ * the board while something inside it is flagged; the confirmation says how
+ * much goes with it, so the count is never a surprise. A run under way is
+ * refused by the server: its materials are out of stock, and stopping is what
+ * puts them back.
+ */
+export function RemoveFromProductionButton({
+  kind,
+  id,
+  name,
+  inside = 0,
+  className,
+}: {
+  kind: "project" | "job" | "product";
+  id: string;
+  name: string;
+  /** Flagged products under this row — what else comes off with it. */
+  inside?: number;
+  className?: string;
+}) {
+  const remove = useMutation(api.production.removeFromProduction);
+  const { confirm } = useAppDialogs();
+  const [busy, setBusy] = useState(false);
+
+  const ask = async () => {
+    const also =
+      kind === "product" || inside === 0
+        ? ""
+        : ` The ${inside} product${inside === 1 ? "" : "s"} under it come${inside === 1 ? "s" : ""} off the board too.`;
+    const ok = await confirm({
+      title: `Remove “${name}” from production?`,
+      message: `It comes off the production board and its flag is cleared — it stays in its project, and its units, cost and history are not touched.${also}`,
+      confirmLabel: "Remove from production",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await remove({ kind, id });
+      if (res.removed === 0) {
+        toast.success(`“${name}” was already off the production board.`);
+      } else if (kind !== "product" && res.products > 0) {
+        toast.success(
+          `“${name}” removed from production, with ${res.products} product${res.products === 1 ? "" : "s"} under it.`,
+        );
+      } else {
+        toast.success(`“${name}” removed from production.`);
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't remove it from production.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void ask()}
+      title="Remove from production"
+      aria-label={`Remove “${name}” from production`}
+      className={cn(
+        "grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground/60 transition-colors hover:bg-rose-500/10 hover:text-rose-600 disabled:opacity-50 dark:hover:text-rose-400",
+        className,
+      )}
+    >
+      {busy ? (
+        <Loader2 className="size-3 animate-spin" />
+      ) : (
+        <FlagOff className="size-3.5" />
+      )}
+    </button>
   );
 }
 
@@ -1192,6 +1306,12 @@ function BoardCardView({
       </div>
       <div className="flex flex-wrap items-center gap-1">
         <AssigneeChip userIds={assignees} peopleById={peopleById} />
+        {/* the card is the flagged product, so this is its way off the board */}
+        <RemoveFromProductionButton
+          kind="product"
+          id={card.fg._id}
+          name={card.fg.name}
+        />
         {card.fg.dueAt !== undefined && (
           <span
             className={cn(
