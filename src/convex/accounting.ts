@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
-import { moneyAccountIds } from "./accountingDefaults";
+import { moneyAccountIds, STOCK_CODE } from "./accountingDefaults";
+import { stockValuation } from "./stockValuation";
 import { requireItem } from "./authorize";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -58,6 +59,46 @@ export type EntryRow = {
 export function signFor(type: AccountType): number {
   return type === "income" || type === "liability" || type === "equity" ? 1 : -1;
 }
+
+/**
+ * The stock accounts.
+ *
+ * Opening and closing stock are each posted twice — once as stock on hand and
+ * once in the trading account — so they are four accounts rather than two, and
+ * they are built from {@link STOCK_CODE} so the seeder, the posting that fills
+ * them and the statements that read them all resolve the same codes.
+ */
+const STOCK_ACCOUNTS: {
+  code: string;
+  name: string;
+  type: AccountType;
+  parent: string;
+}[] = [
+  {
+    code: STOCK_CODE.openingAsset,
+    name: "Opening stock",
+    type: "asset",
+    parent: "1000",
+  },
+  {
+    code: STOCK_CODE.closingAsset,
+    name: "Closing stock",
+    type: "asset",
+    parent: "1000",
+  },
+  {
+    code: STOCK_CODE.openingTrading,
+    name: "Opening stock (trading)",
+    type: "expense",
+    parent: "5000",
+  },
+  {
+    code: STOCK_CODE.closingTrading,
+    name: "Closing stock (trading)",
+    type: "expense",
+    parent: "5000",
+  },
+];
 
 /**
  * The standard chart every new firm starts from. Group rows (Assets, Liabilities…)
@@ -147,6 +188,8 @@ const DEFAULT_ACCOUNTS: {
   { code: "5300", name: "Rent", type: "expense", parent: "5000" },
   { code: "5400", name: "Salaries & wages", type: "expense", parent: "5000" },
   { code: "5500", name: "Utilities", type: "expense", parent: "5000" },
+
+  ...STOCK_ACCOUNTS,
 ];
 
 /** JE0001, JE0002, … */
@@ -166,6 +209,39 @@ async function nextEntryNumber(
   return `JE${String(max + 1).padStart(4, "0")}`;
 }
 
+/**
+ * Give a chart that predates the stock accounts the ones it is missing.
+ *
+ * Opening and closing stock are ordinary posting accounts, so a firm that
+ * already has a chart is not rebuilt: the missing rows are added under the
+ * same headings the rest of the chart uses, once, and left alone afterwards.
+ */
+async function ensureStockAccounts(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+): Promise<boolean> {
+  const accounts = await ctx.db
+    .query("accounts")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+    .collect();
+  const byCode = new Map(accounts.map((a) => [a.code, a]));
+  let added = false;
+  for (const a of STOCK_ACCOUNTS) {
+    if (byCode.has(a.code)) continue;
+    const parentId = byCode.get(a.parent)?._id;
+    if (parentId === undefined) continue;
+    await ctx.db.insert("accounts", {
+      ownerId,
+      code: a.code,
+      name: a.name,
+      type: a.type,
+      parentId,
+    });
+    added = true;
+  }
+  return added;
+}
+
 /** Posts the default chart for a firm that has none yet. */
 export const ensureDefaults = mutation({
   args: {},
@@ -176,7 +252,7 @@ export const ensureDefaults = mutation({
       .query("accounts")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .first();
-    if (existing !== null) return false;
+    if (existing !== null) return ensureStockAccounts(ctx, userId);
     // Parents are written first and their ids remembered, so a child can be
     // filed under its heading in the same pass. Codes run in ascending order
     // and a group always carries a lower code than what sits under it.
@@ -840,6 +916,152 @@ export const removeEntry = mutation({
       .collect();
     for (const line of lines) await ctx.db.delete(line._id);
     await ctx.db.delete(id);
+  },
+});
+
+/** Every stock adjustment carries this memo, so a re-post can find the last one. */
+const STOCK_MEMO = "Opening and closing stock";
+
+/**
+ * Post — or re-post — a period's opening and closing stock into the ledger.
+ *
+ * Stock is counted, not posted: the shelves decide what the figures are, and
+ * this is what puts them in the books. The entry is the ordinary period-end
+ * one —
+ *
+ *   Dr Opening stock (asset)         A1   what was brought forward
+ *       Cr Owner capital             A1     ... which was already on hand
+ *   Dr Opening stock (trading)       A1   carried into the trading account
+ *       Cr Opening stock (asset)     A1     ... so the asset is emptied again
+ *   Dr Closing stock (asset)         A2   what is on the shelves at the end
+ *       Cr Closing stock (trading)   A2     ... credited to the trading account
+ *
+ * So the balance sheet shows closing stock as a current asset while the profit
+ * and loss carries opening stock as a cost and closing stock as a deduction
+ * from it. That is the only way Cost of Goods Sold can be read off a ledger
+ * whose purchases are expensed as the bills arrive — without it, stock on hand
+ * looks like money thrown away.
+ *
+ * Re-posting replaces the previous adjustment rather than adding to it: the
+ * figures come from the shelves, so the latest reading is the true one, and
+ * posting twice can never double the stock.
+ */
+export const postStockAdjustment = mutation({
+  args: { from: v.number(), to: v.number(), label: v.optional(v.string()) },
+  handler: async (
+    ctx,
+    { from, to, label },
+  ): Promise<{ opening: number; closing: number; posted: boolean }> => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) throw new Error("Sign in to post to the ledger.");
+    await requireItem(ctx, userId, "accounting", "create");
+
+    const accounts = await ctx.db
+      .query("accounts")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const postable = (code: string, what: string) => {
+      const found = accounts.find(
+        (a) => a.code === code && a.isGroup !== true,
+      );
+      if (found === undefined) {
+        throw new Error(
+          `${what} is missing from the chart — reopen Accounting → Chart of accounts to add the standard accounts.`,
+        );
+      }
+      return found;
+    };
+    const openingAsset = postable(
+      STOCK_CODE.openingAsset,
+      "The opening stock account",
+    );
+    const closingAsset = postable(
+      STOCK_CODE.closingAsset,
+      "The closing stock account",
+    );
+    const openingTrading = postable(
+      STOCK_CODE.openingTrading,
+      "The opening stock trading account",
+    );
+    const closingTrading = postable(
+      STOCK_CODE.closingTrading,
+      "The closing stock trading account",
+    );
+    const capital =
+      accounts.find((a) => a.code === "3100" && a.isGroup !== true) ??
+      accounts.find((a) => a.name === "Owner capital" && a.isGroup !== true);
+    if (capital === undefined) {
+      throw new Error(
+        "An owner capital account is needed to carry stock that was on hand before the books began.",
+      );
+    }
+
+    // the figures are derived, so the latest reading replaces the last posting
+    // instead of being added on top of it
+    const entries = await ctx.db
+      .query("journalEntries")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    for (const entry of entries) {
+      if (!(entry.memo ?? "").startsWith(STOCK_MEMO)) continue;
+      const old = await ctx.db
+        .query("journalLines")
+        .withIndex("by_entry", (q) => q.eq("entryId", entry._id))
+        .collect();
+      for (const line of old) await ctx.db.delete(line._id);
+      await ctx.db.delete(entry._id);
+    }
+
+    const { opening, closing } = await stockValuation(ctx, userId, from, to);
+    if (opening === 0 && closing === 0) {
+      return { opening: 0, closing: 0, posted: false };
+    }
+
+    await postEntry(ctx, userId, {
+      at: to,
+      kind: "opening",
+      memo: `${STOCK_MEMO}${label !== undefined && label !== "" ? ` · ${label}` : ""}`,
+      lines: [
+        {
+          accountId: openingAsset._id,
+          debit: opening,
+          credit: 0,
+          memo: "Stock brought forward",
+        },
+        {
+          accountId: openingTrading._id,
+          debit: opening,
+          credit: 0,
+          memo: "Opening stock to the trading account",
+        },
+        {
+          accountId: capital._id,
+          debit: 0,
+          credit: opening,
+          memo: "Stock already on hand before the books began",
+        },
+        {
+          accountId: openingAsset._id,
+          debit: 0,
+          credit: opening,
+          memo: "Opening stock to the trading account",
+        },
+        {
+          accountId: closingAsset._id,
+          debit: closing,
+          credit: 0,
+          memo: "Stock on hand at the period end",
+        },
+        {
+          accountId: closingTrading._id,
+          debit: 0,
+          credit: closing,
+          memo: "Closing stock to the trading account",
+        },
+      ],
+    });
+
+    return { opening, closing, posted: true };
   },
 });
 

@@ -1,6 +1,7 @@
 import { query } from "./_generated/server";
 import { scopeUserId } from "./org";
-import { moneyAccountIds } from "./accountingDefaults";
+import { moneyAccountIds, STOCK_CODE } from "./accountingDefaults";
+import { stockValuation } from "./stockValuation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -286,15 +287,35 @@ export const profitAndLoss = query({
         totalExpense: 0,
         profit: 0,
         margin: 0,
+        trading: {
+          openingStock: 0,
+          purchases: 0,
+          closingStock: 0,
+          cogs: 0,
+          sales: 0,
+          otherIncome: 0,
+          grossProfit: 0,
+        },
         empty: true,
       };
 
     const accounts = await ledgerIn(ctx, userId, { from, to });
     const leaves = accounts.filter((a) => !a.isGroup);
 
+    // The two stock accounts belong to the trading account, not to the list of
+    // expenses: opening stock is a cost of the goods sold and closing stock is
+    // a deduction from that cost. They are read out here so the statement can
+    // print them as their own block rather than as two odd expense lines.
+    const stockCodes: string[] = [
+      STOCK_CODE.openingTrading,
+      STOCK_CODE.closingTrading,
+    ];
+    const stockLine = (code: string) =>
+      leaves.find((a) => a.code === code && !a.isGroup);
+
     const build = (type: "income" | "expense") =>
       leaves
-        .filter((a) => a.type === type)
+        .filter((a) => a.type === type && !stockCodes.includes(a.code))
         .map((a) => ({
           _id: a._id,
           code: a.code,
@@ -309,7 +330,47 @@ export const profitAndLoss = query({
     const income = build("income");
     const expense = build("expense");
     const totalIncome = round(income.reduce((s, l) => s + l.amount, 0));
-    const totalExpense = round(expense.reduce((s, l) => s + l.amount, 0));
+
+    /**
+     * The trading account read off the ledger: opening stock as a cost,
+     * purchases beside it, closing stock taken off, and what is left is the
+     * cost of the goods actually sold. Gross profit is sales less that cost.
+     */
+    const opening = stockLine(STOCK_CODE.openingTrading);
+    const closing = stockLine(STOCK_CODE.closingTrading);
+    const openingStock = round((opening?.debit ?? 0) - (opening?.credit ?? 0));
+    const closingStock = round((closing?.credit ?? 0) - (closing?.debit ?? 0));
+    const purchases = round(
+      expense
+        .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
+        .reduce((s, l) => s + l.amount, 0),
+    );
+    const cogs = round(openingStock + purchases - closingStock);
+    /**
+     * Sales, kept apart from the rest of the income so the trading account can
+     * strike a gross profit off sales alone — rent rebates and interest are
+     * not trading income, and a gross profit that quietly counted them would
+     * flatter the margin.
+     */
+    const salesRows = income.filter(
+      (l) => l.code === "4100" || /sale/i.test(l.name),
+    );
+    // a chart with no sales account of its own keeps all income on the
+    // trading line, rather than showing a gross profit struck off no sales at
+    // all
+    const sales =
+      salesRows.length > 0
+        ? round(salesRows.reduce((s, l) => s + l.amount, 0))
+        : totalIncome;
+    const otherIncome = round(totalIncome - sales);
+    const grossProfit = round(sales - cogs);
+
+    // the stock accounts are out of `expense`, so they are added back here —
+    // otherwise the profit would not be the one the trading account just
+    // worked out
+    const totalExpense = round(
+      expense.reduce((s, l) => s + l.amount, 0) + openingStock - closingStock,
+    );
     const profit = round(totalIncome - totalExpense);
     return {
       from,
@@ -320,7 +381,20 @@ export const profitAndLoss = query({
       totalExpense,
       profit,
       margin: totalIncome === 0 ? 0 : round((profit / totalIncome) * 100),
-      empty: income.length === 0 && expense.length === 0,
+      trading: {
+        openingStock,
+        purchases,
+        closingStock,
+        cogs,
+        sales,
+        otherIncome,
+        grossProfit,
+      },
+      empty:
+        income.length === 0 &&
+        expense.length === 0 &&
+        openingStock === 0 &&
+        closingStock === 0,
     };
   },
 });
@@ -1561,118 +1635,9 @@ export const accountingValuation = query({
   }> => {
     const userId = await scopeUserId(ctx);
     if (userId === null) return { opening: 0, closing: 0 };
-
-    const round = (n: number) => Math.round(n * 1e2) / 1e2;
-
-    const materials = await ctx.db
-      .query("rawMaterials")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    const products = await ctx.db
-      .query("finishedGoods")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-
-    const billLines = await ctx.db
-      .query("purchaseLines")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    const averages = new Map<
-      Id<"rawMaterials">,
-      { value: number; qty: number; last: number }
-    >();
-    for (const line of billLines) {
-      const a = averages.get(line.materialId) ?? {
-        value: 0,
-        qty: 0,
-        last: 0,
-      };
-      a.value += line.qty * line.unitCost;
-      a.qty += line.qty;
-      a.last = line.unitCost;
-      averages.set(line.materialId, a);
-    }
-    const weighted = (id: Id<"rawMaterials">, fallback: number) => {
-      const a = averages.get(id);
-      return a !== undefined && a.qty > 0 ? round(a.value / a.qty) : fallback;
-    };
-
-    const items = await ctx.db
-      .query("costingItems")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    const materialById0 = new Map(materials.map((m) => [m._id, m]));
-    const sheetCost = new Map<Id<"finishedGoods">, number>();
-    for (const item of items) {
-      if (item.fgId === undefined) continue;
-      const unit =
-        item.materialId !== undefined
-          ? weighted(
-              item.materialId,
-              materialById0.get(item.materialId)?.pricePerUnit ?? 0,
-            )
-          : item.unitPrice;
-      sheetCost.set(
-        item.fgId,
-        (sheetCost.get(item.fgId) ?? 0) + item.qty * unit,
-      );
-    }
-
-    const materialRate = new Map<
-      Id<"rawMaterials">,
-      number
-    >();
-    for (const m of materials) {
-      materialRate.set(m._id, weighted(m._id, round(m.pricePerUnit)));
-    }
-    const productRate = new Map<Id<"finishedGoods">, number>();
-    for (const p of products) {
-      productRate.set(p._id, round(sheetCost.get(p._id) ?? 0));
-    }
-
-    const stockMovements = await ctx.db
-      .query("stockMovements")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-    const productMovements = await ctx.db
-      .query("productMovements")
-      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
-      .collect();
-
-    const materialById = new Map(materials.map((m) => [m._id, m]));
-    const productById = new Map(products.map((p) => [p._id, p]));
-
-    /** Stock on hand at a moment, valued at current rates. */
-    const valueAt = (at: number) => {
-      const mm = new Map<Id<"rawMaterials">, number>();
-      for (const m of materials) {
-        let qty = m.stock ?? 0;
-        for (const mv of stockMovements) {
-          if (mv.materialId !== m._id) continue;
-          if (mv.at >= at) continue;
-          qty += mv.direction === "in" ? mv.qty : -mv.qty;
-        }
-        mm.set(m._id, round((qty ?? 0) * (materialRate.get(m._id) ?? 0)));
-      }
-      const pp = new Map<Id<"finishedGoods">, number>();
-      for (const p of products) {
-        let qty = p.stock ?? 0;
-        for (const mv of productMovements) {
-          if (mv.productId !== p._id) continue;
-          if (mv.at >= at) continue;
-          qty += mv.direction === "in" ? mv.qty : -mv.qty;
-        }
-        pp.set(p._id, round((qty ?? 0) * (productRate.get(p._id) ?? 0)));
-      }
-      let total = 0;
-      for (const v of mm.values()) total += v;
-      for (const v of pp.values()) total += v;
-      return round(total);
-    };
-
-    const opening = valueAt(from);
-    const closing = valueAt(to + 1);
-    return { opening, closing };
+    // the same reading the stock posting uses, so the statement and the
+    // ledger cannot disagree about what was on hand
+    return stockValuation(ctx, userId, from, to);
   },
 });
 

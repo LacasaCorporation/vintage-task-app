@@ -1,7 +1,9 @@
 import { api } from "@/convex/_generated/api";
-import { Warehouse, Scale } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, Warehouse, Scale, Upload } from "lucide-react";
 import { useState } from "react";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
+import { toast } from "@/lib/toast";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
 import PageTabs from "@/components/PageTabs";
@@ -134,14 +136,82 @@ export default function TradingAccount({ range }: { range: Range }) {
   const movementInValue = stock?.movementInValue ?? 0;
   const movementOutValue = stock?.movementOutValue ?? 0;
 
+  const postStock = useMutation(api.accounting.postStockAdjustment);
+  const [posting, setPosting] = useState(false);
+
+  /** What the ledger is carrying for this period, if anything. */
+  const ledgerOpening = plData?.trading?.openingStock ?? 0;
+  const ledgerClosing = plData?.trading?.closingStock ?? 0;
+  const inLedger = ledgerOpening !== 0 || ledgerClosing !== 0;
+  const ledgerBehind =
+    inLedger &&
+    (Math.abs(ledgerOpening - opening) > 0.01 ||
+      Math.abs(ledgerClosing - closing) > 0.01);
+
+  /**
+   * Put the two figures in the books.
+   *
+   * The statements read the ledger, so until this is posted the stock lives
+   * only on this screen: the balance sheet shows no stock on hand and the
+   * profit and loss cannot work out a cost of goods sold. Posting again is
+   * safe — it replaces the last adjustment rather than adding another.
+   */
+  const postToLedger = async () => {
+    setPosting(true);
+    try {
+      const res = await postStock({
+        from: range.from,
+        to: range.to,
+        label: range.label,
+      });
+      toast.success(
+        res.posted
+          ? `Posted opening stock ${money(res.opening)} and closing stock ${money(res.closing)} to the ledger.`
+          : "There is no stock on hand in this period to post.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not post the stock.",
+      );
+    } finally {
+      setPosting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <SubTabs
-        tabs={TRADING_TABS}
-        value={tab}
-        onChange={(v) => setTab(v as typeof tab)}
-        label="Costing reports"
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SubTabs
+          tabs={TRADING_TABS}
+          value={tab}
+          onChange={(v) => setTab(v as typeof tab)}
+          label="Costing reports"
+        />
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">
+            {ledgerBehind
+              ? "The ledger holds different figures"
+              : inLedger
+                ? "Opening and closing stock are in the ledger"
+                : "Not in the ledger yet"}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 gap-1.5 rounded-lg text-xs"
+            disabled={posting}
+            onClick={() => void postToLedger()}
+          >
+            {posting ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Upload className="size-3" />
+            )}
+            Post stock to ledger
+          </Button>
+        </div>
+      </div>
 
       {tab === "trading" && (
         <TradingAccountView

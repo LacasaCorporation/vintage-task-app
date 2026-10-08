@@ -693,6 +693,22 @@ function ProfitAndLoss({ range }: { range: Range }) {
   const totalIncome = data?.totalIncome ?? 0;
   const totalExpense = data?.totalExpense ?? 0;
   const profit = data?.profit ?? 0;
+  const trading = data?.trading ?? {
+    openingStock: 0,
+    purchases: 0,
+    closingStock: 0,
+    cogs: 0,
+    sales: 0,
+    otherIncome: 0,
+    grossProfit: 0,
+  };
+  /**
+   * The ledger's expenses carry the stock lines inside them; the columns below
+   * are the accounts on their own, so the stock effect is lifted out here and
+   * shown in the trading account instead of hiding in the expense total.
+   */
+  const stockEffect = trading.openingStock - trading.closingStock;
+  const otherExpenses = totalExpense - stockEffect;
 
   const column = (
     title: string,
@@ -738,9 +754,13 @@ function ProfitAndLoss({ range }: { range: Range }) {
         />
         <Tile
           label="Expenses"
-          value={money(totalExpense)}
+          value={money(otherExpenses)}
           tone={LOSS}
-          hint={range.label}
+          hint={
+            stockEffect === 0
+              ? range.label
+              : `${range.label} · after cost of goods sold`
+          }
         />
         <Tile
           label="Profit"
@@ -766,20 +786,84 @@ function ProfitAndLoss({ range }: { range: Range }) {
         </Proof>
       )}
 
+      {trading.openingStock === 0 && trading.closingStock === 0 && (
+        <Proof ok={false}>
+          No opening or closing stock has been posted for this period. Post it
+          from the Trading account, and these two lines will carry what the
+          shelves are actually worth.
+        </Proof>
+      )}
+
+      <Panel
+        title="Trading account"
+        count={`${range.label} · opening stock + purchases − closing stock = cost of goods sold`}
+      >
+        <div className="space-y-2 p-4 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Opening stock</span>
+            <span className="tabular-nums">{money(trading.openingStock)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Add: purchases</span>
+            <span className="tabular-nums">{money(trading.purchases)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Less: closing stock</span>
+            <span className="tabular-nums text-violet-600 dark:text-violet-400">
+              −{money(trading.closingStock)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between border-t border-border/60 pt-2 font-semibold">
+            <span>Cost of goods sold</span>
+            <span className="tabular-nums">{money(trading.cogs)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Sales</span>
+            <span className="tabular-nums">{money(trading.sales)}</span>
+          </div>
+          <div className="flex items-center justify-between border-t border-border/60 pt-2 font-semibold">
+            <span>Gross profit</span>
+            <span
+              className={cn(
+                "tabular-nums",
+                trading.grossProfit < 0 ? LOSS : GAIN,
+              )}
+            >
+              {money(trading.grossProfit)}
+            </span>
+          </div>
+        </div>
+      </Panel>
+
       <div className="grid gap-4 xl:grid-cols-2">
         {column("Income", income, totalIncome, GAIN)}
-        {column("Expenses", expense, totalExpense, LOSS)}
+        {column("Expenses", expense, otherExpenses, LOSS)}
       </div>
 
       <Panel title="Result">
         <div className="space-y-2 p-4 text-sm">
           <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Income</span>
-            <span className="tabular-nums">{money(totalIncome)}</span>
+            <span className="text-muted-foreground">
+              Gross profit on sales
+            </span>
+            <span
+              className={cn(
+                "tabular-nums",
+                trading.grossProfit < 0 ? LOSS : GAIN,
+              )}
+            >
+              {money(trading.grossProfit)}
+            </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Less expenses</span>
-            <span className={cn("tabular-nums", LOSS)}>−{money(totalExpense)}</span>
+            <span className="text-muted-foreground">Add: other income</span>
+            <span className="tabular-nums">{money(trading.otherIncome)}</span>
+          </div>
+          <div className="flex items-center justify-between border-t border-border/60 pt-2">
+            <span className="text-muted-foreground">Less other expenses</span>
+            <span className={cn("tabular-nums", LOSS)}>
+              −{money(otherExpenses)}
+            </span>
           </div>
           <div className="flex items-center justify-between border-t border-border/60 pt-2 text-base font-semibold">
             <span>

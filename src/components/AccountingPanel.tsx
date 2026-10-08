@@ -1148,6 +1148,13 @@ function ProfitAndLossPanel({
     findByCode("1300") ?? findByName("Raw material inventory");
   const fgStockAcc =
     findByCode("1400") ?? findByName("Finished goods inventory");
+  // The two stock posting accounts: opening stock sits in the trading account
+  // account and closing stock in the one credited to it. The plain inventory
+  // accounts above are the fallback for a chart that predates them.
+  const openingTradingAcc =
+    findByCode("5150") ?? findByName("Opening stock (trading)");
+  const closingTradingAcc =
+    findByCode("5155") ?? findByName("Closing stock (trading)");
 
   // All expense accounts (type === "expense") that are NOT purchases/COGS
   // — split into operating and "other" buckets by code.
@@ -1157,7 +1164,11 @@ function ProfitAndLossPanel({
         !a.isGroup &&
         a.type === "expense" &&
         a._id !== purchasesAcc?._id &&
-        a._id !== cogsAcc?._id,
+        a._id !== cogsAcc?._id &&
+        // opening and closing stock are the trading account, not expenses that
+        // happen to be negative — they are shown as their own two lines below
+        a._id !== openingTradingAcc?._id &&
+        a._id !== closingTradingAcc?._id,
     );
     const operating: typeof list = [];
     const other: typeof list = [];
@@ -1167,7 +1178,7 @@ function ProfitAndLossPanel({
       else other.push(a);
     }
     return { operating, other };
-  }, [accounts, purchasesAcc, cogsAcc]);
+  }, [accounts, purchasesAcc, cogsAcc, openingTradingAcc, closingTradingAcc]);
 
   // ── raw movement values ───────────────────────────────────────
   const sales = salesAcc ? rangeMovement(salesAcc._id) : 0;
@@ -1181,8 +1192,24 @@ function ProfitAndLossPanel({
   const openingFg = fgStockAcc ? balanceAt(fgStockAcc._id, fromMs - 1) : 0;
   const closingRaw = rawStockAcc ? balanceAt(rawStockAcc._id, toMs) : 0;
   const closingFg = fgStockAcc ? balanceAt(fgStockAcc._id, toMs) : 0;
-  const openingStock = round(Math.max(0, openingRaw) + Math.max(0, openingFg));
-  const closingStock = round(Math.max(0, closingRaw) + Math.max(0, closingFg));
+  // What the stock posting put in the ledger wins; a chart without one falls
+  // back to reading the inventory accounts at the two dates.
+  const postedOpening = openingTradingAcc
+    ? rangeMovement(openingTradingAcc._id)
+    : 0;
+  const postedClosing = closingTradingAcc
+    ? -rangeMovement(closingTradingAcc._id)
+    : 0;
+  const openingStock = round(
+    postedOpening !== 0
+      ? postedOpening
+      : Math.max(0, openingRaw) + Math.max(0, openingFg),
+  );
+  const closingStock = round(
+    postedClosing !== 0
+      ? postedClosing
+      : Math.max(0, closingRaw) + Math.max(0, closingFg),
+  );
 
   // Operating expenses + other expenses from the chart (range movement)
   const operatingExpLines = expenseRows.operating

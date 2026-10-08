@@ -43,6 +43,26 @@ const FALLBACK_CODE = {
   tax: ["2300"],
 } as const;
 
+/**
+ * The two pairs of stock accounts.
+ *
+ * Each figure is posted twice: once as stock on hand (an asset) and once in
+ * the trading account (opening stock as a cost, closing stock as a deduction),
+ * so opening and closing stock are four accounts rather than two. The codes
+ * live here so the seeder, the posting that fills them and the statements that
+ * read them can never resolve a different account.
+ */
+export const STOCK_CODE = {
+  /** Stock brought forward, held as an asset. */
+  openingAsset: "1310",
+  /** Stock on hand at the period end, held as an asset. */
+  closingAsset: "1320",
+  /** Opening stock carried into the trading account — a cost. */
+  openingTrading: "5150",
+  /** Closing stock credited to the trading account — a deduction from cost. */
+  closingTrading: "5155",
+} as const;
+
 /** The accounts a posting treats as money in or out of the till / bank. */
 export async function moneyAccountIds(ctx: Ctx, ownerId: Id<"users">) {
   const { cash, bank } = await resolveDefaults(ctx, ownerId);
