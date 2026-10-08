@@ -15,6 +15,12 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
  * A plain module rather than a query, so the reports and the stock-adjustment
  * posting share one calculation: the statement and the ledger can then never
  * disagree about how much stock was on hand.
+ *
+ * A correction (`adjustment`) is deliberately not dated stock: it re-states the
+ * figure the books were holding rather than describing goods arriving or
+ * leaving. Counting it as a movement would turn "I fixed my opening count" into
+ * a cost of goods sold with no bill behind it, so it stays in the baseline —
+ * the same way the stock report reads its opening figure.
  */
 export async function stockValuation(
   ctx: QueryCtx | MutationCtx,
@@ -93,15 +99,24 @@ export async function stockValuation(
     .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
     .collect();
 
-  /** Stock on hand at a moment, valued at current rates. */
+  /**
+   * Stock on hand at a moment, valued at current rates.
+   *
+   * `material.stock` is the balance as it stands now and every movement has
+   * already been applied to it, so what was on hand at a moment is today's
+   * balance with the changes made since that moment backed out — not with the
+   * changes made before it added on. Corrections are skipped, so a hand-count
+   * moves the baseline and nothing else.
+   */
   const valueAt = (at: number) => {
     const mm = new Map<Id<"rawMaterials">, number>();
     for (const m of materials) {
       let qty = m.stock ?? 0;
       for (const mv of stockMovements) {
         if (mv.materialId !== m._id) continue;
-        if (mv.at >= at) continue;
-        qty += mv.direction === "in" ? mv.qty : -mv.qty;
+        if (mv.source === "adjustment") continue;
+        if (mv.at < at) continue;
+        qty -= mv.direction === "in" ? mv.qty : -mv.qty;
       }
       mm.set(m._id, round((qty ?? 0) * (materialRate.get(m._id) ?? 0)));
     }
@@ -110,8 +125,9 @@ export async function stockValuation(
       let qty = p.stock ?? 0;
       for (const mv of productMovements) {
         if (mv.productId !== p._id) continue;
-        if (mv.at >= at) continue;
-        qty += mv.direction === "in" ? mv.qty : -mv.qty;
+        if (mv.source === "adjustment") continue;
+        if (mv.at < at) continue;
+        qty -= mv.direction === "in" ? mv.qty : -mv.qty;
       }
       pp.set(p._id, round((qty ?? 0) * (productRate.get(p._id) ?? 0)));
     }

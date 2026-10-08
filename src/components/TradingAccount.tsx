@@ -290,6 +290,14 @@ function TradingAccountView({
 }) {
   const goodsAvailable = opening + purchases;
   const profitable = grossProfit >= 0;
+  /**
+   * Nothing came in or went out of the shelves this period. The two figures
+   * are the same, so the trading account has no cost to strike — saying so is
+   * clearer than printing a COGS that is simply zero and leaving the reader to
+   * wonder which purchase put it there.
+   */
+  const untouched =
+    purchases === 0 && Math.abs(opening - closing) < 0.01;
 
   return (
     <div className="space-y-4">
@@ -425,8 +433,16 @@ function TradingAccountView({
         </table>
       </Panel>
 
-      <Proof ok={!plDataEmpty}>
-        {plDataEmpty ? (
+      <Proof ok={!plDataEmpty || untouched}>
+        {untouched ? (
+          <>
+            No purchase bill, sale or issue was recorded between{" "}
+            {dayLabel(range.from)} and {dayLabel(range.to)}, so stock on hand is
+            unchanged at {money(closing)} and there is nothing to carry into cost
+            of goods sold. Correcting an opening count moves the opening figure
+            itself — it is not a purchase.
+          </>
+        ) : plDataEmpty ? (
           <>
             Nothing was posted between{" "}
             {dayLabel(range.from)} and {dayLabel(range.to)}. Widen the period, or
