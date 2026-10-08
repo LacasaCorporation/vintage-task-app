@@ -1,12 +1,12 @@
 import { api } from "@/convex/_generated/api";
 import { Warehouse, Scale } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "convex/react";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
 import PageTabs from "@/components/PageTabs";
 import type { PageTab } from "@/components/PageTabs";
-import type { Range } from "./ReportsPanel";
+import type { Range, PlLine } from "./ReportsPanel";
 import {
   Tile,
   Panel,
@@ -25,7 +25,6 @@ import {
   LOSS,
   dayLabel,
 } from "./ReportsPanel";
-import type { PlLine } from "./ReportsPanel";
 
 const TRADING_TABS: readonly PageTab<"trading" | "pl" | "movements">[] = [
   { id: "trading", label: "Trading account", icon: Warehouse },
@@ -131,7 +130,6 @@ export default function TradingAccount({ range }: { range: Range }) {
   const materialRows = stock?.materials ?? [];
   const productRows = stock?.products ?? [];
 
-  
 
   const movements = stock?.movement ?? [];
   const movementInValue = stock?.movementInValue ?? 0;
@@ -169,7 +167,7 @@ export default function TradingAccount({ range }: { range: Range }) {
           totalIncome={totalIncome}
           totalExpense={totalExpense}
           profit={netProfit}
-          margin={(plData?.margin ?? 0)}
+          margin={plData?.margin ?? 0}
           incomeRows={incomeRows}
           expenseRows={expenseRows}
           plDataEmpty={plData?.empty ?? true}
@@ -395,6 +393,8 @@ function ProfitAndLossView({
   expenseRows: PlLine[];
   plDataEmpty: boolean;
 }) {
+  const profitable = profit >= 0;
+
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
