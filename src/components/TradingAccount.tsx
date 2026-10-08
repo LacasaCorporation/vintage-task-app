@@ -12,7 +12,6 @@ import {
   Panel,
   Proof,
   Empty,
-  TableWrap,
   SubTabs,
   HEAD,
   CELL,
@@ -255,7 +254,8 @@ function TradingAccountView({
         title="Trading account"
         count={`${range.label} · opening stock + purchases − closing stock = COGS`}
       >
-        <div className="divide-y divide-border/60">
+        <table className="w-full text-sm">
+          <tbody className="divide-y divide-border/60">
           {/* Opening stock */}
           <tr className={ROW}>
             <td className={CELL_LEFT}>
@@ -351,7 +351,8 @@ function TradingAccountView({
               </span>
             </td>
           </tr>
-        </div>
+          </tbody>
+        </table>
       </Panel>
 
       <Proof ok={!plDataEmpty}>
@@ -425,7 +426,8 @@ function ProfitAndLossView({
       </div>
 
       <Panel title="Profit & Loss" count="Gross profit + other income − expenses">
-        <div className="divide-y divide-border/60">
+        <table className="w-full text-sm">
+          <tbody className="divide-y divide-border/60">
           <tr className={ROW}>
             <td className={CELL_LEFT}>
               <span className="font-medium">Gross Profit brought down</span>
@@ -490,7 +492,8 @@ function ProfitAndLossView({
               {money(profit)}
             </td>
           </tr>
-        </div>
+          </tbody>
+        </table>
       </Panel>
 
       <div
@@ -682,7 +685,7 @@ function InventoryMovementsView({
             No inventory movements recorded in this period.
           </Empty>
         ) : movements.length > 0 ? (
-          <TableWrap>
+          <div className="border-t border-border/60 p-4">
             <div className="space-y-3">
               <div className={cn(CELL_LEFT, "text-[11px] font-semibold tracking-widest text-muted-foreground uppercase")}>
                 Movements during the period
@@ -745,7 +748,7 @@ function InventoryMovementsView({
                 </table>
               </div>
             </div>
-          </TableWrap>
+          </div>
         ) : (
           <Empty>
             No inventory movements recorded in this period.

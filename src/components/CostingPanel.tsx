@@ -30,18 +30,25 @@ import ConnectJobDialog from "@/components/ConnectJobDialog";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { blendedRate, cleanRate, priceTaxedLines } from "@/lib/line-tax";
 
-/** Every working area is its own chunk. */ const MaterialsSheet = lazy(() => import("@/components/MaterialsSheet"));
+/**
+ * Every working area is its own chunk.
+ *
+ * Sales, purchasing, projects, the materials sheet, reports and accounting
+ * were all in one file's graph, so opening the costing tab downloaded the lot
+ * even when only the products list was wanted. Each one now arrives when its
+ * sidebar row is opened, and the sheet beside it stays put while it does.
+ */
+const MaterialsSheet = lazy(() => import("@/components/MaterialsSheet"));
 const ProjectsSheet = lazy(() => import("@/components/ProjectsSheet"));
 const PurchasePanel = lazy(() => import("@/components/PurchasePanel"));
 const SalesPanel = lazy(() => import("@/components/SalesPanel"));
@@ -51,237 +58,1818 @@ const ProductForm = lazy(() => import("@/components/ProductForm"));
 const ActivePanel = lazy(() => import("@/components/ActivePanel"));
 
 /** A quiet placeholder for the moment a working area is being fetched. */
-function SectionLoading({ label }: { label: string }) {
+function AreaLoading({ label }: { label: string }) {
   return (
-    <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      Loading {label}…
+    <p className="py-16 text-center text-sm text-muted-foreground">
+      Opening {label}…
+    </p>
+  );
+}
+
+type FgDoc = Doc<"finishedGoods">;
+type MaterialDoc = Doc<"rawMaterials">;
+
+/**
+ * A cell of the costing line table. Tighter than {@link cellCls}, because a
+ * recipe with thirty lines should fit on one screen without shrinking.
+ */
+const lineCls =
+  "h-7 w-full rounded-md bg-transparent px-1.5 text-[11px] outline-none transition-colors focus:bg-primary/5 focus:ring-2 focus:ring-primary/30";
+
+/**
+ * One cell of the totals strip: a small label, the figure, and a footnote that
+ * says where the figure came from. The strip is the bottom of the page, so it
+ * reads as a single line of arithmetic — sub total, tax, cost, margin, price.
+ */
+function Stat({
+  label,
+  value,
+  hint,
+  strong,
+  accent,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  strong?: boolean;
+  accent?: boolean;
+}) {
+  return (
+    <div className="min-w-0 bg-card px-3 py-1.5">
+      <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "truncate text-sm leading-tight tabular-nums",
+          accent
+            ? "font-bold text-primary"
+            : strong
+              ? "font-semibold text-foreground"
+              : "font-medium text-foreground/80",
+        )}
+      >
+        {value}
+      </div>
+      {hint !== undefined && (
+        <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
 
-/** A costing line that is not a raw material. Labour and overhead are kept apart because a recipe quotes them separately from the goods that come out of stock — and because labour is very often tax-exempt while freight is not. */
-type CostLineKind = "labour" | "expense" | "custom";
-
-const COST_KINDS: {
-  kind: CostLineKind;
+/**
+ * The “production is running — continue?” prompt.
+ *
+ * It is rendered inside the costing sheet whenever the sheet is open, because
+ * a banner at the top of the page sits behind the sheet's modal: the edit
+ * would go through with no prompt ever seen, or look like it silently did
+ * nothing.
+ */
+function ProductionWarning({
+  label,
+  onContinue,
+  onCancel,
+}: {
   label: string;
-  hint: string;
-  /** Tailwind classes for the badge in the grid. */
-  badge: string;
-}[] = [
-  {
-    kind: "labour",
-    label: "Labour",
-    hint: "Wages, piecework, overtime — time put into making this",
-    badge: "bg-sky-500/10 text-sky-700 dark:text-sky-400",
-  },
-  {
-    kind: "expense",
-    label: "Expense",
-    hint: "Freight, consumables, power — a cost, not inventory",
-    badge: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  },
-  {
-    kind: "custom",
-    label: "Custom",
-    hint: "Whatever does not fit the two above",
-    badge: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
-  },
-];
+  onContinue: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+      <AlertTriangle className="size-4 shrink-0" />
+      <span className="min-w-0 flex-1">
+        <strong>Production is running</strong> — {label} will change the
+        materials this production uses. Stock is adjusted by the difference
+        right away, and stopping production returns whatever is left. Continue?
+      </span>
+      <Button
+        type="button"
+        size="sm"
+        className="h-8 rounded-lg bg-amber-600 px-3 text-xs text-white hover:bg-amber-700"
+        onClick={onContinue}
+      >
+        Continue
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-8 rounded-lg px-3 text-xs"
+        onClick={onCancel}
+      >
+        Cancel
+      </Button>
+    </div>
+  );
+}
 
-/** A costing sheet line on a finished good, as stored in this view only. */
-type ViewLine = {
-  id: string;
-  kind: CostLineKind | "material" | "overhead";
-  key: string;
-  code: string;
-  name: string;
-  rate: number;
-  qty: number;
-  taxRate: number;
-  taxMode: "exclusive" | "inclusive" | "none";
-  note: string;
-  pos: number;
-};
-
-/** A costing line that is not a raw material. Labour and overhead are kept apart because a recipe quotes them separately from the goods that come out of stock — and because labour is very often tax-exempt while freight is not. */
-export default function CostingPanel(props: {
-  materials?: Doc<"rawMaterials">[];
-  finishedGoods?: Doc<"finishedGoods">[];
-  loading?: boolean;
-  view?: CostingView;
-  onSelectView?: (view: CostingView | null) => void;
-  onNewProject?: (() => void) | undefined;
-  onEditProject?: (doc: Doc<"projects">) => void;
-  onDeleteProject?: (doc: Doc<"projects">) => void;
+/** Main costing area: raw-materials sheet, product form/list, or FG costing grid. */
+export default function CostingPanel({
+  materials,
+  finishedGoods,
+  loading,
+  view,
+  onSelectView,
+  onNewProduct,
+  onNewProject,
+  onEditProject,
+  onDeleteProject,
+  canCreate = true,
+  canEdit = true,
+  canDelete = true,
+  canViewMaterials = true,
+  canViewPurchase = true,
+  canViewSales = true,
+  canViewAccounting = true,
+  canCreatePurchase = true,
+  canEditPurchase = true,
+  canDeletePurchase = true,
+  canCreateMaterial = true,
+  canEditMaterial = true,
+  canDeleteMaterial = true,
+  canPrint = true,
+  canImportExport = true,
+  canImport = true,
+  canEditProject = true,
+  canDeleteProject = true,
+  /**
+   * "dialog" opens the costing sheet over whatever list is on screen, which is
+   * how it has always worked. "page" renders the same sheet on a page of its
+   * own, so a recipe with many lines has room and the back button means
+   * something.
+   */
+  layout = "dialog",
+  returnTo,
+}: {
+  materials: MaterialDoc[];
+  finishedGoods: FgDoc[];
+  loading: boolean;
+  view: CostingView;
+  onSelectView: (view: CostingView) => void;
+  onNewProduct?: (projectName: string) => void;
+  onNewProject?: () => void;
+  onEditProject?: (project: Doc<"projects">) => void;
+  onDeleteProject?: (project: Doc<"projects">) => void;
   canCreate?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
   canViewMaterials?: boolean;
   canViewPurchase?: boolean;
-  canViewSales?: boolean;
-  canViewAccounting?: boolean;
   canCreatePurchase?: boolean;
   canEditPurchase?: boolean;
   canDeletePurchase?: boolean;
+  canViewSales?: boolean;
+  canViewAccounting?: boolean;
+  /** Raw material item permissions (separate from products). */
   canCreateMaterial?: boolean;
   canEditMaterial?: boolean;
   canDeleteMaterial?: boolean;
   canPrint?: boolean;
+  /** Excel menu visibility (dataImport.view). */
   canImportExport?: boolean;
+  /** Row importing (dataImport.create). */
   canImport?: boolean;
   canEditProject?: boolean;
   canDeleteProject?: boolean;
-  layout?: "page" | "sheet";
+  layout?: "dialog" | "page";
+  /** Where the back button returns to when the sheet is rendered as a page. */
   returnTo?: string;
 }) {
-  const {
-    materials,
-    finishedGoods,
-    loading,
-    view = { kind: "products" },
-    onSelectView,
-    onNewProject,
-    onEditProject,
-    onDeleteProject,
-    canCreate = true,
-    canEdit = true,
-    canDelete = true,
-    canViewMaterials = true,
-    canViewPurchase = true,
-    canViewSales = true,
-    canViewAccounting = true,
-    canCreatePurchase = false,
-    canEditPurchase = false,
-    canDeletePurchase = false,
-    canCreateMaterial = false,
-    canEditMaterial = false,
-    canDeleteMaterial = false,
-    canPrint = false,
-    canImportExport = false,
-    canImport = false,
-    canEditProject = false,
-    canDeleteProject = false,
-    layout = "sheet",
-    returnTo,
-  } = props;
+  const navigate = useNavigate();
+  const [projectFocus, setProjectFocus] = useState<string | null>(null);
+  /** The product whose costing sheet is open over the current view. */
+  const [sheetId, setSheetId] = useState<Id<"finishedGoods"> | null>(null);
+  const addFgItem = useMutation(api.costing.addFgItem);
+  const updateItem = useMutation(api.costing.updateItem);
+  const removeItem = useMutation(api.costing.removeItem);
+  const updateFg = useMutation(api.costing.updateFinishedGood);
+  const setFgImage = useMutation(api.costing.setFgImage);
+  const clearFgImageM = useMutation(api.costing.clearFgImage);
+  const mergeDuplicates = useMutation(api.costing.mergeFgDuplicateItems);
+  /**
+   * Putting this product into a job. A product stands on its own until it is
+   * given one, and the job's own totals count it from that moment — so the
+   * button lives on the sheet, next to Save, where the product is being worked
+   * on.
+   */
+  const attachToJobM = useMutation(api.costing.attachToJob);
+  const allJobs = useQuery(api.jobs.listJobs);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const mergedOnceFor = useRef<Id<"finishedGoods"> | null>(null);
+  const { confirm, promptMulti } = useAppDialogs();
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+  const handlePickImage = () => imageInputRef.current?.click();
+
+  const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !activeFg) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Choose an image file (photo, PNG, JPG…).");
+      return;
+    }
+    if (file.size > 900_000) {
+      toast.error("Images up to ~900 KB can be attached.");
+      return;
+    }
+    setUploadingImage(true);
+    try {
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      await setFgImage({ id: activeFg._id, data, name: file.name, size: file.size });
+      toast.success("Product image updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't attach the image.");
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleRemoveImage = async () => {
+    if (!activeFg?.imageUrl) return;
+    const ok = await confirm({
+      title: "Remove the product image?",
+      message: "The photo is detached from this product. It can be added again anytime.",
+      confirmLabel: "Remove image",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await clearFgImageM({ id: activeFg._id });
+      toast.success("Image removed.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't remove the image.");
+    }
+  };
+
+  // ── FG costing grid state ──────────────────────────────────────────
+  const [addingMaterialId, setAddingMaterialId] = useState("");
+  const [materialQty, setMaterialQty] = useState("1");
+  const [customLabel, setCustomLabel] = useState("");
+  const [customQty, setCustomQty] = useState("1");
+  const [customPrice, setCustomPrice] = useState("0");
+  /** Tax on the custom line being added. Defaults to the firm rate. */
+  const [customTax, setCustomTax] = useState("0");
+
+  // Draft state — edits stay local until "Save" is pressed.
+  const [drafts, setDrafts] = useState<
+    {
+      id: Id<"costingItems">;
+      label: string;
+      qty: number;
+      unitPrice: number;
+      /** Tax on this line alone — a recipe buys at mixed rates. */
+      taxPct: number;
+    }[]
+  >([]);
+  const [savingSheet, setSavingSheet] = useState(false);
+  /** A change waiting on the "production is running, continue?" warning. */
+  const [pendingEdit, setPendingEdit] = useState<{
+    label: string;
+    run: () => void | Promise<void>;
+  } | null>(null);
+
+  /**
+   * Editing a product whose production is running always warns first — the
+   * sheet is what decides which materials leave the stock.
+   */
+  const guardProduction = (label: string, run: () => void | Promise<void>) => {
+    if (activeFg?.productionStartedAt === undefined) return void run();
+    setPendingEdit({ label, run });
+  };
+
+  // The sheet has its own address now, at `/costing/:fgId`, so anything that
+  // used to pop it open over a list sends the user to that page instead. One
+  // redirect here covers every entry point in the app at once.
+  const sheetRoute = view?.kind === "fg" ? `/costing/${view.fgId}` : null;
+  useEffect(() => {
+    if (layout === "dialog" && sheetRoute !== null) navigate(sheetRoute);
+  }, [layout, sheetRoute, navigate]);
+
+  // the sheet opens either as its own page (view.kind === "fg") or as an
+  // overlay on top of whatever list the user was looking at
+  const activeFgId = view?.kind === "fg" ? view.fgId : sheetId;
+  const activeFg =
+    activeFgId === null
+      ? null
+      : (finishedGoods.find((f) => f._id === activeFgId) ?? null);
+  // the sheet renders as a modal over everything else, so anything it needs to
+  // show the user has to live inside that modal
+  const sheetOpen = (view?.kind === "fg" || sheetId !== null) && activeFg !== null;
+  const { format, format: money, code: currencyCode } = useWorkspaceCurrency();
+  const markupPct = activeFg?.markupPct ?? 0;
+
+  // keyed on whichever product the sheet is showing, not on the view kind —
+  // the sheet also opens as an overlay, where the view is still the list
+  const items = useQuery(
+    api.costing.listFgItems,
+    activeFgId === null ? "skip" : { fgId: activeFgId },
+  );
+  const rows = useMemo(() => items ?? [], [items]);
+
+  /** The jobs this product already sits in, so the button can say so. */
+  const jobNames = useMemo(() => {
+    const ids =
+      activeFg?.jobIds ??
+      (activeFg?.jobId !== undefined ? [activeFg.jobId] : []);
+    return ids
+      .map((id) => (allJobs ?? []).find((j) => j._id === id)?.name)
+      .filter((name): name is string => name !== undefined);
+  }, [activeFg, allJobs]);
+
+  /** Every job in the firm, as the connect dialog's options. */
+  const jobOptions = useMemo(
+    () =>
+      (allJobs ?? []).map((j) => ({ _id: j._id, name: j.name, code: j.code })),
+    [allJobs],
+  );
+
+  /** Searchable options for the "add a material" picker. */
+  const materialOptions = useMemo<PickerItem[]>(
+    () =>
+      materials.map((m) => ({
+        id: m._id,
+        label: m.name,
+        sub: [m.code, m.category].filter((v) => !!v && v !== "").join(" · ") || undefined,
+        hint: `${money(m.pricePerUnit)}/${m.unit}`,
+        keywords: `${(m.stock ?? 0).toLocaleString()} ${m.unit} in stock`,
+      })),
+    [materials, money],
+  );
+
+  // Collapse duplicate rows (same description/price/unit) once per sheet open.
+  useEffect(() => {
+    if (!activeFg || items === undefined || items.length < 2) return;
+    if (mergedOnceFor.current === activeFg._id) return;
+    const hasDupes = new Set(items.map((i) => `${i.label}::${i.unitPrice}::${i.unit ?? ""}`)).size
+      !== items.length;
+    if (!hasDupes) {
+      mergedOnceFor.current = activeFg._id;
+      return;
+    }
+    mergedOnceFor.current = activeFg._id;
+    void mergeDuplicates({ fgId: activeFg._id })
+      .then((removed) => {
+        if (removed > 0) toast.success(`Merged ${removed} duplicate row${removed === 1 ? "" : "s"}.`);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, activeFg?._id]);
+
+  // ── Draft (save-button) logic ─────────────────────────────────────
+  // Keep a local draft of every visible row; reset it when the sheet's
+  // server data changes shape (rows added/removed or another FG opened).
+  const [syncedItems, setSyncedItems] = useState(items);
+  if (items !== syncedItems) {
+    setSyncedItems(items);
+    setDrafts(
+      rows.map((r) => ({
+        id: r._id,
+        label: r.label,
+        qty: r.qty,
+        unitPrice: r.unitPrice,
+        taxPct: r.taxPct ?? 0,
+      })),
+    );
+  }
+
+  const isDirty = useMemo(() => {
+    if (drafts.length !== rows.length) return rows.length > 0;
+    return rows.some((r) => {
+      const d = drafts.find((x) => x.id === r._id);
+      return d
+        ? d.label !== r.label ||
+            d.qty !== r.qty ||
+            d.unitPrice !== r.unitPrice ||
+            d.taxPct !== (r.taxPct ?? 0)
+        : false;
+    });
+  }, [drafts, rows]);
+
+  const updateDraft = (
+    id: Id<"costingItems">,
+    patch: Partial<{ label: string; qty: number; unitPrice: number; taxPct: number }>,
+  ) => setDrafts((ds) => ds.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+
+  /** True when a draft line and its stored row differ on anything. */
+  const draftChanged = (r: (typeof rows)[number], d: (typeof drafts)[number] | undefined) =>
+    d !== undefined &&
+    (d.label !== r.label ||
+      d.qty !== r.qty ||
+      d.unitPrice !== r.unitPrice ||
+      d.taxPct !== (r.taxPct ?? 0));
+
+  /**
+   * The lines as the user is looking at them right now — stored rows with the
+   * unsaved draft folded over them. Everything below prices these, not the
+   * stored rows, so a figure on screen is always the figure that will save.
+   */
+  const pricedRows = useMemo(
+    () =>
+      rows.map((r) => {
+        const d = drafts.find((x) => x.id === r._id);
+        return {
+          qty: d?.qty ?? r.qty,
+          unitPrice: d?.unitPrice ?? r.unitPrice,
+          taxPct: d?.taxPct ?? r.taxPct ?? 0,
+        };
+      }),
+    [rows, drafts],
+  );
+
+  /**
+   * The sheet prices ONE product. The batch quantity is deliberately absent
+   * here — it is applied on the project line, where the product's cost is
+   * multiplied by how many are being made.
+   *
+   * Tax is charged per line, the same way a bill is, so a recipe where boards
+   * are 18% and glue is 12% totals honestly. Margin is taken on the true cost
+   * — what the recipe costs including the tax already paid on it — and the
+   * sales price is that cost plus the margin.
+   */
+  const totals = useMemo(() => {
+    const priced = priceTaxedLines(pricedRows, 0);
+    const cost = priced.grand;
+    const markup = cost * (markupPct / 100);
+    return {
+      subtotal: priced.subtotal,
+      tax: priced.tax,
+      cost,
+      markup,
+      grand: cost + markup,
+      blendedTax: blendedRate(priced.net, priced.tax),
+    };
+  }, [pricedRows, markupPct]);
+
+  /**
+   * What the sheet is trying to tell the user before they save it: a line
+   * priced at nothing, a material whose own tax rate was quietly dropped, a
+   * batch that eats more of a material than is in stock. Warnings block
+   * nothing — they are read, then acted on.
+   */
+  const warnings = useMemo(() => {
+    const out: { id: string; text: string; note?: boolean }[] = [];
+    pricedRows.forEach((line, i) => {
+      const row = rows[i];
+      if (row === undefined) return;
+      const material =
+        row.materialId !== undefined
+          ? materials.find((x) => x._id === row.materialId)
+          : undefined;
+      const rate = cleanRate(line.taxPct);
+      if (line.qty > 0 && line.unitPrice === 0) {
+        out.push({
+          id: `price-${row._id}`,
+          text: `“${row.label}” has no unit price`,
+        });
+      }
+      if (rate === 0) {
+        const materialTax = material?.purchaseTaxPct ?? 0;
+        if (materialTax > 0) {
+          out.push({
+            id: `tax-${row._id}`,
+            text: `“${row.label}” is at 0% but ${material?.name ?? "the material"} carries ${materialTax}%`,
+          });
+        } else if (material === undefined) {
+          out.push({
+            id: `taxc-${row._id}`,
+            text: `“${row.label}” has no tax rate — labour is often exempt`,
+            note: true,
+          });
+        }
+      }
+      if (material !== undefined && (material.stock ?? 0) < line.qty) {
+        out.push({
+          id: `stock-${row._id}`,
+          text: `Only ${(material.stock ?? 0).toLocaleString()} ${material.unit ?? ""} of ${row.label} on hand — this needs ${line.qty.toLocaleString()}`,
+        });
+      }
+    });
+    return out;
+  }, [pricedRows, rows, materials]);
+
+  /** The firm default rate, so a blank on a custom line is a choice, not a gap. */
+  const defaultTax = useQuery(api.purchases.postingDefaults);
+
+  const saveSheet = async () => {
+    if (!activeFg) return;
+    const run = async () => {
+      setSavingSheet(true);
+      try {
+        for (const r of rows) {
+          const d = drafts.find((x) => x.id === r._id);
+          if (!d) continue;
+          if (draftChanged(r, d)) {
+            await updateItem({
+              id: r._id,
+              label: d.label,
+              qty: d.qty,
+              unitPrice: d.unitPrice,
+              taxPct: d.taxPct,
+            });
+          }
+        }
+        toast.success("Sheet saved.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Couldn't save the sheet.");
+      } finally {
+        setSavingSheet(false);
+      }
+    };
+    guardProduction("Saving the sheet", run);
+  };
+
+  /**
+   * The one save for this sheet: the product's own record first, then any
+   * line edits still sitting in the draft.
+   */
+  const saveAll = async () => {
+    if (!activeFg || savingSheet) return;
+    setSavingSheet(true);
+    try {
+      await updateFg({
+        id: activeFg._id,
+        name: activeFg.name,
+        code: activeFg.code ?? "",
+        unit: activeFg.unit ?? "",
+        projectName: activeFg.projectName,
+        note: activeFg.note,
+      });
+      for (const r of rows) {
+        const d = drafts.find((x) => x.id === r._id);
+        if (!d) continue;
+        if (!draftChanged(r, d)) continue;
+        await updateItem({
+          id: r._id,
+          label: d.label,
+          qty: d.qty,
+          unitPrice: d.unitPrice,
+          taxPct: d.taxPct,
+        });
+      }
+      toast.success(`“${activeFg.name}” saved.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't save.");
+    } finally {
+      setSavingSheet(false);
+    }
+  };
+
+  // Ctrl/Cmd+S saves the sheet.
+  useEffect(() => {
+    if (!isDirty) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void saveSheet();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty, drafts]);
+
+  /** Per-row edit dialog (pencil icon). */
+  const handleEditRow = async (row: {
+    _id: Id<"costingItems">;
+    label: string;
+    qty: number;
+    unitPrice: number;
+    taxPct?: number;
+  }) => {
+    if (!activeFg) return;
+    const result = await promptMulti({
+      title: `Edit line — ${row.label}`,
+      message: "Change the description, quantity, unit price or tax.",
+      columns: 2,
+      confirmLabel: "Apply",
+      fields: [
+        { key: "label", label: "Description", initial: row.label, required: true },
+        { key: "qty", label: "Quantity", initial: String(row.qty), type: "number", required: true },
+        {
+          key: "price",
+          label: "Unit price",
+          initial: String(row.unitPrice),
+          type: "number",
+          required: true,
+        },
+        {
+          key: "tax",
+          label: "Tax %",
+          initial: String(row.taxPct ?? 0),
+          type: "number",
+          required: true,
+        },
+      ],
+    });
+    if (result === null) return;
+    const qty = Number(result.qty);
+    const price = Number(result.price);
+    const tax = Number(result.tax);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error("Quantity must be greater than zero.");
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error("Price can't be negative.");
+      return;
+    }
+    if (!Number.isFinite(tax) || tax < 0 || tax > 100) {
+      toast.error("Tax must be between 0 and 100.");
+      return;
+    }
+    try {
+      await updateItem({
+        id: row._id,
+        label: result.label,
+        qty,
+        unitPrice: price,
+        taxPct: tax,
+      });
+      toast.success("Line updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't update the line.");
+    }
+  };
+  const editRow = (
+    row: {
+      _id: Id<"costingItems">;
+      label: string;
+      qty: number;
+      unitPrice: number;
+      taxPct?: number;
+    },
+  ) => guardProduction("Editing a line", () => void handleEditRow(row));
+
+  const addMaterialRow = async () => {
+    if (!activeFg || !addingMaterialId) return;
+    const qty = Number(materialQty);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error("Enter a quantity greater than zero.");
+      return;
+    }
+    try {
+      await addFgItem({
+        fgId: activeFg._id,
+        materialId: addingMaterialId as MaterialDoc["_id"],
+        qty,
+      });
+      setAddingMaterialId("");
+      setMaterialQty("1");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
+    }
+  };
+  const addMaterialRowGuarded = () =>
+    guardProduction("Adding a material", () => void addMaterialRow());
+
+  const addCustomRow = async () => {
+    if (!activeFg) return;
+    const qty = Number(customQty);
+    const price = Number(customPrice);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error("Quantity must be greater than zero.");
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error("Price can't be negative.");
+      return;
+    }
+    try {
+      await addFgItem({
+        fgId: activeFg._id,
+        label: customLabel.trim() || "Custom line",
+        qty,
+        unitPrice: price,
+        taxPct: Number.isFinite(Number(customTax)) ? Number(customTax) : 0,
+      });
+      setCustomLabel("");
+      setCustomQty("1");
+      setCustomPrice("0");
+      setCustomTax("0");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
+    }
+  };
+
+  const exportCsv = () => {
+    if (!activeFg) return;
+    const lines = [
+      [
+        "Description",
+        "Qty",
+        "Unit",
+        `Unit price (${currencyCode})`,
+        "Tax %",
+        `Amount (${currencyCode})`,
+        `Tax (${currencyCode})`,
+        `Total (${currencyCode})`,
+      ].join(","),
+      ...pricedRows.map((l, i) => {
+        const r = rows[i];
+        const amount = l.qty * l.unitPrice;
+        const tax = amount * (cleanRate(l.taxPct) / 100);
+        return [
+          `"${(r?.label ?? "").replace(/"/g, '""')}"`,
+          String(l.qty),
+          r?.unit ?? "",
+          l.unitPrice.toFixed(2),
+          String(cleanRate(l.taxPct)),
+          amount.toFixed(2),
+          tax.toFixed(2),
+          (amount + tax).toFixed(2),
+        ].join(",");
+      }),
+      `"Sub total",,,,,,,"${totals.subtotal.toFixed(2)}",`,
+      `"Total tax",,,,,,,"${totals.tax.toFixed(2)}",`,
+      `"Total cost",,,,,,,"${totals.cost.toFixed(2)}",`,
+      `"Margin (${markupPct}%)",,,,,,,"${totals.markup.toFixed(2)}",`,
+      `"SALES PRICE",,,,,,,"${totals.grand.toFixed(2)}",`,
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${activeFg.name.replace(/[^\w-]+/g, "_")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** Open a print-ready costing sheet in a new window and show the print dialog.
+   *  withAmounts=false prints a production-floor sheet: quantities and units only,
+   *  no prices, amounts, margin or sales price. */
+  const printSheet = (withAmounts: boolean) => {
+    if (!activeFg) return;
+    const money = (v: number) => (withAmounts ? format(v) : "");
+    const today = new Date().toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+    const codeLine = [
+      activeFg.projectCode ? activeFg.projectCode : null,
+      activeFg.code ? activeFg.code : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const rowsHtml = pricedRows
+      .map((l, i) => {
+        const r = rows[i];
+        const amount = l.qty * l.unitPrice;
+        const tax = amount * (cleanRate(l.taxPct) / 100);
+        return `
+        <tr>
+          <td class="num">${i + 1}</td>
+          <td>${escapeHtml(r?.label ?? "")}</td>
+          <td class="num">${l.qty.toLocaleString()}</td>
+          <td class="muted">${escapeHtml(r?.unit ?? "—")}</td>
+          ${withAmounts ? `<td class="num">${format(l.unitPrice)}</td>
+          <td class="num">${cleanRate(l.taxPct)}%</td>
+          <td class="num">${format(amount)}</td>
+          <td class="num muted">${format(tax)}</td>
+          <td class="num strong">${format(amount + tax)}</td>` : ""}
+        </tr>`;
+      })
+      .join("");
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) {
+      toast.error("Allow pop-ups to print the sheet.");
+      return;
+    }
+    win.document.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${withAmounts ? "Costing sheet" : "Production sheet"} — ${escapeHtml(activeFg.name)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #18181b; margin: 40px; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; border-bottom: 2px solid #4f46e5; padding-bottom: 16px; margin-bottom: 8px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .meta { font-size: 12px; color: #52525b; line-height: 1.5; }
+    .brand { font-size: 11px; letter-spacing: 3px; color: #4f46e5; font-weight: 700; margin-bottom: 6px; }
+    .date { font-size: 12px; color: #52525b; text-align: right; }
+    img.photo { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #e4e4e7; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
+    th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: #71717a; border-bottom: 1.5px solid #d4d4d8; padding: 8px 10px; }
+    td { border-bottom: 1px solid #e4e4e7; padding: 9px 10px; }
+    td.num, th.num { text-align: right; }
+    td.strong { font-weight: 600; }
+    .muted { color: #71717a; }
+    .totals { margin-top: 16px; margin-left: auto; width: 46%; font-size: 13px; }
+    .totals td { border: none; padding: 6px 10px; }
+    .totals .lbl { text-align: right; color: #52525b; }
+    .totals .val { text-align: right; font-variant-numeric: tabular-nums; }
+    .totals tr.grand td { border-top: 1.5px solid #4f46e5; font-weight: 700; font-size: 15px; color: #4f46e5; padding-top: 10px; }
+    .note { margin-top: 8px; font-size: 12px; color: #71717a; }
+    @page { margin: 14mm; }
+    @media print { body { margin: 0; } }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <div>
+      <div class="brand">${withAmounts ? "COSTING SHEET" : "PRODUCTION SHEET"}</div>
+      <h1>${escapeHtml(activeFg.name)}</h1>
+      <div class="meta">
+        Project: ${escapeHtml(activeFg.projectName ?? "Standalone")}${codeLine ? ` &nbsp;·&nbsp; ${escapeHtml(codeLine)}` : ""}<br />
+        ${activeFg.unit ? `Sold per: ${escapeHtml(activeFg.unit)}${withAmounts ? ` &nbsp;·&nbsp; Margin: ${markupPct}%` : ""}` : ""}
+      </div>
+    </div>
+    <div style="text-align:right">
+      ${activeFg.imageUrl ? `<img class="photo" src="${activeFg.imageUrl}" alt="" />` : ""}
+      <div class="date">${today}</div>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr><th class="num">#</th><th>Description</th><th class="num">Qty</th><th>Unit</th>${withAmounts ? `<th class="num">Unit price</th><th class="num">Tax %</th><th class="num">Amount</th><th class="num">Tax</th><th class="num">Total</th>` : ""}</tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  ${withAmounts ? `
+  <table class="totals">
+    <tr><td class="lbl">Sub total</td><td class="val">${money(totals.subtotal)}</td></tr>
+    <tr><td class="lbl">Tax amount</td><td class="val">${money(totals.tax)}</td></tr>
+    <tr><td class="lbl">Total cost</td><td class="val">${money(totals.cost)}</td></tr>
+    <tr><td class="lbl">Margin (${markupPct}%)</td><td class="val">+${money(totals.markup)}</td></tr>
+    <tr class="grand"><td class="lbl">Sales price</td><td class="val">${money(totals.grand)}</td></tr>
+  </table>` : ""}
+  ${activeFg.note ? `<p class="note">${escapeHtml(activeFg.note)}</p>` : ""}
+  <script>window.onload = function () { window.print(); };</script>
+</body>
+</html>`);
+    win.document.close();
+  };
+
+  /** Minimal HTML escaping for interpolated values. */
+  function escapeHtml(value: string) {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /**
+   * The sheet's own actions — dirty marker, "put into a job", save.
+   *
+   * A dialog puts them in the product header; a page puts them in the sticky
+   * bar instead, so they stay in reach however long the recipe is. One value,
+   * two homes, so the two can never drift apart.
+   */
+  const sheetActions = (
+    <>
+      <span
+        className={cn(
+          "text-[11px] whitespace-nowrap transition-opacity",
+          isDirty ? "text-amber-600" : "text-muted-foreground/60 opacity-0",
+        )}
+      >
+        Unsaved changes
+      </span>
+      {canEdit && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setConnectOpen(true)}
+          title="Put this product into a job — the job's cost and sales value then include it"
+          className="h-7 shrink-0 gap-1.5 rounded-lg text-xs"
+        >
+          <Link2 className="size-3" />
+          Put into a job
+        </Button>
+      )}
+      {canEdit && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={savingSheet}
+          onClick={() => void saveAll()}
+          title="Save the product details and any sheet changes (Ctrl/Cmd+S)"
+          className={cn(
+            "h-7 shrink-0 gap-1.5 rounded-lg text-xs",
+            isDirty && "animate-pulse",
+          )}
+        >
+          {savingSheet ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Save className="size-3" />
+          )}
+          {savingSheet ? "Saving" : "Save"}
+        </Button>
+      )}
+    </>
+  );
+
+  /**
+   * Where the sheet is a page, closing it means going back to the products
+   * list; as a dialog it means dismissing the overlay.
+   */
+  const closeSheet = () => {
+    if (layout === "page") {
+      navigate(returnTo ?? "/dashboard?section=costing&view=products");
+      return;
+    }
+    setSheetId(null);
+    if (view?.kind === "fg") onSelectView(null);
+  };
+
+  /**
+   * The costing sheet itself — the header, the add-row bar, the line table and
+   * the totals.
+   *
+   * Kept as one value rather than written out twice, because it is rendered
+   * two ways: over the products list as a dialog, and on `/costing/:fgId` as
+   * a page with room for a long recipe. Both take the same body, so the two
+   * can never drift apart.
+   */
+  const sheetBody = activeFg ? (
+        <>
+          {pendingEdit !== null && (
+            <ProductionWarning
+              label={pendingEdit.label}
+              onContinue={() => {
+                const run = pendingEdit.run;
+                setPendingEdit(null);
+                void run();
+              }}
+              onCancel={() => setPendingEdit(null)}
+            />
+          )}
+          {/* product header */}
+          <div className="mt-1.5 flex flex-wrap items-center gap-2.5 rounded-xl border bg-card px-2.5 py-1.5 shadow-sm">
+            {/* product image: thumbnail or add button */}
+            {activeFg.imageUrl ? (
+              <div className="group/img relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setLightboxOpen(true)}
+                  title="Click to enlarge"
+                  className="block size-10 overflow-hidden rounded-lg border bg-muted"
+                >
+                  <img
+                    src={activeFg.imageUrl}
+                    alt={activeFg.imageAlt ?? activeFg.name}
+                    className="size-full object-cover"
+                  />
+                </button>
+                <span className="absolute -right-1.5 -top-1.5 hidden gap-0.5 group-hover/img:flex">
+                  <button
+                    type="button"
+                    aria-label="Replace image"
+                    title="Replace image"
+                    className="grid size-5 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-primary"
+                    onClick={handlePickImage}
+                  >
+                    <Pencil className="size-2.5" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Remove image"
+                    title="Remove image"
+                    className="grid size-5 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm hover:text-destructive"
+                    onClick={() => void handleRemoveImage()}
+                  >
+                    <Trash2 className="size-2.5" />
+                  </button>
+                </span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handlePickImage}
+                title="Add a product image"
+                className="grid size-10 shrink-0 place-items-center rounded-lg border border-dashed bg-muted/40 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+              >
+                {uploadingImage ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <ImagePlus className="size-4" />
+                )}
+              </button>
+            )}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageFile}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-display text-sm font-semibold">{activeFg.name}</p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {activeFg.projectName}
+                {activeFg.code ? ` · ${activeFg.code}` : ""}
+                {activeFg.unit ? ` · per ${activeFg.unit}` : ""}
+                {activeFg.productionStartedAt !== undefined && " · in production"}
+                {activeFg.isCompleted === true && " · finished"}
+                {jobNames.length > 0 && ` · in ${jobNames.join(", ")}`}
+              </p>
+              {activeFg.note && (
+                <p className="truncate text-[11px] text-muted-foreground/80">{activeFg.note}</p>
+              )}
+            </div>
+            {/* at-a-glance figures, so the sheet needs no scrolling to read */}
+            <dl className="flex shrink-0 items-center gap-3 text-right">
+              <div
+                title="Finished units on hand, ready to sell. A sales bill takes stock off this."
+              >
+                <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                  Stock
+                </dt>
+                <dd
+                  className={cn(
+                    "text-xs font-semibold tabular-nums",
+                    (activeFg.stock ?? 0) < 0
+                      ? "text-destructive"
+                      : (activeFg.stock ?? 0) > 0
+                        ? "text-foreground"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {(activeFg.stock ?? 0).toLocaleString()}{" "}
+                  <span className="font-normal text-muted-foreground">
+                    {activeFg.unit ?? "pcs"}
+                  </span>
+                </dd>
+              </div>
+              {(activeFg.inProduction ?? 0) > 0 && (
+                <div
+                  title="Part-made right now — a run has started but not finished"
+                >
+                  <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                    In production
+                  </dt>
+                  <dd className="text-xs font-semibold tabular-nums text-primary">
+                    {activeFg.inProduction?.toLocaleString()}
+                  </dd>
+                </div>
+              )}
+              <div>
+                <dt className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                  Sales price
+                </dt>
+                <dd className="text-sm font-bold tabular-nums text-foreground">
+                  {money(totals.grand)}
+                </dd>
+              </div>
+            </dl>
+            {layout === "dialog" && sheetActions}
+          </div>
+
+          {/* image lightbox */}
+          {lightboxOpen && activeFg.imageUrl && (
+            <div
+              className="fixed inset-0 z-[100] grid place-items-center bg-foreground/60 p-6 backdrop-blur-sm animate-in fade-in duration-150"
+              onClick={() => setLightboxOpen(false)}
+            >
+              <figure className="max-h-full max-w-3xl">
+                <img
+                  src={activeFg.imageUrl}
+                  alt={activeFg.imageAlt ?? activeFg.name}
+                  className="max-h-[80vh] max-w-full rounded-xl border bg-card object-contain shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <figcaption className="mt-2 flex items-center justify-between gap-3 text-xs text-background/90">
+                  <span className="truncate">
+                    {activeFg.name}
+                    {activeFg.imageAlt ? ` — ${activeFg.imageAlt}` : ""}
+                  </span>
+                  <span className="shrink-0 opacity-70">Click anywhere to close</span>
+                </figcaption>
+              </figure>
+            </div>
+          )}
+
+          {/* add-row bar: both kinds of line on one compact row */}
+          {canCreate && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1 rounded-xl border bg-card px-2 py-1.5 shadow-sm">
+              <span
+                className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+                title="Add a raw material from the master price list"
+              >
+                <Package className="size-3" />
+                Material
+              </span>
+              <ItemPicker
+                className="min-w-[170px] flex-1"
+                size="sm"
+                items={materialOptions}
+                value={addingMaterialId}
+                onChange={setAddingMaterialId}
+                placeholder="Choose or search material…"
+                searchPlaceholder="Search name, code or category…"
+                emptyLabel="No material matches that."
+                aria-label="Choose a raw material"
+                onCreateNew={(term) =>
+                  navigate(
+                    `/materials/new?name=${encodeURIComponent(term.trim())}`,
+                  )
+                }
+              />
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={materialQty}
+                onChange={(e) => setMaterialQty(e.target.value)}
+                aria-label="Material quantity"
+                className="h-7 w-14 rounded-lg text-xs"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="size-7 shrink-0 rounded-lg"
+                disabled={!addingMaterialId || items === undefined}
+                onClick={addMaterialRowGuarded}
+                title="Add this material to the sheet"
+              >
+                <Plus className="size-3.5" />
+              </Button>
+
+              <span className="mx-1 h-4 w-px bg-border" />
+
+              <span
+                className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+                title="Add labour, transport, packaging or any other cost"
+              >
+                <Plus className="size-3" />
+                Custom
+              </span>
+              <Input
+                value={customLabel}
+                onChange={(e) => setCustomLabel(e.target.value)}
+                placeholder="e.g. Labor, Transport…"
+                aria-label="Custom line label"
+                className="h-7 w-32 rounded-lg text-xs"
+              />
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={customQty}
+                onChange={(e) => setCustomQty(e.target.value)}
+                aria-label="Custom line quantity"
+                className="h-7 w-12 rounded-lg text-xs"
+              />
+              <Input
+                type="number"
+                min="0"
+                step="any"
+                value={customPrice}
+                onChange={(e) => setCustomPrice(e.target.value)}
+                aria-label="Custom line unit price"
+                className="h-7 w-14 rounded-lg text-xs"
+              />
+              <div className="relative">
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="any"
+                  value={customTax}
+                  onChange={(e) => setCustomTax(e.target.value)}
+                  aria-label="Custom line tax percent"
+                  title={`Tax on this custom line — the firm default is ${defaultTax?.taxPct ?? 0}%`}
+                  className="h-7 w-12 rounded-lg pr-4 text-xs tabular-nums"
+                />
+                <Percent
+                  className="pointer-events-none absolute top-1/2 right-1 size-2.5 -translate-y-1/2 text-muted-foreground/70"
+                  aria-hidden
+                />
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="size-7 shrink-0 rounded-lg"
+                disabled={items === undefined}
+                onClick={() => guardProduction("Adding a custom line", () => void addCustomRow())}
+                title="Add this custom line to the sheet"
+              >
+                <Plus className="size-3.5" />
+              </Button>
+
+              {materials.length === 0 && (
+                <button
+                  type="button"
+                  onClick={() => onSelectView({ kind: "materials" })}
+                  className="text-[11px] text-primary hover:underline"
+                >
+                  + Add raw materials first
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* what the sheet is asking to be checked before it is saved */}
+          {warnings.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-2.5 py-1 text-[11px] text-amber-800 dark:text-amber-300">
+              <span className="flex shrink-0 items-center gap-1 font-semibold">
+                <AlertTriangle className="size-3" />
+                {warnings.length} to check
+              </span>
+              {warnings.slice(0, 3).map((w) => (
+                <span key={w.id} className="opacity-90">
+                  · {w.text}
+                </span>
+              ))}
+              {warnings.length > 3 && (
+                <span className="opacity-70">+{warnings.length - 3} more</span>
+              )}
+            </div>
+          )}
+
+          {/* the spreadsheet */}
+          <section className="mt-1.5 overflow-hidden rounded-xl border bg-card shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px] text-sm">
+                <thead>
+                  <tr className="border-b border-border/70 bg-muted/40 text-left text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+                    <th className="w-8 px-2 py-1.5 font-semibold">#</th>
+                    <th className="px-2 py-1.5 font-semibold">Description</th>
+                    <th className="w-[4.25rem] px-2 py-1.5 text-right font-semibold">Qty</th>
+                    <th className="w-14 px-2 py-1.5 font-semibold">Unit</th>
+                    <th className="w-24 px-2 py-1.5 text-right font-semibold">Rate</th>
+                    <th className="w-[4.5rem] px-2 py-1.5 text-right font-semibold">
+                      <span className="inline-flex items-center justify-end gap-0.5">
+                        <Percent className="size-2.5" aria-hidden />
+                        Tax
+                      </span>
+                    </th>
+                    <th className="w-28 px-2 py-1.5 text-right font-semibold">Amount</th>
+                    <th className="w-28 px-2 py-1.5 text-right font-semibold">Total</th>
+                    <th className="w-9 px-1 py-1.5" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {items === undefined ? (
+                    <tr>
+                      <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
+                        <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
+                        Loading rows…
+                      </td>
+                    </tr>
+                  ) : rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
+                        Empty sheet — add a raw material or a custom line above.
+                      </td>
+                    </tr>
+                  ) : (
+                    rows.map((row, i) => {
+                      // the numbers on screen are the drafts, so an unsaved
+                      // edit already shows in the amount, the tax and the total
+                      const d = drafts.find((x) => x.id === row._id);
+                      const qty = d?.qty ?? row.qty;
+                      const rate = d?.unitPrice ?? row.unitPrice;
+                      const taxPct = d?.taxPct ?? row.taxPct ?? 0;
+                      const amount = qty * rate;
+                      const lineTax = amount * (cleanRate(taxPct) / 100);
+                      const material =
+                        row.materialId !== undefined
+                          ? materials.find((x) => x._id === row.materialId)
+                          : undefined;
+                      const short =
+                        material !== undefined && (material.stock ?? 0) < qty;
+                      return (
+                        <tr
+                          key={row._id}
+                          className={cn(
+                            "group/row transition-colors hover:bg-accent/40",
+                            rate === 0 || (taxPct === 0 && amount > 0)
+                              ? "bg-amber-500/[0.04]"
+                              : undefined,
+                          )}
+                        >
+                          <td className="px-2 py-1 align-top text-[11px] text-muted-foreground tabular-nums">
+                            {i + 1}
+                          </td>
+                          <td className="max-w-0 px-2 py-1 align-top">
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <span className="truncate text-xs font-medium">
+                                {row.label}
+                              </span>
+                              {material !== undefined && (
+                                <span
+                                  className={cn(
+                                    "inline-flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums",
+                                    short
+                                      ? "text-amber-600 dark:text-amber-400"
+                                      : "text-muted-foreground/70",
+                                  )}
+                                  title={
+                                    short
+                                      ? `Only ${(material.stock ?? 0).toLocaleString()} ${material.unit ?? ""} on hand — this batch needs ${qty.toLocaleString()}`
+                                      : `${(material.stock ?? 0).toLocaleString()} ${material.unit ?? ""} on hand`
+                                  }
+                                >
+                                  {short && <AlertTriangle className="size-2.5" />}
+                                  {(material.stock ?? 0).toLocaleString()}{" "}
+                                  {material.unit ?? ""} on hand
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-1 py-1 align-top">
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={qty}
+                              onChange={(e) =>
+                                updateDraft(row._id, { qty: Number(e.target.value) })
+                              }
+                              className={cn(lineCls, "text-right tabular-nums")}
+                              aria-label="Quantity"
+                            />
+                          </td>
+                          <td className="px-2 py-1 align-top text-[11px] text-muted-foreground">
+                            {row.unit ?? "—"}
+                          </td>
+                          <td className="px-1 py-1 align-top">
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={rate}
+                              onChange={(e) =>
+                                updateDraft(row._id, {
+                                  unitPrice: Number(e.target.value),
+                                })
+                              }
+                              className={cn(
+                                lineCls,
+                                "text-right tabular-nums",
+                                rate === 0 && "text-amber-600 dark:text-amber-400",
+                              )}
+                              aria-label="Unit price"
+                            />
+                          </td>
+                          <td className="px-1 py-1 align-top">
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="any"
+                              value={taxPct}
+                              onChange={(e) =>
+                                updateDraft(row._id, {
+                                  taxPct: cleanRate(Number(e.target.value)),
+                                })
+                              }
+                              title={`Tax on this line — ${cleanRate(taxPct)}% of ${money(amount)} is ${money(lineTax)}`}
+                              className={cn(
+                                lineCls,
+                                "text-right tabular-nums",
+                                taxPct === 0 && "text-muted-foreground",
+                              )}
+                              aria-label="Tax percent"
+                            />
+                            <div className="pr-1.5 text-right text-[9px] leading-none text-muted-foreground/70 tabular-nums">
+                              {money(lineTax)}
+                            </div>
+                          </td>
+                          <td className="px-2 py-1 align-top text-right text-xs font-medium tabular-nums">
+                            {money(amount)}
+                          </td>
+                          <td className="px-2 py-1 align-top text-right text-xs font-semibold tabular-nums">
+                            {money(amount + lineTax)}
+                          </td>
+                          <td className="px-1 py-1 align-top text-right">
+                          <span
+                            className="hidden items-center gap-0.5 group-hover/row:inline-flex"
+                            aria-label={`Actions for ${row.label}`}
+                          >
+                            {canCreate && (
+                              <button
+                                type="button"
+                                aria-label={`Duplicate ${row.label}`}
+                                title="Duplicate this line"
+                                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
+                                onClick={() =>
+                                  guardProduction("Duplicating a line", () =>
+                                    void addFgItem({
+                                      fgId: activeFg._id,
+                                      label: `${row.label} (copy)`,
+                                      qty: row.qty,
+                                      unitPrice: row.unitPrice,
+                                      taxPct: row.taxPct ?? 0,
+                                      ...(row.materialId !== undefined
+                                        ? { materialId: row.materialId }
+                                        : {}),
+                                    }).catch(() =>
+                                      toast.error("Couldn't duplicate the line."),
+                                    ),
+                                  )
+                                }
+                              >
+                                <Copy className="size-3" />
+                              </button>
+                            )}
+                            {canEdit && (
+                              <button
+                                type="button"
+                                aria-label={`Edit ${row.label}`}
+                                title="Edit line"
+                                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-primary"
+                                onClick={() => editRow(row)}
+                              >
+                                <Pencil className="size-3.5" />
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                type="button"
+                                aria-label="Delete row"
+                                title="Delete line"
+                                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-destructive"
+                                onClick={() =>
+                                  void removeItem({ id: row._id }).catch(() =>
+                                    toast.error("Couldn't delete the row."),
+                                  )
+                                }
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            )}
+                          </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+                {rows.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t border-border/70 bg-muted/30">
+                      <td
+                        colSpan={5}
+                        className="px-2 py-1 text-right text-[10px] tracking-wider text-muted-foreground uppercase"
+                      >
+                        Lines
+                        <span className="ml-1.5 opacity-70">{rows.length}</span>
+                      </td>
+                      <td className="px-2 py-1 text-right text-xs font-semibold tabular-nums">
+                        {money(totals.tax)}
+                      </td>
+                      <td className="px-2 py-1 text-right text-xs text-muted-foreground tabular-nums">
+                        {money(totals.subtotal)}
+                      </td>
+                      <td className="px-2 py-1 text-right text-xs font-semibold tabular-nums">
+                        {money(totals.cost)}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </section>
+
+          {rows.length > 0 && (
+            /* ── totals: sub total → tax → cost → margin → sales price ──
+                One strip at the foot of the sheet, so a whole recipe adds up
+                without scrolling and without opening anything. */
+            <div className="mt-1.5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border shadow-sm sm:grid-cols-3 lg:grid-cols-5">
+              <Stat
+                label="Sub total"
+                value={money(totals.subtotal)}
+                hint={`${rows.length} line${rows.length === 1 ? "" : "s"} · before tax`}
+              />
+              <Stat
+                label="Tax amount"
+                value={money(totals.tax)}
+                hint={
+                  totals.tax > 0
+                    ? `blended ${totals.blendedTax}%`
+                    : `no tax on any line · default ${defaultTax?.taxPct ?? 0}%`
+                }
+                strong={totals.tax > 0}
+              />
+              <Stat
+                label="Total cost"
+                value={money(totals.cost)}
+                hint="sub total + tax"
+                strong
+              />
+              {/* margin is edited in place, the way it always was */}
+              <div className="min-w-0 bg-card px-3 py-1.5">
+                <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
+                  Margin
+                </div>
+                <div className="flex items-baseline gap-0.5">
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={markupPct}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v) && v >= 0 && activeFg) {
+                        void updateFg({ id: activeFg._id, markupPct: v }).catch(() =>
+                          toast.error("Couldn't update the margin."),
+                        );
+                      }
+                    }}
+                    aria-label="Margin percent"
+                    className="w-10 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
+                  />
+                  <span className="text-[11px] text-muted-foreground">%</span>
+                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                    {money(totals.markup)}
+                  </span>
+                </div>
+                <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
+                  on total cost
+                </div>
+              </div>
+              <Stat
+                label="Sales price"
+                value={money(totals.grand)}
+                hint={`per ${activeFg.unit ?? "pcs"}`}
+                accent
+              />
+            </div>
+          )}
+
+          {rows.length > 0 && (
+            <div className="mt-1.5 flex items-center justify-end gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 rounded-lg text-xs"
+                onClick={exportCsv}
+                title="Export this sheet as CSV"
+              >
+                <Download className="size-3.5" />
+                CSV
+              </Button>
+              {canPrint && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 rounded-lg text-xs"
+                    title="Print this sheet"
+                  >
+                    <Printer className="size-3" />
+                    Print
+                    <ChevronDown className="size-3 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem onClick={() => printSheet(true)}>
+                    <Printer className="size-3.5" />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-medium">With amounts</span>
+                      <span className="text-[10px] text-muted-foreground">Prices, tax and sales price</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => printSheet(false)}>
+                    <Factory className="size-3.5" />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-medium">Without amounts</span>
+                      <span className="text-[10px] text-muted-foreground">Production sheet — qty only</span>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              )}
+            </div>
+          )}
+          {/* putting the product into a job: the dialog closes the sheet's
+              own dialog behind it, so it is mounted outside that content */}
+          {connectOpen && (
+            <ConnectJobDialog
+              open
+              productName={activeFg.name}
+              productUnit={activeFg.unit ?? "pcs"}
+              defaultQty={activeFg.qty ?? 1}
+              jobs={jobOptions}
+              currentJobId={activeFg.jobId}
+              onClose={() => setConnectOpen(false)}
+              onSubmit={async (jobId, qty) => {
+                await attachToJobM({ fgId: activeFg._id, jobId, qty });
+                const job = (allJobs ?? []).find((j) => j._id === jobId);
+                toast.success(
+                  `“${activeFg.name}” put into ${job?.name ?? "the job"} — ${qty} needed.`,
+                );
+              }}
+            />
+          )}
+        </>
+  ) : null;
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-7xl flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
-        <div className="flex items-center gap-1.5 text-sm font-semibold">
-          <span className="text-muted-foreground">Costing</span>
+    <div>
+      {/* ── Production warning: editing a running product asks first ──
+          Shown on the page only while the sheet is closed; when the sheet is
+          open it renders inside the sheet's modal instead, or it would sit
+          behind it and never be seen. */}
+      {pendingEdit !== null && !sheetOpen && (
+        <ProductionWarning
+          label={pendingEdit.label}
+          onContinue={() => {
+            const run = pendingEdit.run;
+            setPendingEdit(null);
+            void run();
+          }}
+          onCancel={() => setPendingEdit(null)}
+        />
+      )}
+
+      {/* ── Open product chip (navigation lives in the sidebar) ──────── */}
+      {activeFg && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary">
+            <FileSpreadsheet className="size-3.5" />
+            {activeFg.name}
+            <span className="text-xs font-normal text-primary/70">{activeFg.projectName}</span>
+            <button
+              type="button"
+              aria-label="Close product sheet"
+              className="text-primary/60 hover:text-primary"
+              onClick={() => onSelectView(null)}
+            >
+              ✕
+            </button>
+          </span>
         </div>
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={() => {}}>
-            {layout === "sheet" ? "Page" : "Sheet"}
-          </Button>
+      )}
+
+      {/* ── Views ────────────────────────────────────────────────────── */}
+      {view?.kind === "purchase" && canViewPurchase ? (
+        <Suspense fallback={<AreaLoading label="purchasing" />}>
+          <PurchasePanel
+            materials={materials}
+            canCreate={canCreatePurchase}
+            canEdit={canEditPurchase}
+            canDelete={canDeletePurchase}
+            tab={view.tab}
+            onTabChange={(tab) => onSelectView({ kind: "purchase", tab })}
+          />
+        </Suspense>
+      ) : view?.kind === "sales" && canViewSales ? (
+        <Suspense fallback={<AreaLoading label="sales" />}>
+          <SalesPanel
+            canCreate={canCreatePurchase}
+            canEdit={canEditPurchase}
+            canDelete={canDeletePurchase}
+            tab={view.tab}
+            onTabChange={(tab) => onSelectView({ kind: "sales", tab })}
+          />
+        </Suspense>
+      ) : view?.kind === "accounting" && canViewAccounting ? (
+        <Suspense fallback={<AreaLoading label="accounting" />}>
+          <AccountingPanel
+            tab={view.tab}
+            onTabChange={(tab) => onSelectView({ kind: "accounting", tab })}
+          />
+        </Suspense>
+      ) : view?.kind === "reports" && canViewAccounting ? (
+        <Suspense fallback={<AreaLoading label="reports" />}>
+          <ReportsPanel area={view.area} />
+        </Suspense>
+      ) : view?.kind === "active" || view?.kind === "inactive" ? (
+        <div className="mt-4">
+          <Suspense
+            fallback={
+              <AreaLoading
+                label={view.kind === "active" ? "the Active list" : "the Inactive list"}
+              />
+            }
+          >
+            <ActivePanel
+              scope={view.kind}
+              onSelectView={onSelectView}
+            />
+          </Suspense>
         </div>
-      </div>
-
-      <div className="flex min-h-0 flex-1">
-        <div className="w-48 flex flex-col border-r border-border/60 bg-muted/30 p-2">
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-            onClick={() => onSelectView?.({ kind: "products" })}
-          >
-            Products
-          </button>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-            onClick={() => onSelectView?.({ kind: "materials" })}
-          >
-            Materials
-          </button>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-            onClick={() => onSelectView?.({ kind: "purchase", tab: "items" })}
-          >
-            Purchases
-          </button>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-            onClick={() => onSelectView?.({ kind: "sales", tab: "items" })}
-          >
-            Sales
-          </button>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-            onClick={() => onSelectView?.({ kind: "accounting", tab: "accounts" })}
-          >
-            Accounting
-          </button>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-            onClick={() => onSelectView?.({ kind: "projects" })}
-          >
-            Projects
-          </button>
+      ) : view?.kind === "materials" && canViewMaterials ? (
+        <div className="mt-4">
+          <Suspense fallback={<AreaLoading label="the materials sheet" />}>
+          <MaterialsSheet
+            materials={materials}
+            loading={materials === undefined}
+            canCreate={canCreateMaterial}
+            canEdit={canEditMaterial}
+            canDelete={canDeleteMaterial}
+            canImportExport={canImportExport}
+            canImport={canImport}
+          />
+          </Suspense>
         </div>
+      ) : view === null || view?.kind === "projects" ? (
+        <div className="mt-4">
+          <Suspense fallback={<AreaLoading label="projects" />}>
+          <ProjectsSheet
+            finishedGoods={finishedGoods}
+            loading={loading}
+            onOpenProject={(name) => {
+              setProjectFocus(name);
+              onSelectView({ kind: "products" });
+            }}
+            onNewProject={onNewProject}
+            onEditProject={canEditProject ? onEditProject : undefined}
+            onDeleteProject={
+              canDeleteProject ? (p) => onDeleteProject?.(p) : undefined
+            }
+            onOpenProduct={(fgId) => onSelectView({ kind: "fg", fgId })}
+          />
+          </Suspense>
+        </div>
+      ) : (view?.kind === "fg" || sheetId !== null) && activeFg ? (
+        layout === "page" ? (
+          /* ── the sheet, on a page of its own ───────────────────────
+              Everything about one product on one screen: the lines, the
+              warnings and the full set of totals, with the actions pinned
+              to the top so a long recipe never scrolls them away. */
+          <div className="min-h-screen bg-background">
+            <header className="sticky top-0 z-30 border-b bg-card/95 backdrop-blur">
+              <div className="mx-auto flex h-12 max-w-[1320px] items-center gap-2 px-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 shrink-0 gap-1.5 rounded-lg text-xs"
+                  onClick={closeSheet}
+                >
+                  <ArrowLeft className="size-3.5" />
+                  Products
+                </Button>
+                <nav
+                  aria-label="Breadcrumb"
+                  className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:flex"
+                >
+                  <button
+                    type="button"
+                    onClick={closeSheet}
+                    className="truncate hover:text-foreground hover:underline"
+                  >
+                    {activeFg.projectName ?? "Products"}
+                  </button>
+                  <ChevronRight className="size-3 shrink-0 opacity-50" />
+                  <span className="truncate font-medium text-foreground">
+                    {activeFg.name}
+                  </span>
+                </nav>
+                <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {sheetActions}
+                </div>
+              </div>
+            </header>
+            <main className="mx-auto w-full max-w-[1320px] px-3 py-2">
+              {sheetBody}
+            </main>
+          </div>
+        ) : (
+          <Dialog open onOpenChange={(open) => !open && closeSheet()}>
+            <DialogContent className="max-h-[92vh] gap-0 overflow-y-auto p-0 sm:max-w-[min(100%,1240px)]">
+              <DialogTitle className="sr-only">
+                Costing sheet — {activeFg.name}
+              </DialogTitle>
+              {sheetBody}
+            </DialogContent>
+          </Dialog>
+        )
+      ) : loading ? (
+        <div className="mt-8 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Loading…
+        </div>
+      ) : (
+        <div className="mt-4">
+          <Suspense fallback={<AreaLoading label="products" />}>
+            <ProductForm
+              finishedGoods={finishedGoods}
+              activeFgId={activeFgId}
+              onSelectFg={(id) => onSelectView({ kind: "fg", fgId: id })}
+              onOpenSheet={(id) => navigate(`/costing/${id}`)}
+              initialProject={view?.kind === "products" ? projectFocus : null}
+            />
+          </Suspense>
+        </div>
+      )}
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-auto bg-background">
-          {view?.kind === "products" && (
-            <Suspense fallback={<SectionLoading label="products" />}>
-              <MaterialsSheet materials={materials ?? []} loading={loading ?? false} />
-            </Suspense>
-          )}
-
-          {view?.kind === "materials" && (
-            <Suspense fallback={<SectionLoading label="materials" />}>
-              <MaterialsSheet materials={materials ?? []} loading={loading ?? false} />
-            </Suspense>
-          )}
-
-          {view?.kind === "purchase" && (
-            <Suspense fallback={<SectionLoading label="purchases" />}>
-              <PurchasePanel materials={materials ?? []} loading={loading ?? false} canCreate={canCreatePurchase} canEdit={canEditPurchase} canDelete={canDeletePurchase} onTabChange={() => {}} tab="items" />
-            </Suspense>
-          )}
-
-          {view?.kind === "sales" && (
-            <Suspense fallback={<SectionLoading label="sales" />}>
-              <SalesPanel materials={materials ?? []} finishedGoods={finishedGoods ?? []} loading={loading ?? false} canCreate={canCreate} canEdit={canEdit} canDelete={canDelete} onTabChange={() => {}} tab="items" />
-            </Suspense>
-          )}
-
-          {view?.kind === "accounting" && (
-            <Suspense fallback={<SectionLoading label="accounting" />}>
-              <AccountingPanel />
-            </Suspense>
-          )}
-
-          {view?.kind === "projects" && (
-            <Suspense fallback={<SectionLoading label="projects" />}>
-              <ProjectsSheet finishedGoods={finishedGoods ?? []} loading={loading ?? false} onOpenProject={onEditProject} onOpenProduct={() => {}} activeFgId={finishedGoods?.[0]?._id ?? null} />
-            </Suspense>
-          )}
-
-          {view?.kind === "fg" && (
-            <Suspense fallback={<SectionLoading label="costing" />}>
-              <ProductForm finishedGoods={finishedGoods ?? []} onSelectFg={() => {}} onOpenSheet={() => {}} activeFgId={finishedGoods?.[0]?._id ?? null} product={finishedGoods?.find((p) => p._id === view.fgId) ?? null} />
-            </Suspense>
-          )}
-
-          {view?.kind === "material" && (
-            <Suspense fallback={<SectionLoading label="material" />}>
-              <MaterialsSheet materials={materials ?? []} loading={loading ?? false} selectedId={view.materialId} canImport={canImport} canImportExport={canImportExport} canCreate={canCreateMaterial} canEdit={canEditMaterial} canDelete={canDeleteMaterial} onTabChange={() => {}} tab="list" />
-            </Suspense>
-          )}
-
-          {view?.kind === "project" && (
-            <Suspense fallback={<SectionLoading label="project" />}>
-              <ProjectsSheet finishedGoods={finishedGoods ?? []} loading={loading ?? false} selectedProjectId={view.projectId} onOpenProject={onEditProject} onOpenProduct={() => {}} activeFgId={finishedGoods?.[0]?._id ?? null} />
-            </Suspense>
-          )}
-        </main>
-      </div>
     </div>
   );
 }
