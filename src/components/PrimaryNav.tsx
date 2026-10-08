@@ -16,7 +16,7 @@ import {
 import { useState } from "react";
 import type { CostingView, ReportsArea } from "@/components/CostingSidebar";
 import ReportsSidebar from "@/components/ReportsSidebar";
-import { ACCOUNTING_TABS } from "@/lib/accounting-tabs";
+import { ACCOUNTING_TABS, type AccountingTab } from "@/lib/accounting-tabs";
 import { PURCHASE_TABS } from "@/lib/purchase-tabs";
 import { SALES_TABS } from "@/lib/sales-tabs";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,16 @@ const rowCls = "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left 
 const subRowCls = "flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors";
 const countCls =
   "shrink-0 rounded-full bg-muted px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground";
+
+/**
+ * The Accounts sub-pages the sidebar leaves out.
+ *
+ * `accounts` is the row's own page — clicking Accounts already opens it.
+ * `pandl` is not a page of its own here: the Profit & Loss is printed by the
+ * Trading account report (and by the Accounts panel's own tab), so listing it
+ * again under Accounts only adds a line that leads to the same statement.
+ */
+const ACCOUNTS_LIST_HIDDEN = new Set<AccountingTab>(["accounts", "pandl"]);
 
 /** One line in the navigation list. */
 function NavRow({
@@ -447,7 +457,7 @@ export default function PrimaryNav({
 
           {accountsExpanded && (
             <div className="ml-3 border-l border-border/60 pl-1">
-              {ACCOUNTING_TABS.filter((t) => t.id !== "accounts").map((t) => (
+              {ACCOUNTING_TABS.filter((t) => !ACCOUNTS_LIST_HIDDEN.has(t.id)).map((t) => (
                 <NavRow
                   key={t.id}
                   label={t.label}
