@@ -42,19 +42,19 @@ function lazyRoute<P>(loader: () => Promise<{ default: React.ComponentType<P> }>
   );
 }
 
-const Landing = lazyRoute(() => import("./pages/Landing.tsx"));
-const AuthPage = lazyRoute(() => import("./pages/Auth.tsx"));
-const Dashboard = lazyRoute(() => import("./pages/Dashboard.tsx"));
+const Landing = lazyRoute(() => import("./pages/Landing"));
+const AuthPage = lazyRoute(() => import("./pages/Auth"));
+const Dashboard = lazyRoute(() => import("./pages/Dashboard"));
 const SalesDocumentPage = lazyRoute(
-  () => import("./pages/SalesDocumentPage.tsx"),
+  () => import("./pages/SalesDocumentPage"),
 );
-const MaterialPage = lazyRoute(() => import("./pages/MaterialPage.tsx"));
-const ProductPage = lazyRoute(() => import("./pages/ProductPage.tsx"));
-const CostingPage = lazyRoute(() => import("./pages/CostingPage.tsx"));
+const MaterialPage = lazyRoute(() => import("./pages/MaterialPage"));
+const ProductPage = lazyRoute(() => import("./pages/ProductPage"));
+const CostingPage = lazyRoute(() => import("./pages/CostingPage"));
 const UnitsCategoriesPage = lazyRoute(
-  () => import("./pages/UnitsCategoriesPage.tsx"),
+  () => import("./pages/UnitsCategoriesPage"),
 );
-const NotFound = lazyRoute(() => import("./pages/NotFound.tsx"));
+const NotFound = lazyRoute(() => import("./pages/NotFound"));
 
 // Simple loading fallback for route transitions
 function RouteLoading() {

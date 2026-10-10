@@ -151,20 +151,20 @@ export default function MaterialFormPage({
   const [subCategory, setSubCategory] = useState(editing?.subCategory ?? "");
   const [unit, setUnit] = useState(editing?.unit ?? "");
   const [price, setPrice] = useState(
-    editing !== null ? String(editing.pricePerUnit) : "",
+    editing !== null ? String(editing.pricePerUnit) : "0.00",
   );
   const [note, setNote] = useState(editing?.note ?? "");
   const [minStock, setMinStock] = useState(
-    editing?.minStock !== undefined ? String(editing.minStock) : "",
+    editing?.minStock !== undefined ? String(editing.minStock) : "0",
   );
   const [reorderLevel, setReorderLevel] = useState(
-    editing?.reorderLevel !== undefined ? String(editing.reorderLevel) : "",
+    editing?.reorderLevel !== undefined ? String(editing.reorderLevel) : "0",
   );
   const [salesTax, setSalesTax] = useState(
-    editing?.salesTaxPct !== undefined ? String(editing.salesTaxPct) : "",
+    editing?.salesTaxPct !== undefined ? String(editing.salesTaxPct) : "0",
   );
   const [purchaseTax, setPurchaseTax] = useState(
-    editing?.purchaseTaxPct !== undefined ? String(editing.purchaseTaxPct) : "",
+    editing?.purchaseTaxPct !== undefined ? String(editing.purchaseTaxPct) : "0",
   );
   const [saving, setSaving] = useState(false);
 
