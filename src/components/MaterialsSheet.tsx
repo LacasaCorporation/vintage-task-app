@@ -626,10 +626,12 @@ export default function MaterialsSheet({
                   // a material with no recorded movement still has a balance
                   const income = stock?.income ?? 0;
                   const outgoing = stock?.outgoing ?? 0;
-                  const opening = stock?.opening ?? 0;
-                  // The ledger reads in / out / balance: the opening figure is
-                  // folded into what came in, so one number tells the story.
-                  const received = opening + income;
+                  // The ledger reads in / out / balance. The opening is what was
+                  // already on hand before this period; only the ledger's trade
+                  // movements belong in the In / Out columns — the opening is
+                  // shown separately in the opening-balance view and at the
+                  // bottom of the detail panel.
+                  const received = income;
                   const issued = outgoing;
                   const movementRow: StockRow = stock ?? {
                     materialId: m._id,
