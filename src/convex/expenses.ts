@@ -1,12 +1,52 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { postEntry } from "./accounting";
-import { resolveDefaults } from "./accountingDefaults";
+import { resolveDefaults, STOCK_CODE } from "./accountingDefaults";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 
 const round = (n: number) => Math.round(n * 100) / 100;
+
+/** The two classes an expense is filed under. */
+export const EXPENSE_KINDS = ["direct", "indirect"] as const;
+
+export type ExpenseKind = (typeof EXPENSE_KINDS)[number];
+
+/**
+ * The accounts whose spend is part of what a product costs to make. Anything
+ * charged to one of them is a direct expense; everything else is spent
+ * running the business.
+ *
+ * Only used to read rows recorded before the split existed — an expense
+ * entered now says which class it belongs to outright.
+ */
+const DIRECT_ACCOUNT_CODES = new Set<string>([
+  "5100", // cost of goods sold
+  "5200", // raw material purchased
+  STOCK_CODE.openingTrading,
+  STOCK_CODE.closingTrading,
+]);
+
+/**
+ * Which class an expense belongs to, never left unanswered.
+ *
+ * A row that carries its kind is taken at its word. An older one is read off
+ * the account it was charged to, so the register can be split in two without
+ * ending up with a third bucket for history nobody can file.
+ */
+function classOf(
+  expense: ExpenseDoc,
+  codeOf: Map<string, string>,
+): ExpenseKind {
+  if (expense.kind === "direct" || expense.kind === "indirect") {
+    return expense.kind;
+  }
+  const code = codeOf.get(expense.category.toLowerCase());
+  return code !== undefined && DIRECT_ACCOUNT_CODES.has(code)
+    ? "direct"
+    : "indirect";
+}
 
 
 export type ExpenseDoc = Doc<"expenses">;
@@ -26,6 +66,10 @@ export const list = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
     const nameOf = new Map(accounts.map((a) => [a._id, a.name]));
+    /** Account name (lowercased) → code, for reading a row's class. */
+    const codeOf = new Map(
+      accounts.map((a) => [a.name.toLowerCase(), a.code] as const),
+    );
     const entries = await ctx.db
       .query("journalEntries")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
@@ -35,6 +79,8 @@ export const list = query({
       .sort((a, b) => b.at - a.at)
       .map((e) => ({
         ...e,
+        kind: classOf(e, codeOf),
+        categoryCode: codeOf.get(e.category.toLowerCase()),
         paidFromName: e.paidFrom !== undefined ? nameOf.get(e.paidFrom) : undefined,
         // undefined means the row never reached the ledger — the panel offers
         // a repair rather than showing it as posted
@@ -136,6 +182,14 @@ export const create = mutation({
     vendor: v.optional(v.string()),
     reference: v.optional(v.string()),
     note: v.optional(v.string()),
+    /**
+     * Which class this expense is. Required here so a row entered now says
+     * which it is, rather than leaving it to be read off the account later.
+     * Optional so the register panel — which predates the split — can keep
+     * posting without a change; those rows fall back to indirect, which is
+     * where running-the-business spend belongs.
+     */
+    kind: v.optional(v.union(v.literal("direct"), v.literal("indirect"))),
   },
   handler: async (ctx, args): Promise<Id<"expenses">> => {
     const userId = await scopeUserId(ctx);
@@ -179,6 +233,7 @@ export const create = mutation({
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
       reference: args.reference?.trim().slice(0, 60) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
+      kind: args.kind ?? "indirect",
       createdAt: Date.now(),
     });
 

@@ -31,6 +31,7 @@ import PageTabs from "@/components/PageTabs";
 import AccountLedgerDialog from "@/components/AccountLedgerDialog";
 import AccountFormDialog from "@/components/AccountFormDialog";
 import AccountingDashboard from "@/components/AccountingDashboard";
+import ExpenseEnteringPanel from "@/components/ExpenseEnteringPanel";
 import JournalEntryForm, {
   type EntryFormKind,
 } from "@/components/JournalEntryForm";
@@ -504,6 +505,8 @@ export default function AccountingPanel({
             focusId={tab === "journal" ? focusEntry : null}
           />
         </Panel>
+      ) : tab === "expenses" ? (
+        <ExpenseEnteringPanel />
       ) : tab === "pandl" ? (
         <ProfitAndLossPanel
           money={money}

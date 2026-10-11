@@ -811,6 +811,14 @@ const schema = defineSchema(
       vendor: v.optional(v.string()),
       reference: v.optional(v.string()), // receipt or voucher number
       note: v.optional(v.string()),
+      /**
+       * Which class of expense this is. A direct expense is spend that goes
+       * into what a product costs to make; an indirect one is spent running
+       * the business. Both are charged to the same chart — the split is a
+       * reading of it, not a second set of books — and a row recorded before
+       * the split existed carries no kind, which is why it is optional.
+       */
+      kind: v.optional(v.union(v.literal("direct"), v.literal("indirect"))),
       /** The journal entry this expense posted, so it can be traced back. */
       entryId: v.optional(v.id("journalEntries")),
       createdAt: v.number(), // ms

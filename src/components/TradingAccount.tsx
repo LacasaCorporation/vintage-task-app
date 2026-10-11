@@ -1,7 +1,7 @@
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Loader2, Warehouse, Scale, Upload } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
@@ -103,17 +103,51 @@ export default function TradingAccount({ range }: { range: Range }) {
 
   const opening = valuation?.opening ?? 0;
   const closing = valuation?.closing ?? 0;
-  const purchases = (plData?.expense ?? []).find(
-    (l) => l.code === "5200" || l.name.toLowerCase().includes("purchase"),
-  )?.amount ?? 0;
+  /**
+   * Purchases, on the same footing the ledger reads them: every account that
+   * is a purchase, not just the first one found. A firm that splits its
+   * materials across two accounts would otherwise see half of them here and
+   * all of them in the profit and loss account.
+   */
+  const purchases = (plData?.expense ?? [])
+    .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
+    .reduce((s, l) => s + l.amount, 0);
   const totalIncome = plData?.totalIncome ?? 0;
   const totalExpense = plData?.totalExpense ?? 0;
-  const cogs =
-    opening + purchases - closing;
-  const grossProfit = totalIncome - cogs;
-  const netProfit = totalIncome - totalExpense;
-  const margin =
-    totalIncome === 0 ? 0 : (grossProfit / totalIncome) * 100;
+  const cogs = opening + purchases - closing;
+
+  /**
+   * Sales kept apart from the rest of the income, so the gross profit is
+   * struck off trading alone — a rent rebate or interest is not trading
+   * income, and counting it would quietly flatter the margin.
+   */
+  const salesRows = (plData?.income ?? []).filter(
+    (l) => l.code === "4100" || /sale/i.test(l.name),
+  );
+  const sales =
+    salesRows.length > 0
+      ? salesRows.reduce((s, l) => s + l.amount, 0)
+      : totalIncome;
+  const otherIncome = totalIncome - sales;
+
+  /**
+   * Operating expenses: the expense accounts with the purchase account lifted
+   * out. Purchases already sit in the trading account above, so counting them
+   * again below would charge the same materials twice.
+   */
+  const ledgerStockEffect =
+    (plData?.trading?.openingStock ?? 0) - (plData?.trading?.closingStock ?? 0);
+  const otherExpenses = totalExpense - ledgerStockEffect - purchases;
+
+  /**
+   * The two results, struck off the figures printed above them. Gross profit
+   * is sales less the cost of the goods actually sold; the net is that plus
+   * everything outside trading. The profit and loss account continues this
+   * statement rather than restating it.
+   */
+  const grossProfit = sales - cogs;
+  const netProfit = grossProfit + otherIncome - otherExpenses;
+  const margin = totalIncome === 0 ? 0 : (grossProfit / totalIncome) * 100;
 
   const incomeRows = (plData?.income ?? []).map((l) => ({
     _id: l._id,
@@ -178,6 +212,59 @@ export default function TradingAccount({ range }: { range: Range }) {
     }
   };
 
+  // Track previous range to auto-post on change
+  const prevFromRef = useRef<number | null>(null);
+  const prevToRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
+  /** Kept in a ref so the effect reads it without listing it as a dependency. */
+  const postStockRef = useRef(postStock);
+
+  useEffect(() => {
+    postStockRef.current = postStock;
+  }, [postStock]);
+
+  useEffect(() => {
+    // The figures are derived from the shelves, so wait for the valuation to
+    // arrive before acting on it — a half-loaded reading would post the wrong
+    // stock and mark the period as done.
+    if (valuation === undefined) return;
+
+    const changed =
+      prevFromRef.current !== range.from || prevToRef.current !== range.to;
+    if (isMountedRef.current) {
+      isMountedRef.current = false;
+      prevFromRef.current = range.from;
+      prevToRef.current = range.to;
+      return;
+    }
+    if (!changed) return;
+    prevFromRef.current = range.from;
+    prevToRef.current = range.to;
+
+    // Only a period that actually holds stock is worth posting; an empty shelf
+    // has nothing to carry into cost of goods sold.
+    if (!(opening > 0 || closing > 0) || posting) return;
+
+    void postStockRef
+      .current({
+        from: range.from,
+        to: range.to,
+        label: range.label,
+      })
+      .then((res) => {
+        if (res.posted) {
+          toast.info(`Auto-posted stock for ${range.label}`);
+        }
+      })
+      .catch((error: unknown) => {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Could not auto-post the stock.",
+        );
+      });
+  }, [valuation, range.from, range.to, range.label, opening, closing, posting]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -221,10 +308,12 @@ export default function TradingAccount({ range }: { range: Range }) {
           purchases={purchases}
           closing={closing}
           cogs={cogs}
-          totalIncome={totalIncome}
           grossProfit={grossProfit}
           margin={margin}
-          incomeRows={incomeRows}
+          sales={sales}
+          otherIncome={otherIncome}
+          otherExpenses={otherExpenses}
+          netProfit={netProfit}
           plDataEmpty={plData?.empty ?? true}
         />
       )}
@@ -270,10 +359,12 @@ function TradingAccountView({
   purchases,
   closing,
   cogs,
-  totalIncome,
   grossProfit,
   margin,
-  incomeRows,
+  sales,
+  otherIncome,
+  otherExpenses,
+  netProfit,
   plDataEmpty,
 }: {
   range: Range;
@@ -282,10 +373,12 @@ function TradingAccountView({
   purchases: number;
   closing: number;
   cogs: number;
-  totalIncome: number;
   grossProfit: number;
   margin: number;
-  incomeRows: PlLine[];
+  sales: number;
+  otherIncome: number;
+  otherExpenses: number;
+  netProfit: number;
   plDataEmpty: boolean;
 }) {
   const goodsAvailable = opening + purchases;
@@ -330,7 +423,7 @@ function TradingAccountView({
 
       <Panel
         title="Trading account"
-        count={`${range.label} · opening stock + purchases − closing stock = COGS`}
+        count={`${range.label} · opening stock + purchases − closing stock = COGS · gross profit carried into the profit and loss account`}
       >
         <table className="w-full text-sm">
           <tbody className="divide-y divide-border/60">
@@ -406,10 +499,10 @@ function TradingAccountView({
             <td className={CELL_LEFT}>
               <span className="font-medium">Sales revenue</span>
               <div className="text-[11px] text-muted-foreground">
-                {incomeRows.length} income account(s) posted in period
+                Trading income posted in the period
               </div>
             </td>
-            <td className={cn(CELL, GAIN)}>{money(totalIncome)}</td>
+            <td className={cn(CELL, GAIN)}>{money(sales)}</td>
           </tr>
 
           {/* Gross profit */}
@@ -427,6 +520,90 @@ function TradingAccountView({
               <span className="ml-2 text-[11px] text-emerald-600 dark:text-emerald-400">
                 {margin.toFixed(1)}% margin
               </span>
+            </td>
+          </tr>
+
+          {/* ── Profit and Loss Account ──────────────────────────────────
+              The statement continues where the trading account leaves off:
+              the gross profit is carried down rather than struck again, and
+              everything outside trading is added to it to give the net
+              result. Purchases are not repeated here — they are already a
+              cost of the goods sold above. */}
+          <tr className="border-t-2 border-border bg-muted/40">
+            <td className={cn(CELL_LEFT, "text-[11px] font-semibold tracking-widest text-muted-foreground uppercase")} colSpan={2}>
+              Profit and Loss Account
+            </td>
+          </tr>
+
+          <tr className={ROW}>
+            <td className={CELL_LEFT}>
+              <span className="font-medium">Gross profit brought down</span>
+              <div className="text-[11px] text-muted-foreground">
+                From the trading account above
+              </div>
+            </td>
+            <td className={cn(CELL, grossProfit < 0 ? LOSS : GAIN)}>
+              {money(grossProfit)}
+            </td>
+          </tr>
+
+          <tr className={ROW}>
+            <td className={CELL_LEFT}>
+              <span className="font-medium">Add: Other income</span>
+              <div className="text-[11px] text-muted-foreground">
+                Income that is not trading income
+              </div>
+            </td>
+            <td className={CELL}>{money(otherIncome)}</td>
+          </tr>
+
+          <tr className={ROW}>
+            <td className={CELL_LEFT}>
+              <span className="font-medium">Less: Operating expenses</span>
+              <div className="text-[11px] text-muted-foreground">
+                Everything spent that is not stock or purchases
+              </div>
+            </td>
+            <td className={cn(CELL, LOSS)}>−{money(otherExpenses)}</td>
+          </tr>
+
+          {/* Net result */}
+          <tr className={cn(
+            "border-t border-border/60",
+            netProfit < 0
+              ? "bg-rose-50 dark:bg-rose-950/30"
+              : "bg-emerald-50 dark:bg-emerald-950/30",
+          )}>
+            <td className={CELL_LEFT}>
+              <span
+                className={cn(
+                  "font-semibold",
+                  netProfit < 0
+                    ? "text-rose-700 dark:text-rose-300"
+                    : "text-emerald-700 dark:text-emerald-300",
+                )}
+              >
+                {netProfit < 0 ? "NET LOSS FOR THE PERIOD" : "NET PROFIT FOR THE PERIOD"}
+              </span>
+              <div
+                className={cn(
+                  "text-[11px]",
+                  netProfit < 0
+                    ? "text-rose-600 dark:text-rose-400"
+                    : "text-emerald-600 dark:text-emerald-400",
+                )}
+              >
+                Gross profit + Other income − Operating expenses
+              </div>
+            </td>
+            <td
+              className={cn(
+                CELL,
+                "font-semibold",
+                netProfit < 0 ? LOSS : GAIN,
+              )}
+            >
+              {money(netProfit)}
             </td>
           </tr>
           </tbody>
@@ -451,7 +628,10 @@ function TradingAccountView({
         ) : (
           <>
             COGS = Opening stock {money(opening)} + Purchases {money(purchases)} −
-            Closing stock {money(closing)} = {money(cogs)}.
+            Closing stock {money(closing)} = {money(cogs)}. Gross profit{" "}
+            {money(grossProfit)} carried down, plus other income{" "}
+            {money(otherIncome)} less operating expenses {money(otherExpenses)},
+            leaves {money(netProfit)} for the period.
           </>
         )}
       </Proof>
