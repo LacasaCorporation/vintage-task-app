@@ -1,5 +1,5 @@
 import type { Doc } from "@/convex/_generated/dataModel";
-import type { AccountingTab } from "@/components/AccountingPanel";
+import type { AccountingTab } from "@/lib/accounting-tabs";
 import type { PurchaseTab } from "@/lib/purchase-tabs";
 import type { SalesTab } from "@/lib/sales-tabs";
 

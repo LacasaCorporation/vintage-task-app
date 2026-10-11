@@ -43,7 +43,6 @@ function signFor(type: AccountType): 1 | -1 {
     : -1;
 }
 
-export { ACCOUNTING_TABS, type AccountingTab } from "@/lib/accounting-tabs";
 import { ACCOUNTING_TABS, type AccountingTab } from "@/lib/accounting-tabs";
 
 /** The kinds an entry can be filed under. */
