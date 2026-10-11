@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { useMutation, useQuery } from "convex/react";
@@ -140,6 +140,8 @@ export default function MaterialFormPage({
   // of the app instead of free text that can drift
   const units = useQuery(api.costing.listUnits);
   const masterCategories = useQuery(api.costing.listCategories);
+  /** What a new item starts with, as chosen in Settings. */
+  const costingDefaults = useQuery(api.settings.getCostingDefaults);
   const topCategories = useMemo(
     () => (masterCategories ?? []).filter((c) => c.parentId === undefined),
     [masterCategories],
@@ -167,6 +169,32 @@ export default function MaterialFormPage({
     editing?.purchaseTaxPct !== undefined ? String(editing.purchaseTaxPct) : "0",
   );
   const [saving, setSaving] = useState(false);
+
+  // A new material opens with whatever the workspace set as its defaults,
+  // applied once the first time they load so it never fights a choice already
+  // made on this form.
+  const [appliedDefaults, setAppliedDefaults] = useState(false);
+  useEffect(() => {
+    if (editing !== null || appliedDefaults || costingDefaults === undefined) {
+      return;
+    }
+    if (costingDefaults !== null) {
+      if (costingDefaults.unitName) setUnit(costingDefaults.unitName);
+      if (costingDefaults.categoryName) {
+        setCategory(costingDefaults.categoryName);
+      }
+      if (costingDefaults.subCategoryName) {
+        setSubCategory(costingDefaults.subCategoryName);
+      }
+      if (costingDefaults.salesTaxPct !== undefined) {
+        setSalesTax(String(costingDefaults.salesTaxPct));
+      }
+      if (costingDefaults.purchaseTaxPct !== undefined) {
+        setPurchaseTax(String(costingDefaults.purchaseTaxPct));
+      }
+    }
+    setAppliedDefaults(true);
+  }, [costingDefaults, editing, appliedDefaults]);
 
   /** Sub-categories belong to the category above them, so they narrow as you choose. */
   const subCategories = useMemo(() => {

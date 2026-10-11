@@ -392,6 +392,110 @@ export const setAccountingDefaults = mutation({
 });
 
 /**
+ * The choices a brand-new raw material or product opens with — its unit,
+ * category, sub-category and tax rate. Read back with the managed rows
+ * attached so the Settings screen can show a name rather than an opaque id,
+ * and can tell a stale pointer from a live one.
+ */
+export const getCostingDefaults = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    const settingsDoc = await getSettings(ctx, userId);
+    if (settingsDoc === null) return null;
+    const d = settingsDoc.costingDefaults;
+    const unit = d?.unitId !== undefined ? await ctx.db.get(d.unitId) : null;
+    const category =
+      d?.categoryId !== undefined ? await ctx.db.get(d.categoryId) : null;
+    const subCategory =
+      d?.subCategoryId !== undefined ? await ctx.db.get(d.subCategoryId) : null;
+    return {
+      unitId: unit?._id,
+      unitName: unit?.name,
+      unitAbbr: unit?.abbreviation?.trim() || unit?.name,
+      categoryId: category?._id,
+      categoryName: category?.name,
+      subCategoryId: subCategory?._id,
+      subCategoryName: subCategory?.name,
+      salesTaxPct: d?.salesTaxPct,
+      purchaseTaxPct: d?.purchaseTaxPct,
+    };
+  },
+});
+
+/**
+ * Save what a new item starts with. Passing null clears a choice, which puts
+ * that field back to its own fallback — so clearing a field is a real choice,
+ * not a dead end.
+ */
+export const setCostingDefaults = mutation({
+  args: {
+    unitId: v.optional(v.union(v.id("costUnits"), v.null())),
+    categoryId: v.optional(v.union(v.id("costCategories"), v.null())),
+    subCategoryId: v.optional(v.union(v.id("costCategories"), v.null())),
+    salesTaxPct: v.optional(v.union(v.number(), v.null())),
+    purchaseTaxPct: v.optional(v.union(v.number(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Sign in first.");
+    const settingsDoc = await getOrCreateSettings(ctx, userId);
+    const role =
+      settingsDoc.ownerId === userId
+        ? "super"
+        : settingsDoc.members.find((m) => m.userId === userId)?.role;
+    if (role !== "super" && role !== "admin")
+      throw new Error("Only an admin can change the workspace defaults.");
+
+    const unit =
+      args.unitId === undefined || args.unitId === null
+        ? undefined
+        : await ctx.db.get(args.unitId);
+    if (
+      unit !== undefined &&
+      (unit === null || unit.ownerId !== settingsDoc.ownerId)
+    ) {
+      throw new Error("That unit no longer exists.");
+    }
+    const category =
+      args.categoryId === undefined || args.categoryId === null
+        ? undefined
+        : await ctx.db.get(args.categoryId);
+    if (
+      category !== undefined &&
+      (category === null || category.ownerId !== settingsDoc.ownerId)
+    ) {
+      throw new Error("That category no longer exists.");
+    }
+    const subCategory =
+      args.subCategoryId === undefined || args.subCategoryId === null
+        ? undefined
+        : await ctx.db.get(args.subCategoryId);
+    if (
+      subCategory !== undefined &&
+      (subCategory === null || subCategory.ownerId !== settingsDoc.ownerId)
+    ) {
+      throw new Error("That sub-category no longer exists.");
+    }
+
+    const pct = (value: number | null | undefined): number | undefined =>
+      value === undefined || value === null ? undefined : Math.max(0, value);
+
+    await ctx.db.patch(settingsDoc._id, {
+      costingDefaults: {
+        unitId: unit?._id,
+        categoryId: category?._id,
+        subCategoryId: subCategory?._id,
+        salesTaxPct: pct(args.salesTaxPct),
+        purchaseTaxPct: pct(args.purchaseTaxPct),
+      },
+    });
+    return true;
+  },
+});
+
+/**
  * Claim any pending invite for the caller's email and register them as a
  * member. Called once per sign-in from the client; silently no-ops when
  * there's no invite.

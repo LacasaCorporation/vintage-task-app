@@ -21,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import MasterDataManager from "@/components/MasterDataManager";
+import CostingDefaultsCard from "@/components/CostingDefaultsCard";
 import { useAppDialogs } from "@/components/AppDialogs";
 import CurrencyPicker from "@/components/CurrencyPicker";
 import AccountingSettingsPage from "@/components/AccountingSettingsPage";
@@ -1946,7 +1947,11 @@ export default function SettingsPanel() {
             Shared by finished-goods products and raw materials
           </span>
         </header>
-        <div className="px-5 py-4">
+        <div className="space-y-4 px-5 py-4">
+          <CostingDefaultsCard
+            units={units ?? []}
+            categories={allCategories ?? []}
+          />
           <MasterDataManager
             units={units ?? []}
             categories={allCategories ?? []}

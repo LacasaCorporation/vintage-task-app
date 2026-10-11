@@ -143,6 +143,23 @@ const settings = defineTable({
       taxPct: v.optional(v.number()),
     }),
   ),
+  /**
+   * What a brand-new raw material or product starts with, so the same four
+   * choices are not retyped on every record. The unit and categories are held
+   * as ids into the managed master data, so renaming one follows through
+   * instead of leaving a stale name behind; the tax rates are percentages.
+   */
+  costingDefaults: v.optional(
+    v.object({
+      unitId: v.optional(v.id("costUnits")),
+      categoryId: v.optional(v.id("costCategories")),
+      subCategoryId: v.optional(v.id("costCategories")),
+      /** Rate offered a new item, e.g. 18 for 18%. */
+      salesTaxPct: v.optional(v.number()),
+      /** What a new material is bought at, e.g. 5 for 5%. */
+      purchaseTaxPct: v.optional(v.number()),
+    }),
+  ),
   members: v.array(teamMemberValidator), // every user + role + restrictions
 }).index("by_owner", ["ownerId"]);
 
