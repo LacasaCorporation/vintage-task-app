@@ -196,26 +196,52 @@ export default function ProductFormPage({
   const addProjectM = useMutation(api.costing.addProject);
   const [name, setName] = useState(editing?.name ?? "");
   const [code, setCode] = useState(editing?.code ?? "");
-  const [unit, setUnit] = useState(editing?.unit ?? "");
+  // A new product opens with the workspace's usual unit already chosen — the
+  // summary reads "pcs" when nothing is picked, and the server stores the same
+  // fallback, so the field should say it too instead of starting blank.
+  const [unit, setUnit] = useState(
+    editing !== null ? (editing.unit ?? "") : "pcs",
+  );
   const [qty, setQty] = useState(
-    editing?.qty !== undefined ? String(editing.qty) : "",
+    editing !== null
+      ? editing.qty !== undefined
+        ? String(editing.qty)
+        : ""
+      : "1",
   );
   const [category, setCategory] = useState(editing?.category ?? "");
   const [subCategory, setSubCategory] = useState(editing?.subCategory ?? "");
   const [note, setNote] = useState(editing?.note ?? "");
+  // Every standard number starts at a real figure for a new product — zero
+  // markup, zero minimum, zero reorder level, zero tax — so the record reads
+  // the same as it saves instead of showing a dash the server would store as 0.
   const [markup, setMarkup] = useState(
-    editing?.markupPct !== undefined && editing.markupPct > 0
-      ? String(editing.markupPct)
-      : "",
+    editing !== null
+      ? editing.markupPct !== undefined && editing.markupPct > 0
+        ? String(editing.markupPct)
+        : ""
+      : "0",
   );
   const [minStock, setMinStock] = useState(
-    editing?.minStock !== undefined ? String(editing.minStock) : "",
+    editing !== null
+      ? editing.minStock !== undefined
+        ? String(editing.minStock)
+        : ""
+      : "0",
   );
   const [reorderLevel, setReorderLevel] = useState(
-    editing?.reorderLevel !== undefined ? String(editing.reorderLevel) : "",
+    editing !== null
+      ? editing.reorderLevel !== undefined
+        ? String(editing.reorderLevel)
+        : ""
+      : "0",
   );
   const [salesTax, setSalesTax] = useState(
-    editing?.salesTaxPct !== undefined ? String(editing.salesTaxPct) : "",
+    editing !== null
+      ? editing.salesTaxPct !== undefined
+        ? String(editing.salesTaxPct)
+        : ""
+      : "0",
   );
   const [saving, setSaving] = useState(false);
 
