@@ -623,16 +623,11 @@ export default function MaterialsSheet({
                 rows.map((m, i) => {
                   const stock = stockByMaterial.get(m._id);
                   const open = openStock === m._id;
-                  // a material with no recorded movement still has a balance
-                  const income = stock?.income ?? 0;
-                  const outgoing = stock?.outgoing ?? 0;
                   // The ledger reads in / out / balance. The opening is the stock that
                   // was already on hand before this period; only the ledger's trade
                   // movements belong in the In / Out columns — the opening is shown
                   // separately in the opening-balance view and at the bottom of the
                   // detail panel.
-                  const stock = stockByMaterial.get(m._id);
-                  const open = openStock === m._id;
                   const received = stock?.income ?? 0;
                   const issued = stock?.outgoing ?? 0;
                   const movementRow: StockRow = stock ?? {
@@ -649,15 +644,13 @@ export default function MaterialsSheet({
                   };
 
                   return (
-                  <Fragment key={m._id}>
-                  return (
                     <Fragment key={m._id}>
                       <tr
-                    className={cn(
-                      "group/row transition-colors hover:bg-accent/40",
-                      open && "bg-accent/40",
-                    )}
-                  >
+                        className={cn(
+                          "group/row transition-colors hover:bg-accent/40",
+                          open && "bg-accent/40",
+                        )}
+                      >
                     <td className="px-3 py-2">
                       <button
                         type="button"
