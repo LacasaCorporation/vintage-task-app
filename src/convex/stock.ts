@@ -102,9 +102,7 @@ async function ledgerTotals(
     .collect();
   for (const m of moves) {
     if (m.materialId !== materialId) continue;
-    // goods received — on an order or on a voucher — are stock bought, the
-    // same as a bill line
-    if ((m.source === "lpo" || m.source === "grv") && m.direction === "in") {
+    if (m.source === "grv" && m.direction === "in") {
       income += m.qty;
     }
     // production is the only real consumer; a stop hands the same units back
@@ -201,9 +199,9 @@ export const report = query({
         outgoing: 0,
         movements: [],
       };
-      // goods received — on an order or on a voucher — are stock bought, the
-      // same as a bill line
-      if ((m.source === "lpo" || m.source === "grv") && m.direction === "in") {
+      // goods received — on a voucher — are stock bought, the same as a
+      // bill line
+      if (m.source === "grv" && m.direction === "in") {
         entry.lpoIncome += m.qty;
       }
       // only production consumes stock; corrections adjust the opening, and a
@@ -304,3 +302,21 @@ export const setOpening = mutation({
     await ctx.db.patch(materialId, { opening: target });
   },
 });
+
+/**
+ * At a glance: does the ledger's arithmetic hold for one material?
+ */
+export function ledgerChecks(
+  balance: number,
+  income: number,
+  outgoing: number,
+  opening: number,
+): {
+  ok: boolean;
+  expected: number;
+  diff: number;
+} {
+  const expected = round(opening + income - outgoing);
+  const diff = round(balance - expected);
+  return { ok: diff === 0, expected, diff };
+}

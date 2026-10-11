@@ -626,13 +626,15 @@ export default function MaterialsSheet({
                   // a material with no recorded movement still has a balance
                   const income = stock?.income ?? 0;
                   const outgoing = stock?.outgoing ?? 0;
-                  // The ledger reads in / out / balance. The opening is what was
-                  // already on hand before this period; only the ledger's trade
-                  // movements belong in the In / Out columns — the opening is
-                  // shown separately in the opening-balance view and at the
-                  // bottom of the detail panel.
-                  const received = income;
-                  const issued = outgoing;
+                  // The ledger reads in / out / balance. The opening is the stock that
+                  // was already on hand before this period; only the ledger's trade
+                  // movements belong in the In / Out columns — the opening is shown
+                  // separately in the opening-balance view and at the bottom of the
+                  // detail panel.
+                  const stock = stockByMaterial.get(m._id);
+                  const open = openStock === m._id;
+                  const received = stock?.income ?? 0;
+                  const issued = stock?.outgoing ?? 0;
                   const movementRow: StockRow = stock ?? {
                     materialId: m._id,
                     name: m.name,
@@ -645,9 +647,12 @@ export default function MaterialsSheet({
                     opening: 0,
                     movements: [],
                   };
+
                   return (
                   <Fragment key={m._id}>
-                  <tr
+                  return (
+                    <Fragment key={m._id}>
+                      <tr
                     className={cn(
                       "group/row transition-colors hover:bg-accent/40",
                       open && "bg-accent/40",
@@ -736,7 +741,7 @@ export default function MaterialsSheet({
                     </td>
                     <td
                       className="px-3 py-2 text-right text-xs tabular-nums text-emerald-600 dark:text-emerald-400"
-                      title="Stock received — purchases, returns and the opening figure"
+                      title="Stock received — purchases and the goods-received voucher"
                     >
                       {received === 0 ? "—" : `+${received.toLocaleString()}`}
                     </td>
@@ -803,7 +808,7 @@ export default function MaterialsSheet({
                       </td>
                     </tr>
                   )}
-                  </Fragment>
+                    </Fragment>
                   );
                 })
               )}
@@ -812,12 +817,10 @@ export default function MaterialsSheet({
         </div>
       </section>
       )}
-
       <p className="mt-3 text-xs text-muted-foreground">
         This list is the master price list — costing sheets pick materials from here, so prices stay
         consistent across products.
       </p>
-
       <MaterialImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
