@@ -338,26 +338,38 @@ export const profitAndLoss = query({
      */
     const opening = stockLine(STOCK_CODE.openingTrading);
     const closing = stockLine(STOCK_CODE.closingTrading);
-    const openingStock = round((opening?.debit ?? 0) - (opening?.credit ?? 0));
-    const closingStock = round((closing?.credit ?? 0) - (closing?.debit ?? 0));
+    let openingStock = round((opening?.debit ?? 0) - (opening?.credit ?? 0));
+    let closingStock = round((closing?.credit ?? 0) - (closing?.debit ?? 0));
+
+    // If stock trading accounts haven't been posted yet for this period,
+    // evaluate stock treatment automatically from the chart (1310) and shelves:
+    if (openingStock === 0) {
+      const openingAssetLine = stockLine(STOCK_CODE.openingAsset);
+      if (openingAssetLine && openingAssetLine.debit > 0) {
+        openingStock = round(openingAssetLine.debit - openingAssetLine.credit);
+      }
+    }
+    const valuation = await stockValuation(ctx, userId, from, to);
+    if (openingStock === 0 && valuation.opening > 0) {
+      openingStock = valuation.opening;
+    }
+    if (closingStock === 0 && valuation.closing > 0) {
+      closingStock = valuation.closing;
+    }
     /**
      * Materials bought in the period.
      *
-     * A goods received voucher debits inventory rather than the purchase
-     * account — the goods are in stock from the moment they arrive — so
-     * purchases are read from the inventory accounts' debits, with the purchase
-     * account counted as well for a bill raised without a receipt. Reading only
-     * the purchase account would silently drop every receipt from the cost of
-     * goods sold.
+     * Purchases are read from the expense account (5200 Raw material purchased
+     * and any account whose name matches "purchase"). Goods received vouchers
+     * debit an inventory asset (1300/1400) rather than the purchase account,
+     * but those receipts are already captured via the closing stock valuation —
+     * adding them here as well would charge the same goods twice (once as a
+     * purchase and once via COGS when closing stock reduces cost).
      */
-    const inventoryCodes = new Set(["1300", "1400"]);
-    const inventoryReceived = leaves
-      .filter((a) => inventoryCodes.has(a.code))
-      .reduce((s, a) => s + round(a.debit), 0);
     const purchases = round(
       expense
         .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
-        .reduce((s, l) => s + l.amount, 0) + inventoryReceived,
+        .reduce((s, l) => s + l.amount, 0),
     );
     const cogs = round(openingStock + purchases - closingStock);
     /**

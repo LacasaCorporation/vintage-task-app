@@ -839,9 +839,15 @@ function ProfitAndLoss({ range }: { range: Range }) {
    * The ledger's expenses carry the stock lines inside them; the columns below
    * are the accounts on their own, so the stock effect is lifted out here and
    * shown in the trading account instead of hiding in the expense total.
+   * Purchase accounts (5200 / "purchase") are already charged as "To Purchases"
+   * in the trading account, so they are excluded here to prevent the same cost
+   * appearing twice.
    */
+  const purchasesInExpense = (data?.expense ?? [])
+    .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
+    .reduce((s, l) => s + l.amount, 0);
   const stockEffect = trading.openingStock - trading.closingStock;
-  const otherExpenses = totalExpense - stockEffect;
+  const otherExpenses = totalExpense - stockEffect - purchasesInExpense;
 
   /**
    * A gain is a debit balance and a loss a credit one, so the two statements
@@ -1151,7 +1157,14 @@ function ProfitAndLoss({ range }: { range: Range }) {
 
       <div className="grid gap-4 xl:grid-cols-2">
         {column("Income", income, totalIncome, GAIN)}
-        {column("Expenses", expense, otherExpenses, LOSS)}
+        {column(
+          "Operating expenses",
+          expense.filter(
+            (l) => l.code !== "5200" && !/purchase/i.test(l.name),
+          ),
+          otherExpenses,
+          LOSS,
+        )}
       </div>
     </div>
   );

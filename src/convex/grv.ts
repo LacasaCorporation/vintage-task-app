@@ -51,7 +51,7 @@ const GRV_MEMO = "Goods received";
  * Reposting is safe: a voucher that posts twice would carry its goods in
  * twice, so the old entry is dropped before the new one is written.
  */
-async function postGrvToLedger(
+export async function postGrvToLedger(
   ctx: MutationCtx,
   userId: Id<"users">,
   grv: Grv,
@@ -459,3 +459,36 @@ export const remove = mutation({
     await ctx.db.delete(id);
   },
 });
+
+/**
+ * Ensures every received voucher has posted its inventory entry to the ledger.
+ * This guarantees that when GRV happens, the stock movement is verified and
+ * shown in the inventory account (1300) and GRIR account (2400) in the ledger.
+ */
+export async function syncReceivedGrvs(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+): Promise<number> {
+  const vouchers = await ctx.db
+    .query("grvs")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+    .collect();
+  let count = 0;
+  for (const grv of vouchers) {
+    if (grv.status === "received" && grv.entryId === undefined && grv.total > 0) {
+      await postGrvToLedger(ctx, ownerId, grv);
+      count++;
+    }
+  }
+  return count;
+}
+
+export const syncGrvLedger = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return 0;
+    return syncReceivedGrvs(ctx, userId);
+  },
+});
+

@@ -9,7 +9,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
 import { creditRefusalMessage, creditState } from "../lib/credit";
-import { nextGrvNumber } from "./grv";
+import { nextGrvNumber, postGrvToLedger } from "./grv";
 
 const MAX_NAME_LENGTH = 120;
 
@@ -240,6 +240,10 @@ export const create = mutation({    args: {
           });
         }
         resolvedGrvId = grvId;
+        const createdGrv = await ctx.db.get(grvId);
+        if (createdGrv !== null) {
+          await postGrvToLedger(ctx, userId, createdGrv);
+        }
       }
     }
     // ── end GRV resolution ───────────────────────────────────────────────────

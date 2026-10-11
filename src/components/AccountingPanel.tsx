@@ -32,6 +32,7 @@ import AccountLedgerDialog from "@/components/AccountLedgerDialog";
 import AccountFormDialog from "@/components/AccountFormDialog";
 import AccountingDashboard from "@/components/AccountingDashboard";
 import ExpenseEnteringPanel from "@/components/ExpenseEnteringPanel";
+import StockTreatmentDialog from "@/components/StockTreatmentDialog";
 import JournalEntryForm, {
   type EntryFormKind,
 } from "@/components/JournalEntryForm";
@@ -175,6 +176,7 @@ export default function AccountingPanel({
     mode: "create" | "edit" | "view";
     id?: Id<"accounts">;
   } | null>(null);
+  const [stockTreatmentOpen, setStockTreatmentOpen] = useState(false);
   const formAccount =
     accountForm?.id === undefined
       ? undefined
@@ -278,6 +280,15 @@ export default function AccountingPanel({
               <span className="hidden text-[11px] text-muted-foreground sm:inline">
                 Click a row to open its ledger
               </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setStockTreatmentOpen(true)}
+                className="h-7 gap-1.5 rounded-lg border-emerald-500/30 bg-emerald-500/[0.06] px-2 text-xs text-emerald-700 hover:bg-emerald-500/10 hover:text-emerald-800 dark:text-emerald-300"
+              >
+                <Scale className="size-3.5" /> Stock treatment
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -565,6 +576,10 @@ export default function AccountingPanel({
             setLedgerAccountId(null);
             window.setTimeout(() => setEntryForm("journal"), 0);
           }}
+      {stockTreatmentOpen && (
+        <StockTreatmentDialog
+          open={stockTreatmentOpen}
+          onClose={() => setStockTreatmentOpen(false)}
         />
       )}
     </div>

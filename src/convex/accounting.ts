@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { GRIR_CODE, moneyAccountIds, STOCK_CODE } from "./accountingDefaults";
 import { stockValuation } from "./stockValuation";
+import { syncReceivedGrvs } from "./grv";
 import { requireItem } from "./authorize";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -264,6 +265,7 @@ async function ensurePostingAccounts(
     });
     added = true;
   }
+  await syncReceivedGrvs(ctx, ownerId);
   return added;
 }
 
@@ -1046,16 +1048,26 @@ export const postStockAdjustment = mutation({
       await ctx.db.delete(entry._id);
     }
 
-    const { opening, closing } = await stockValuation(ctx, userId, from, to);
+    const { opening: shelfOpening, closing } = await stockValuation(ctx, userId, from, to);
+    let opening = shelfOpening;
+    if (opening === 0) {
+      const allLines = await ctx.db
+        .query("journalLines")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+      const existingOpening = allLines
+        .filter((l) => l.accountId === openingAsset._id)
+        .reduce((s, l) => s + l.debit - l.credit, 0);
+      if (existingOpening > 0) opening = Math.round(existingOpening * 100) / 100;
+    }
+
     if (opening === 0 && closing === 0) {
       return { opening: 0, closing: 0, posted: false };
     }
 
-    await postEntry(ctx, userId, {
-      at: to,
-      kind: "opening",
-      memo: `${STOCK_MEMO}${label !== undefined && label !== "" ? ` · ${label}` : ""}`,
-      lines: [
+    const postLines = [];
+    if (opening > 0) {
+      postLines.push(
         {
           accountId: openingAsset._id,
           debit: opening,
@@ -1066,7 +1078,7 @@ export const postStockAdjustment = mutation({
           accountId: openingTrading._id,
           debit: opening,
           credit: 0,
-          memo: "Opening stock to the trading account",
+          memo: "Opening stock in trading account",
         },
         {
           accountId: capital._id,
@@ -1078,8 +1090,12 @@ export const postStockAdjustment = mutation({
           accountId: openingAsset._id,
           debit: 0,
           credit: opening,
-          memo: "Opening stock to the trading account",
+          memo: "Opening stock transferred to trading account",
         },
+      );
+    }
+    if (closing > 0) {
+      postLines.push(
         {
           accountId: closingAsset._id,
           debit: closing,
@@ -1090,12 +1106,89 @@ export const postStockAdjustment = mutation({
           accountId: closingTrading._id,
           debit: 0,
           credit: closing,
-          memo: "Closing stock to the trading account",
+          memo: "Closing stock in trading account",
         },
-      ],
-    });
+      );
+    }
 
-    return { opening, closing, posted: true };
+    if (postLines.length > 0) {
+      await postEntry(ctx, userId, {
+        at: to,
+        kind: "opening",
+        memo: `${STOCK_MEMO}${label !== undefined && label !== "" ? ` · ${label}` : ""}`,
+        lines: postLines,
+      });
+    }
+
+    return { opening, closing, posted: postLines.length > 0 };
+  },
+});
+
+/**
+ * At-a-glance summary of current stock valuation, GRVs received, and ledger stock status.
+ */
+export const stockSummary = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await scopeUserId(ctx);
+    if (userId === null) return null;
+    const now = Date.now();
+    const startOfYear = new Date(new Date().getFullYear(), 0, 1).getTime();
+    const valuation = await stockValuation(ctx, userId, startOfYear, now);
+
+    const accounts = await ctx.db
+      .query("accounts")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const lines = await ctx.db
+      .query("journalLines")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+
+    const byCode = (code: string) => accounts.find((a) => a.code === code);
+    const balance = (code: string) => {
+      const acc = byCode(code);
+      if (!acc) return 0;
+      return round(
+        lines
+          .filter((l) => l.accountId === acc._id)
+          .reduce((s, l) => s + l.debit - l.credit, 0),
+      );
+    };
+
+    const grvs = await ctx.db
+      .query("grvs")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    const receivedGrvs = grvs.filter((g) => g.status === "received");
+    const grvTotal = round(receivedGrvs.reduce((s, g) => s + g.total, 0));
+    const unpostedGrvsCount = receivedGrvs.filter((g) => g.entryId === undefined).length;
+
+    const opening = valuation.opening > 0 ? valuation.opening : balance("1310");
+    const closing = valuation.closing;
+    const purchases = round(balance("1300") + balance("5200"));
+    const cogs = round(opening + purchases - closing);
+
+    return {
+      opening,
+      closing,
+      grvTotal,
+      purchases,
+      cogs,
+      rawInventoryBalance: balance("1300"),
+      openingStockBalance: balance("1310"),
+      closingStockBalance: balance("1320"),
+      postedTradingOpening: balance("5150"),
+      postedTradingClosing: round(
+        lines
+          .filter((l) => {
+            const acc = byCode("5155");
+            return acc && l.accountId === acc._id;
+          })
+          .reduce((s, l) => s + l.credit - l.debit, 0),
+      ),
+      unpostedGrvsCount,
+    };
   },
 });
 
