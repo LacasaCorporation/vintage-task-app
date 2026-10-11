@@ -13,6 +13,30 @@ export type { StockRow };
 /** Quantities are user-entered, so trim float noise off the ledger. */
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
 
+/**
+ * The GRV numbers a purchase bill has already claimed.
+ *
+ * A voucher and the bill that pays for it describe the same delivery: the
+ * voucher wrote its movement into stock, and the bill wrote the matching line.
+ * Counting both would double the goods, so income reads the bill line and skips
+ * the billed voucher's movement — while a voucher no bill has claimed yet still
+ * counts, because nothing else records it.
+ */
+async function billedGrvNumbers(
+  ctx: QueryCtx,
+  ownerId: Id<"users">,
+): Promise<Set<string>> {
+  const vouchers = await ctx.db
+    .query("grvs")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+    .collect();
+  const billed = new Set<string>();
+  for (const voucher of vouchers) {
+    if (voucher.billId !== undefined) billed.add(voucher.number);
+  }
+  return billed;
+}
+
 type MoveArgs = {
   ownerId: Id<"users">;
   material: Doc<"rawMaterials">;
@@ -87,6 +111,7 @@ async function ledgerTotals(
   ownerId: Id<"users">,
   materialId: Id<"rawMaterials">,
 ): Promise<{ income: number; outgoing: number }> {
+  const billedGrvs = await billedGrvNumbers(ctx, ownerId);
   let income = 0;
   const lines = await ctx.db
     .query("purchaseLines")
@@ -102,7 +127,11 @@ async function ledgerTotals(
     .collect();
   for (const m of moves) {
     if (m.materialId !== materialId) continue;
-    if (m.source === "grv" && m.direction === "in") {
+    if (
+      m.source === "grv" &&
+      m.direction === "in" &&
+      !billedGrvs.has(m.ref ?? "")
+    ) {
       income += m.qty;
     }
     // production is the only real consumer; a stop hands the same units back
@@ -180,6 +209,7 @@ export const report = query({
       income.set(line.materialId, (income.get(line.materialId) ?? 0) + line.qty);
     }
 
+    const billedGrvs = await billedGrvNumbers(ctx, userId);
     const allMovements = await ctx.db
       .query("stockMovements")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
@@ -199,9 +229,14 @@ export const report = query({
         outgoing: 0,
         movements: [],
       };
-      // goods received — on a voucher — are stock bought, the same as a
-      // bill line
-      if (m.source === "grv" && m.direction === "in") {
+      // goods received on a voucher are stock bought, but once a bill claims
+      // that voucher its line already counts the delivery, so skip the
+      // movement to avoid counting the same goods twice
+      if (
+        m.source === "grv" &&
+        m.direction === "in" &&
+        !billedGrvs.has(m.ref ?? "")
+      ) {
         entry.lpoIncome += m.qty;
       }
       // only production consumes stock; corrections adjust the opening, and a
