@@ -138,6 +138,16 @@ const settings = defineTable({
       payableAccountId: v.optional(v.id("accounts")),
       salesAccountId: v.optional(v.id("accounts")),
       purchaseAccountId: v.optional(v.id("accounts")),
+      /**
+       * Where a goods received voucher lands its goods. Left unset it falls
+       * back to the standard inventory accounts in the chart.
+       */
+      inventoryAccountId: v.optional(v.id("accounts")),
+      /**
+       * The clearing account a receipt credits and its bill clears. Optional,
+       * so a chart built before goods receipts were posted still works.
+       */
+      grirAccountId: v.optional(v.id("accounts")),
       taxAccountId: v.optional(v.id("accounts")),
       /** Rate offered on new bills and invoices, e.g. 18 for 18%. */
       taxPct: v.optional(v.number()),
@@ -766,6 +776,12 @@ const schema = defineSchema(
        */
       billId: v.optional(v.id("purchases")),
       receivedInto: v.optional(v.number()), // ms, when it was counted in
+      /**
+       * The journal entry that carried these goods into stock. Absent means
+       * they were counted in before receipts posted to the ledger, so the
+       * chart shows nothing for them until it is repaired.
+       */
+      entryId: v.optional(v.id("journalEntries")),
     }).index("by_owner", ["ownerId"]),
 
     /**

@@ -2,10 +2,15 @@ import { mutation, query } from "./_generated/server";
 import { requireItem } from "./authorize";
 import { scopeUserId } from "./org";
 import { stockIn, stockOut } from "./stock";
+import { resolveDefaults, settledTax } from "./accountingDefaults";
+import { postEntry } from "./accounting";
+import { reverseEntry } from "./ledger";
 import type { MutationCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { blendedRate, cleanRate, priceTaxedLines } from "../lib/line-tax";
+
+type Grv = Doc<"grvs">;
 
 const MAX_NAME_LENGTH = 120;
 
@@ -28,6 +33,57 @@ export async function nextGrvNumber(
     if (Number.isFinite(n) && n > max) max = n;
   }
   return `GRV${String(max + 1).padStart(4, "0")}`;
+}
+
+/** The memo every goods-received accrual carries, so they can be told apart. */
+const GRV_MEMO = "Goods received";
+
+/**
+ * Carry a voucher's goods into the ledger.
+ *
+ * Materials arrive on the shelves the moment a voucher is counted in, so the
+ * books have to hold them from that moment: the inventory account is debited
+ * and the goods-received-not-billed account credited, which is the debt owed to
+ * the supplier for goods that are already here. The bill that follows clears
+ * that credit into accounts payable, so the material sits in stock for the
+ * whole gap between arriving and being billed.
+ *
+ * Reposting is safe: a voucher that posts twice would carry its goods in
+ * twice, so the old entry is dropped before the new one is written.
+ */
+async function postGrvToLedger(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  grv: Grv,
+): Promise<void> {
+  await reverseEntry(ctx, userId, grv.entryId);
+  if (grv.total <= 0) {
+    if (grv.entryId !== undefined) {
+      await ctx.db.patch(grv._id, { entryId: undefined });
+    }
+    return;
+  }
+  const d = await resolveDefaults(ctx, userId);
+  const { net, tax } = settledTax(grv.total, grv.taxPct, grv.taxAmount);
+  const entryId = await postEntry(ctx, userId, {
+    at: grv.receivedAt,
+    kind: "journal",
+    memo: `${GRV_MEMO} ${grv.number}${grv.vendor ? ` · ${grv.vendor}` : ""}`,
+    party: grv.vendor?.trim() || undefined,
+    lines: [
+      { accountId: d.inventory._id, debit: net, credit: 0 },
+      ...(tax > 0
+        ? [{ accountId: d.tax._id, debit: tax, credit: 0 }]
+        : []),
+      {
+        accountId: d.grir._id,
+        debit: 0,
+        credit: net + tax,
+        memo: `${grv.vendor ?? grv.number} — not yet billed`,
+      },
+    ],
+  });
+  await ctx.db.patch(grv._id, { entryId });
 }
 
 /**
@@ -109,6 +165,9 @@ async function countIn(
     });
   }
   await ctx.db.patch(grv._id, { status: "received", receivedInto: Date.now() });
+  // the goods are on the shelves now, so they are in the books too
+  const refreshed = await ctx.db.get(grv._id);
+  if (refreshed !== null) await postGrvToLedger(ctx, userId, refreshed);
   // a delivery against an order closes that order out, so it is never received
   // a second time through the order's own Receive action
   if (grv.lpoId !== undefined) {
@@ -293,6 +352,8 @@ export const update = mutation({
           at: args.receivedAt ?? grv.receivedAt,
         });
       }
+      // the voucher was revised, so what the books carry is revised with it
+      await reverseEntry(ctx, userId, grv.entryId);
     }
 
     let vendor = (args.vendor ?? "").trim().slice(0, MAX_NAME_LENGTH);
@@ -315,7 +376,12 @@ export const update = mutation({
       taxPct: blendedRate(priced.net, priced.tax) || undefined,
       total: priced.grand,
       taxAmount: priced.tax,
+      entryId: undefined,
     });
+    if (grv.status === "received") {
+      const refreshed = await ctx.db.get(args.id);
+      if (refreshed !== null) await postGrvToLedger(ctx, userId, refreshed);
+    }
   },
 });
 
@@ -358,6 +424,8 @@ export const remove = mutation({
           at: grv.receivedAt,
         });
       }
+      // the goods never arrived, so neither does the debt that came with them
+      await reverseEntry(ctx, userId, grv.entryId);
     }
     // an order that was received through this voucher is no longer covered by
     // it: the link is cleared and the order goes back to being outstanding,

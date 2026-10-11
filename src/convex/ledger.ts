@@ -11,6 +11,8 @@ import { resolveDefaults, round2, settledTax } from "./accountingDefaults";
  *
  *   bill          debit purchases + tax, credit payable
  *   bill settled  debit payable, credit cash or bank
+ *   goods in      debit inventory, credit goods received not billed
+ *   bill for them debit goods received not billed, credit payable
  *   invoice       debit receivable, credit sales + tax
  *   invoice paid  debit cash or bank, credit receivable
  *
@@ -28,6 +30,33 @@ import { resolveDefaults, round2, settledTax } from "./accountingDefaults";
  */
 
 type Ctx = MutationCtx;
+
+/**
+ * What a goods received voucher left in the not-billed account.
+ *
+ * Read back from the accrual's own credit rather than from the voucher's
+ * total, so a voucher whose total was revised after it posted still clears
+ * exactly what it wrote. Zero when the voucher never posted — which is what a
+ * receipt counted in before goods receipts posted to the ledger looks like,
+ * and clearing nothing is the honest reading of that.
+ */
+async function accruedForGrv(
+  ctx: Ctx,
+  ownerId: Id<"users">,
+  grv: Doc<"grvs">,
+): Promise<number> {
+  if (grv.entryId === undefined) return 0;
+  const { grir } = await resolveDefaults(ctx, ownerId);
+  const lines = await ctx.db
+    .query("journalLines")
+    .withIndex("by_entry", (q) => q.eq("entryId", grv.entryId!))
+    .collect();
+  return round2(
+    lines
+      .filter((l) => l.accountId === grir._id && l.ownerId === ownerId)
+      .reduce((s, l) => s + l.credit - l.debit, 0),
+  );
+}
 
 /** Remove an entry and its lines — the reversal half of every re-post. */
 export async function reverseEntry(
@@ -70,6 +99,61 @@ export async function postBill(
   // `taxAmount` is what the lines actually added up to; only an older
   // document without it falls back to deriving tax from a single rate
   const { net, tax } = settledTax(bill.total, bill.taxPct, bill.taxAmount);
+  const owing = round2(net + tax);
+
+  /**
+   * A bill raised from a goods received voucher pays for goods that were
+   * already in stock and already owed: the voucher debited inventory and
+   * credited goods-received-not-billed. So this entry clears that credit into
+   * accounts payable rather than charging the material a second time, and the
+   * balance sheet is left carrying it as stock instead of an expense.
+   *
+   * A bill raised without a voucher has no accrual to clear, so it charges
+   * materials to the purchase account as it always did.
+   */
+  if (bill.grvId !== undefined) {
+    const grv = await ctx.db.get(bill.grvId);
+    if (grv !== null && grv.ownerId === ownerId) {
+      const accrued = await accruedForGrv(ctx, ownerId, grv);
+      const { grir, inventory } = await resolveDefaults(ctx, ownerId);
+      const diff = round2(bill.total - accrued);
+      const lines: {
+        accountId: Id<"accounts">;
+        debit: number;
+        credit: number;
+        memo?: string;
+      }[] = [
+        {
+          accountId: grir._id,
+          debit: accrued,
+          credit: 0,
+          memo: `Clears ${grv.number}`,
+        },
+        // the paperwork priced the goods differently from what arrived, so the
+        // cost of the stock still on the shelves is restated to the real figure
+        {
+          accountId: inventory._id,
+          debit: diff > 0 ? diff : 0,
+          credit: diff < 0 ? -diff : 0,
+          memo: "Price difference on the bill",
+        },
+        {
+          accountId: d.payable._id,
+          debit: 0,
+          credit: round2(bill.total),
+          memo: bill.supplier?.trim() || undefined,
+        },
+      ];
+      return postEntry(ctx, ownerId, {
+        at: bill.purchasedAt,
+        kind: "journal",
+        memo: `Bill ${bill.number} · ${grv.number}`,
+        party: bill.supplier?.trim() || undefined,
+        lines,
+      });
+    }
+  }
+
   const lines: {
     accountId: Id<"accounts">;
     debit: number;
@@ -83,7 +167,7 @@ export async function postBill(
   lines.push({
     accountId: d.payable._id,
     debit: 0,
-    credit: round2(net + tax),
+    credit: owing,
     memo: bill.supplier?.trim() || undefined,
   });
 
