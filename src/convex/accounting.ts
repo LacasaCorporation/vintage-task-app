@@ -1,6 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
-import { moneyAccountIds, STOCK_CODE } from "./accountingDefaults";
+import { GRIR_CODE, moneyAccountIds, STOCK_CODE } from "./accountingDefaults";
 import { stockValuation } from "./stockValuation";
 import { requireItem } from "./authorize";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -101,6 +101,29 @@ const STOCK_ACCOUNTS: {
 ];
 
 /**
+ * Where a goods received voucher lands its goods.
+ *
+ * A receipt puts materials on the shelves the moment they arrive, long before
+ * the paperwork, so the ledger has to hold them from that moment too — or the
+ * chart shows nil stock while the shelves are full. Credited by the receipt
+ * and cleared by the bill that follows, it carries no balance of its own once
+ * the bill lands.
+ */
+const GRIR_ACCOUNTS: {
+  code: string;
+  name: string;
+  type: AccountType;
+  parent: string;
+}[] = [
+  {
+    code: GRIR_CODE,
+    name: "Goods received not billed",
+    type: "liability",
+    parent: "2000",
+  },
+];
+
+/**
  * The standard chart every new firm starts from. Group rows (Assets, Liabilities…)
  * are headings only; the rest are the posting accounts.
  */
@@ -190,6 +213,7 @@ const DEFAULT_ACCOUNTS: {
   { code: "5500", name: "Utilities", type: "expense", parent: "5000" },
 
   ...STOCK_ACCOUNTS,
+  ...GRIR_ACCOUNTS,
 ];
 
 /** JE0001, JE0002, … */
@@ -210,13 +234,14 @@ async function nextEntryNumber(
 }
 
 /**
- * Give a chart that predates the stock accounts the ones it is missing.
+ * Give a chart that predates the posting accounts the ones it is missing.
  *
- * Opening and closing stock are ordinary posting accounts, so a firm that
- * already has a chart is not rebuilt: the missing rows are added under the
- * same headings the rest of the chart uses, once, and left alone afterwards.
+ * Opening and closing stock, and the goods-received-not-billed clearing
+ * account, are ordinary posting accounts, so a firm that already has a chart is
+ * not rebuilt: the missing rows are added under the same headings the rest of
+ * the chart uses, once, and left alone afterwards.
  */
-async function ensureStockAccounts(
+async function ensurePostingAccounts(
   ctx: MutationCtx,
   ownerId: Id<"users">,
 ): Promise<boolean> {
@@ -226,7 +251,7 @@ async function ensureStockAccounts(
     .collect();
   const byCode = new Map(accounts.map((a) => [a.code, a]));
   let added = false;
-  for (const a of STOCK_ACCOUNTS) {
+  for (const a of [...STOCK_ACCOUNTS, ...GRIR_ACCOUNTS]) {
     if (byCode.has(a.code)) continue;
     const parentId = byCode.get(a.parent)?._id;
     if (parentId === undefined) continue;
@@ -252,7 +277,7 @@ export const ensureDefaults = mutation({
       .query("accounts")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .first();
-    if (existing !== null) return ensureStockAccounts(ctx, userId);
+    if (existing !== null) return ensurePostingAccounts(ctx, userId);
     // Parents are written first and their ids remembered, so a child can be
     // filed under its heading in the same pass. Codes run in ascending order
     // and a group always carries a lower code than what sits under it.
@@ -955,6 +980,15 @@ export const postStockAdjustment = mutation({
     const userId = await scopeUserId(ctx);
     if (userId === null) throw new Error("Sign in to post to the ledger.");
     await requireItem(ctx, userId, "accounting", "create");
+
+    /**
+     * A chart seeded before stock became postable never received the accounts
+     * this posting writes to, so the posting would fail with "missing from the
+     * chart" for a firm that has done nothing wrong. The backfill exists, but
+     * only `ensureDefaults` reached it and only for an empty chart — so the
+     * operation that needs the rows now ensures them itself.
+     */
+    await ensurePostingAccounts(ctx, userId);
 
     const accounts = await ctx.db
       .query("accounts")

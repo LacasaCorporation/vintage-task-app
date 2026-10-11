@@ -1,24 +1,25 @@
 import { api } from "@/convex/_generated/api";
 import PageTabs, { type PageTab } from "@/components/PageTabs";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   AlertTriangle,
   BookOpen,
   Boxes,
-  CalendarDays,
   Check,
   Download,
   FileBarChart,
+  Loader2,
   Package,
   Receipt,
   ShoppingCart,
   TrendingUp,
-  Warehouse,
+  Upload,
 } from "lucide-react";
 import type { ReportsArea } from "@/components/CostingSidebar";
-import TradingAccount from "./TradingAccount";
-import { useMemo, useState } from "react";
-import { useQuery } from "convex/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
+import { toast } from "@/lib/toast";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
 
@@ -382,21 +383,19 @@ export default function ReportsPanel({ area }: { area: ReportArea }) {
 
 /* ── financial ────────────────────────────────────────────────────── */
 
-type FinTab = "trading" | "trial" | "position" | "pl" | "day";
+type FinTab = "trial" | "pl" | "position";
 
 const FIN_TABS: readonly PageTab<FinTab>[] = [
-  { id: "trading", label: "Trading account", icon: Warehouse },
   { id: "trial", label: "Trial balance", icon: BookOpen },
+  { id: "pl", label: "Profit and loss account", icon: TrendingUp },
   { id: "position", label: "Balance sheet", icon: FileBarChart },
-  { id: "pl", label: "Profit & loss", icon: TrendingUp },
-  { id: "day", label: "Day book", icon: CalendarDays },
 ];
 
 export const GAIN = "text-emerald-600 dark:text-emerald-400";
 export const LOSS = "text-rose-600 dark:text-rose-400";
 
 function FinancialReports({ range }: { range: Range }) {
-  const [tab, setTab] = useState<FinTab>("trading");
+  const [tab, setTab] = useState<FinTab>("trial");
   return (
     <div className="space-y-4">
       <SubTabs
@@ -405,11 +404,9 @@ function FinancialReports({ range }: { range: Range }) {
         onChange={setTab}
         label="Financial reports"
       />
-      {tab === "trading" && <TradingAccount range={range} />}
       {tab === "trial" && <TrialBalance range={range} />}
-      {tab === "position" && <BalanceSheet range={range} />}
       {tab === "pl" && <ProfitAndLoss range={range} />}
-      {tab === "day" && <DayBook range={range} />}
+      {tab === "position" && <BalanceSheet range={range} />}
     </div>
   );
 }
@@ -715,6 +712,28 @@ function ProfitAndLoss({ range }: { range: Range }) {
     from: range.from,
     to: range.to,
   });
+  /**
+   * What the shelves actually hold, read the same way the stock posting reads
+   * them. The statement below is struck from the ledger, and the ledger only
+   * holds stock once it has been posted — until then these figures and the
+   * printed ones disagree, and the reader deserves to see both rather than a
+   * silently zeroed cost of goods sold.
+   */
+  const valuation = useQuery(api.reports.accountingValuation, {
+    from: range.from,
+    to: range.to,
+  });
+  const postStock = useMutation(api.accounting.postStockAdjustment);
+  const [posting, setPosting] = useState(false);
+
+  const shelfOpening = valuation?.opening ?? 0;
+  const shelfClosing = valuation?.closing ?? 0;
+  /** Purchases, on the same footing the ledger reads them: every account. */
+  const shelfPurchases = (data?.expense ?? [])
+    .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
+    .reduce((s, l) => s + l.amount, 0);
+  const shelfCogs = shelfOpening + shelfPurchases - shelfClosing;
+
   const income = data?.income ?? [];
   const expense = data?.expense ?? [];
   const totalIncome = data?.totalIncome ?? 0;
@@ -729,6 +748,93 @@ function ProfitAndLoss({ range }: { range: Range }) {
     otherIncome: 0,
     grossProfit: 0,
   };
+
+  /** Whether the ledger's stock is missing, present, or behind the shelves. */
+  const inLedger = trading.openingStock !== 0 || trading.closingStock !== 0;
+  const ledgerBehind =
+    inLedger &&
+    (Math.abs(trading.openingStock - shelfOpening) > 0.01 ||
+      Math.abs(trading.closingStock - shelfClosing) > 0.01);
+  const stockToPost = inLedger && !ledgerBehind ? 0 : shelfOpening + shelfClosing;
+
+  /**
+   * Put the two figures in the books.
+   *
+   * The statement reads the ledger, so until this is posted the opening and
+   * closing stock print as nothing and every purchase looks like it was sold at
+   * a loss. Posting again is safe — it replaces the last adjustment.
+   */
+  const postToLedger = async () => {
+    setPosting(true);
+    try {
+      const res = await postStock({
+        from: range.from,
+        to: range.to,
+        label: range.label,
+      });
+      toast.success(
+        res.posted
+          ? `Posted opening stock ${money(res.opening)} and closing stock ${money(res.closing)} to the ledger.`
+          : "There is no stock on hand in this period to post.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not post the stock.",
+      );
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  /**
+   * Auto-post when the period changes, so a fresh period never opens with a
+   * cost of goods sold that forgets what is on the shelves. The figures come
+   * from the shelves, so the effect waits for the valuation to arrive — a
+   * half-loaded reading would post the wrong stock.
+   */
+  const prevFromRef = useRef<number | null>(null);
+  const prevToRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
+  const postStockRef = useRef(postStock);
+
+  useEffect(() => {
+    postStockRef.current = postStock;
+  }, [postStock]);
+
+  useEffect(() => {
+    if (valuation === undefined) return;
+
+    const changed =
+      prevFromRef.current !== range.from || prevToRef.current !== range.to;
+    if (isMountedRef.current) {
+      isMountedRef.current = false;
+      prevFromRef.current = range.from;
+      prevToRef.current = range.to;
+      return;
+    }
+    if (!changed) return;
+    prevFromRef.current = range.from;
+    prevToRef.current = range.to;
+
+    // Only a period that actually holds stock is worth posting.
+    if (!(shelfOpening > 0 || shelfClosing > 0) || posting) return;
+
+    void postStockRef
+      .current({ from: range.from, to: range.to, label: range.label })
+      .then((res) => {
+        if (res.posted) {
+          toast.info(`Auto-posted stock for ${range.label}`);
+        }
+      })
+      .catch((error: unknown) => {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Could not auto-post the stock.",
+        );
+      });
+  }, [valuation, range.from, range.to, range.label, shelfOpening, shelfClosing, posting]);
+
   /**
    * The ledger's expenses carry the stock lines inside them; the columns below
    * are the accounts on their own, so the stock effect is lifted out here and
@@ -866,11 +972,51 @@ function ProfitAndLoss({ range }: { range: Range }) {
         </Proof>
       )}
 
-      {trading.openingStock === 0 && trading.closingStock === 0 && (
+      {/* ── what the shelves hold, against what the books carry ─────────── */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Tile
+          label="Opening stock"
+          value={money(shelfOpening)}
+          tone="text-sky-600 dark:text-sky-400"
+          hint="On hand at the start of the period"
+        />
+        <Tile
+          label="Purchases"
+          value={money(shelfPurchases)}
+          tone="text-amber-600 dark:text-amber-400"
+          hint="Materials bought during the period"
+        />
+        <Tile
+          label="Closing stock"
+          value={money(shelfClosing)}
+          tone="text-violet-600 dark:text-violet-400"
+          hint="On hand at the end of the period"
+        />
+        <Tile
+          label="Cost of goods sold"
+          value={money(shelfCogs)}
+          tone="text-rose-700 dark:text-rose-300"
+          hint="Opening + purchases − closing"
+        />
+      </div>
+
+      {stockToPost > 0 && (
         <Proof ok={false}>
-          No opening or closing stock has been posted for this period. Post it
-          from the Trading account, and these two lines will carry what the
-          shelves are actually worth.
+          {inLedger ? (
+            <>
+              The ledger holds opening stock {money(trading.openingStock)} and
+              closing stock {money(trading.closingStock)}, but the shelves hold{" "}
+              {money(shelfOpening)} and {money(shelfClosing)}. Post the shelves
+              to bring the two together.
+            </>
+          ) : (
+            <>
+              No opening or closing stock has been posted for this period, so
+              the statement below charges the whole {money(shelfCogs)} against
+              a nil sale. Post the shelf figures and the trading account will
+              show what was actually sold.
+            </>
+          )}
         </Proof>
       )}
 
@@ -878,6 +1024,7 @@ function ProfitAndLoss({ range }: { range: Range }) {
         title="Trading and Profit and Loss Account"
         count={`For the period ${range.label}`}
         actions={
+<<<<<<< HEAD
           <CsvButton
             what="trading and profit and loss account"
             onClick={() =>
@@ -903,6 +1050,52 @@ function ProfitAndLoss({ range }: { range: Range }) {
               ])
             }
           />
+=======
+          <>
+            {stockToPost > 0 && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void postToLedger()}
+                disabled={posting}
+                className="h-7 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
+              >
+                {posting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Upload className="size-3.5" />
+                )}
+                {posting ? "Posting…" : "Post stock to ledger"}
+              </Button>
+            )}
+            <CsvButton
+              what="trading and profit and loss account"
+              onClick={() =>
+                downloadCsv("trading-and-profit-and-loss.csv", [
+                  ["Trading and Profit and Loss Account", "Dr", "Cr"],
+                  ...tradingRows.flatMap((r) => {
+                    if (r.section !== undefined) return [[r.section, "", ""]];
+                    if (r.totals !== undefined) {
+                      return [
+                        ["Total", num(r.totals.dr), num(r.totals.cr)],
+                      ];
+                    }
+                    const rows: (string | number)[][] = [
+                      [
+                        r.dr?.label ?? "",
+                        r.dr === undefined ? "" : num(r.dr.amount),
+                        r.cr?.label ?? "",
+                        r.cr === undefined ? "" : num(r.cr.amount),
+                      ],
+                    ];
+                    return rows;
+                  }),
+                ])
+              }
+            />
+          </>
+>>>>>>> luck-zipper
         }
       >
         <TableWrap>
@@ -979,7 +1172,12 @@ function ProfitAndLoss({ range }: { range: Range }) {
           <span className={cn("font-medium", profit < 0 ? LOSS : GAIN)}>
             {money(profit)}
           </span>
+<<<<<<< HEAD
           .
+=======
+          . The figures above are what the shelves hold; the statement is struck
+          from the ledger, so post the stock to make the two agree.
+>>>>>>> luck-zipper
         </p>
       </Panel>
 
@@ -987,6 +1185,7 @@ function ProfitAndLoss({ range }: { range: Range }) {
         {column("Income", income, totalIncome, GAIN)}
         {column("Expenses", expense, otherExpenses, LOSS)}
       </div>
+<<<<<<< HEAD
     </div>
   );
 }
@@ -1132,6 +1331,8 @@ function DayBook({ range }: { range: Range }) {
           </TableWrap>
         )}
       </Panel>
+=======
+>>>>>>> luck-zipper
     </div>
   );
 }

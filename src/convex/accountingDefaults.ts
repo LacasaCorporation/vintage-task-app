@@ -26,6 +26,17 @@ export type AccountingDefaults = {
   sales: Doc<"accounts">;
   /** Where purchased stock and materials land. */
   purchase: Doc<"accounts">;
+  /**
+   * Raw materials and finished goods sitting in inventory. Where a goods
+   * received voucher lands its goods.
+   */
+  inventory: Doc<"accounts">;
+  /**
+   * Goods received but not yet billed. A voucher credits it and the bill that
+   * follows clears it, so the material is in stock from the moment it arrives
+   * rather than waiting for the paperwork.
+   */
+  grir: Doc<"accounts">;
   /** GST / VAT / sales tax collected and paid. */
   tax: Doc<"accounts">;
   /** Rate offered on new documents, 0 when unset. */
@@ -40,8 +51,16 @@ const FALLBACK_CODE = {
   payable: ["2100"],
   sales: ["4100"],
   purchase: ["5200", "5100"],
+  inventory: ["1300", "1400"],
+  grir: ["2400"],
   tax: ["2300"],
 } as const;
+
+/**
+ * Goods received but not yet billed — the account that lets a receipt put
+ * stock on the books before the paperwork arrives.
+ */
+export const GRIR_CODE = "2400";
 
 /**
  * The two pairs of stock accounts.
@@ -147,6 +166,18 @@ export async function resolveDefaults(
       configured?.purchaseAccountId,
       FALLBACK_CODE.purchase,
       "A purchases account",
+    ),
+    inventory: pick(
+      accounts,
+      configured?.inventoryAccountId,
+      FALLBACK_CODE.inventory,
+      "An inventory account",
+    ),
+    grir: pick(
+      accounts,
+      configured?.grirAccountId,
+      FALLBACK_CODE.grir,
+      "A goods-received-not-billed account",
     ),
     tax: pick(accounts, configured?.taxAccountId, FALLBACK_CODE.tax, "The tax account"),
     taxPct: Math.max(0, configured?.taxPct ?? 0),

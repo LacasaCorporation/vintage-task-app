@@ -180,9 +180,18 @@ export default function AccountingPanel({
       ? undefined
       : (accounts ?? []).find((a) => a._id === accountForm.id);
 
-  // a brand-new firm has no chart, so seed the standard one on first open
+  /**
+   * A brand-new firm has no chart, so seed the standard one on first open.
+   *
+   * This also covers a chart seeded before stock became postable. `ensureDefaults`
+   * adds the missing opening and closing stock accounts without touching the
+   * rest of the chart, and it is idempotent — calling it when nothing is missing
+   * costs one read. Gating on "the chart is empty" alone left those firms
+   * permanently unable to post stock, because the chart of accounts is the only
+   * page that can reveal the accounts are absent before the posting fails.
+   */
   useEffect(() => {
-    if (accounts !== undefined && accounts.length === 0) {
+    if (accounts !== undefined) {
       void ensureDefaults().catch(() => undefined);
     }
   }, [accounts, ensureDefaults]);

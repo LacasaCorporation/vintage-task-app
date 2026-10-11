@@ -340,10 +340,24 @@ export const profitAndLoss = query({
     const closing = stockLine(STOCK_CODE.closingTrading);
     const openingStock = round((opening?.debit ?? 0) - (opening?.credit ?? 0));
     const closingStock = round((closing?.credit ?? 0) - (closing?.debit ?? 0));
+    /**
+     * Materials bought in the period.
+     *
+     * A goods received voucher debits inventory rather than the purchase
+     * account — the goods are in stock from the moment they arrive — so
+     * purchases are read from the inventory accounts' debits, with the purchase
+     * account counted as well for a bill raised without a receipt. Reading only
+     * the purchase account would silently drop every receipt from the cost of
+     * goods sold.
+     */
+    const inventoryCodes = new Set(["1300", "1400"]);
+    const inventoryReceived = leaves
+      .filter((a) => inventoryCodes.has(a.code))
+      .reduce((s, a) => s + round(a.debit), 0);
     const purchases = round(
       expense
         .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
-        .reduce((s, l) => s + l.amount, 0),
+        .reduce((s, l) => s + l.amount, 0) + inventoryReceived,
     );
     const cogs = round(openingStock + purchases - closingStock);
     /**
