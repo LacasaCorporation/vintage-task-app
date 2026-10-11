@@ -682,6 +682,33 @@ function BalanceSheet({ range }: { range: Range }) {
 
 export type PlLine = { _id: string; code: string; name: string; amount: number };
 
+/**
+ * One side of the ledger statement: what it is called, and what it came to.
+ * A side is left out rather than shown as zero, so a line that does not apply
+ * simply does not appear.
+ */
+type LedgerSide = { label: string; amount: number } | undefined;
+
+/** One line of the statement — a debit side, a credit side, or neither. */
+type LedgerRow = {
+  dr?: LedgerSide;
+  cr?: LedgerSide;
+  /** A heading that spans both sides. */
+  section?: string;
+  /** The rule and the totals under it. */
+  totals?: { dr: number; cr: number };
+};
+
+/**
+ * The trading account and the profit and loss account, as one document.
+ *
+ * The two statements are one statement: the trading account strikes the gross
+ * profit, the profit and loss account carries it down, and neither makes sense
+ * read on its own. So they are printed as a single ledger with a debit side and
+ * a credit side rather than as two tables the reader has to add up together —
+ * the carried figure appears in both halves and both halves balance, which is
+ * how the statement proves itself.
+ */
 function ProfitAndLoss({ range }: { range: Range }) {
   const { format: money } = useWorkspaceCurrency();
   const data = useQuery(api.reports.profitAndLoss, {
@@ -709,6 +736,59 @@ function ProfitAndLoss({ range }: { range: Range }) {
    */
   const stockEffect = trading.openingStock - trading.closingStock;
   const otherExpenses = totalExpense - stockEffect;
+
+  /**
+   * A gain is a debit balance and a loss a credit one, so the two statements
+   * put their carried figure on whichever side the arithmetic leaves it. A
+   * gross loss is a credit to the trading account and a debit brought into the
+   * profit and loss account; a net loss is credited to it, exactly as a gross
+   * profit is debited.
+   */
+  const grossGain = trading.grossProfit >= 0 ? trading.grossProfit : 0;
+  const grossLoss = trading.grossProfit < 0 ? -trading.grossProfit : 0;
+  const netGain = profit >= 0 ? profit : 0;
+  const netLoss = profit < 0 ? -profit : 0;
+
+  const tradingRows: LedgerRow[] = [
+    { section: "Trading account" },
+    {
+      dr: { label: "To Opening stock", amount: trading.openingStock },
+      cr: { label: "By Sales", amount: trading.sales },
+    },
+    {
+      dr: { label: "To Purchases", amount: trading.purchases },
+      cr: { label: "By Closing stock", amount: trading.closingStock },
+    },
+    {
+      dr: grossGain > 0 ? { label: "To Gross profit c/d", amount: grossGain } : undefined,
+      cr: grossLoss > 0 ? { label: "By Gross loss on trading c/d", amount: grossLoss } : undefined,
+    },
+    {
+      totals: {
+        dr: trading.openingStock + trading.purchases + grossGain,
+        cr: trading.sales + trading.closingStock + grossLoss,
+      },
+    },
+    { section: "Profit and loss account" },
+    {
+      dr: grossLoss > 0 ? { label: "To Gross loss b/d", amount: grossLoss } : undefined,
+      cr: grossGain > 0 ? { label: "By Gross profit b/d", amount: grossGain } : undefined,
+    },
+    {
+      dr: { label: "To Operating expenses", amount: otherExpenses },
+      cr: { label: "By Other income", amount: trading.otherIncome },
+    },
+    {
+      dr: netGain > 0 ? { label: "To Net profit c/d", amount: netGain } : undefined,
+      cr: netLoss > 0 ? { label: "By Net loss c/d", amount: netLoss } : undefined,
+    },
+    {
+      totals: {
+        dr: grossLoss + otherExpenses + netGain,
+        cr: grossGain + trading.otherIncome + netLoss,
+      },
+    },
+  ];
 
   const column = (
     title: string,
@@ -795,86 +875,118 @@ function ProfitAndLoss({ range }: { range: Range }) {
       )}
 
       <Panel
-        title="Trading account"
-        count={`${range.label} · opening stock + purchases − closing stock = cost of goods sold`}
+        title="Trading and Profit and Loss Account"
+        count={`For the period ${range.label}`}
+        actions={
+          <CsvButton
+            what="trading and profit and loss account"
+            onClick={() =>
+              downloadCsv("trading-and-profit-and-loss.csv", [
+                ["Trading and Profit and Loss Account", "Dr", "Cr"],
+                ...tradingRows.flatMap((r) => {
+                  if (r.section !== undefined) return [[r.section, "", ""]];
+                  if (r.totals !== undefined) {
+                    return [
+                      ["Total", num(r.totals.dr), num(r.totals.cr)],
+                    ];
+                  }
+                  const rows: (string | number)[][] = [
+                    [
+                      r.dr?.label ?? "",
+                      r.dr === undefined ? "" : num(r.dr.amount),
+                      r.cr?.label ?? "",
+                      r.cr === undefined ? "" : num(r.cr.amount),
+                    ],
+                  ];
+                  return rows;
+                }),
+              ])
+            }
+          />
+        }
       >
-        <div className="space-y-2 p-4 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Opening stock</span>
-            <span className="tabular-nums">{money(trading.openingStock)}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Add: purchases</span>
-            <span className="tabular-nums">{money(trading.purchases)}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Less: closing stock</span>
-            <span className="tabular-nums text-violet-600 dark:text-violet-400">
-              −{money(trading.closingStock)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between border-t border-border/60 pt-2 font-semibold">
-            <span>Cost of goods sold</span>
-            <span className="tabular-nums">{money(trading.cogs)}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Sales</span>
-            <span className="tabular-nums">{money(trading.sales)}</span>
-          </div>
-          <div className="flex items-center justify-between border-t border-border/60 pt-2 font-semibold">
-            <span>Gross profit</span>
-            <span
-              className={cn(
-                "tabular-nums",
-                trading.grossProfit < 0 ? LOSS : GAIN,
-              )}
-            >
-              {money(trading.grossProfit)}
-            </span>
-          </div>
-        </div>
+        <TableWrap>
+          <thead>
+            <tr className={HEAD}>
+              <th className={CELL_LEFT}>Debit</th>
+              <th className={TH_R}>Amount</th>
+              <th className={CELL_LEFT}>Credit</th>
+              <th className={TH_R}>Amount</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/60">
+            {tradingRows.map((r, i) =>
+              r.section !== undefined ? (
+                <tr key={i} className={HEAD}>
+                  <td className={CELL_LEFT} colSpan={4}>
+                    {r.section}
+                  </td>
+                </tr>
+              ) : (
+                <tr key={i} className={r.totals !== undefined ? TOTAL : ROW}>
+                  <td className={`${CELL_LEFT} font-medium`}>
+                    {r.dr?.label ?? ""}
+                  </td>
+                  <td
+                    className={cn(
+                      CELL,
+                      r.dr === undefined && "text-muted-foreground",
+                    )}
+                  >
+                    {r.dr === undefined ? "" : money(r.dr.amount)}
+                  </td>
+                  <td className={`${CELL_LEFT} font-medium`}>
+                    {r.cr?.label ?? ""}
+                  </td>
+                  <td
+                    className={cn(
+                      CELL,
+                      r.cr === undefined && "text-muted-foreground",
+                    )}
+                  >
+                    {r.cr === undefined ? "" : money(r.cr.amount)}
+                  </td>
+                </tr>
+              ),
+            )}
+            <tr className={TOTAL}>
+              <td className={CELL_LEFT}>Gross profit on sales</td>
+              <td
+                className={cn(
+                  CELL,
+                  trading.grossProfit < 0 ? LOSS : GAIN,
+                )}
+              >
+                {money(trading.grossProfit)}
+              </td>
+              <td className={CELL_LEFT}>
+                {profit < 0 ? "Net loss" : "Net profit"} for the period
+              </td>
+              <td className={cn(CELL, profit < 0 ? LOSS : GAIN)}>
+                {money(profit)}
+              </td>
+            </tr>
+          </tbody>
+        </TableWrap>
+        <p className="border-t border-border/60 px-4 py-2.5 text-xs text-muted-foreground">
+          The gross profit struck by the trading account is carried down into
+          the profit and loss account, and the two halves of the statement
+          balance: cost of goods sold {money(trading.cogs)}, gross profit{" "}
+          <span className={cn("font-medium", trading.grossProfit < 0 ? LOSS : GAIN)}>
+            {money(trading.grossProfit)}
+          </span>
+          , net {profit < 0 ? "loss" : "profit"}{" "}
+          <span className={cn("font-medium", profit < 0 ? LOSS : GAIN)}>
+            {money(profit)}
+          </span>
+          .
+        </p>
       </Panel>
 
       <div className="grid gap-4 xl:grid-cols-2">
         {column("Income", income, totalIncome, GAIN)}
         {column("Expenses", expense, otherExpenses, LOSS)}
       </div>
-
-      <Panel title="Result">
-        <div className="space-y-2 p-4 text-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">
-              Gross profit on sales
-            </span>
-            <span
-              className={cn(
-                "tabular-nums",
-                trading.grossProfit < 0 ? LOSS : GAIN,
-              )}
-            >
-              {money(trading.grossProfit)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Add: other income</span>
-            <span className="tabular-nums">{money(trading.otherIncome)}</span>
-          </div>
-          <div className="flex items-center justify-between border-t border-border/60 pt-2">
-            <span className="text-muted-foreground">Less other expenses</span>
-            <span className={cn("tabular-nums", LOSS)}>
-              −{money(otherExpenses)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between border-t border-border/60 pt-2 text-base font-semibold">
-            <span>
-              {profit < 0 ? "Loss for the period" : "Profit for the period"}
-            </span>
-            <span className={cn("tabular-nums", profit < 0 ? LOSS : GAIN)}>
-              {money(profit)}
-            </span>
-          </div>
-        </div>
-      </Panel>
     </div>
   );
 }

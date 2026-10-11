@@ -3,6 +3,7 @@ import {
   CalendarDays,
   Landmark,
   LayoutDashboard,
+  Receipt,
   Scale,
   ScrollText,
   Wallet,
@@ -21,6 +22,7 @@ export type AccountingTab =
   | "accounts"
   | "journal"
   | "receipt"
+  | "expenses"
   | "cashbook"
   | "daybook"
   | "balance"
@@ -61,6 +63,12 @@ export const ACCOUNTING_TABS: {
     label: "Receipt / payment",
     icon: Wallet,
     hint: "Money received from a customer, or paid to a supplier",
+  },
+  {
+    id: "expenses",
+    label: "Expense entering",
+    icon: Receipt,
+    hint: "Money out that is not stock, split into direct and indirect",
   },
   {
     id: "cashbook",
