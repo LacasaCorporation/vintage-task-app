@@ -1024,33 +1024,6 @@ function ProfitAndLoss({ range }: { range: Range }) {
         title="Trading and Profit and Loss Account"
         count={`For the period ${range.label}`}
         actions={
-<<<<<<< HEAD
-          <CsvButton
-            what="trading and profit and loss account"
-            onClick={() =>
-              downloadCsv("trading-and-profit-and-loss.csv", [
-                ["Trading and Profit and Loss Account", "Dr", "Cr"],
-                ...tradingRows.flatMap((r) => {
-                  if (r.section !== undefined) return [[r.section, "", ""]];
-                  if (r.totals !== undefined) {
-                    return [
-                      ["Total", num(r.totals.dr), num(r.totals.cr)],
-                    ];
-                  }
-                  const rows: (string | number)[][] = [
-                    [
-                      r.dr?.label ?? "",
-                      r.dr === undefined ? "" : num(r.dr.amount),
-                      r.cr?.label ?? "",
-                      r.cr === undefined ? "" : num(r.cr.amount),
-                    ],
-                  ];
-                  return rows;
-                }),
-              ])
-            }
-          />
-=======
           <>
             {stockToPost > 0 && (
               <Button
@@ -1095,7 +1068,6 @@ function ProfitAndLoss({ range }: { range: Range }) {
               }
             />
           </>
->>>>>>> luck-zipper
         }
       >
         <TableWrap>
@@ -1172,12 +1144,8 @@ function ProfitAndLoss({ range }: { range: Range }) {
           <span className={cn("font-medium", profit < 0 ? LOSS : GAIN)}>
             {money(profit)}
           </span>
-<<<<<<< HEAD
-          .
-=======
           . The figures above are what the shelves hold; the statement is struck
           from the ledger, so post the stock to make the two agree.
->>>>>>> luck-zipper
         </p>
       </Panel>
 
@@ -1185,154 +1153,6 @@ function ProfitAndLoss({ range }: { range: Range }) {
         {column("Income", income, totalIncome, GAIN)}
         {column("Expenses", expense, otherExpenses, LOSS)}
       </div>
-<<<<<<< HEAD
-    </div>
-  );
-}
-
-type DayRow = {
-  day: number;
-  debit: number;
-  credit: number;
-  cashDebit: number;
-  cashCredit: number;
-  entries: number;
-};
-
-function DayBook({ range }: { range: Range }) {
-  const { format: money } = useWorkspaceCurrency();
-  const data = useQuery(api.reports.dayBook, {
-    from: range.from,
-    to: range.to,
-  });
-  const rows: DayRow[] = data ?? [];
-  const sum = (pick: (r: DayRow) => number) =>
-    rows.reduce((s, r) => s + pick(r), 0);
-  const inTotal = sum((r) => r.debit);
-  const outTotal = sum((r) => r.credit);
-  const entryCount = sum((r) => r.entries);
-
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Tile
-          label="Receipts"
-          value={money(inTotal)}
-          tone={GAIN}
-          hint={range.label}
-        />
-        <Tile
-          label="Payments"
-          value={money(outTotal)}
-          tone={LOSS}
-          hint={range.label}
-        />
-        <Tile
-          label="Net movement"
-          value={money(inTotal - outTotal)}
-          tone={inTotal - outTotal < 0 ? LOSS : GAIN}
-        />
-        <Tile label="Journal entries" value={String(entryCount)} />
-      </div>
-
-      <Panel
-        title="Day book"
-        count={`${rows.length} days with movement`}
-        actions={
-          <CsvButton
-            what="day book"
-            onClick={() =>
-              downloadCsv("day-book.csv", [
-                [
-                  "Date",
-                  "Entries",
-                  "Debits",
-                  "Credits",
-                  "Net",
-                  "Cash in",
-                  "Cash out",
-                ],
-                ...rows.map((r) => [
-                  toInput(r.day),
-                  r.entries,
-                  num(r.debit),
-                  num(r.credit),
-                  num(r.debit - r.credit),
-                  num(r.cashDebit),
-                  num(r.cashCredit),
-                ]),
-                [
-                  "Totals",
-                  entryCount,
-                  num(inTotal),
-                  num(outTotal),
-                  num(inTotal - outTotal),
-                  num(sum((r) => r.cashDebit)),
-                  num(sum((r) => r.cashCredit)),
-                ],
-              ])
-            }
-          />
-        }
-      >
-        {rows.length === 0 ? (
-          <Empty>
-            No posting between {dayLabel(range.from)} and {dayLabel(range.to)}.
-          </Empty>
-        ) : (
-          <TableWrap>
-            <thead>
-              <tr className={HEAD}>
-                <th className={CELL_LEFT}>Date</th>
-                <th className={TH_R}>Entries</th>
-                <th className={TH_R}>Receipts</th>
-                <th className={TH_R}>Payments</th>
-                <th className={TH_R}>Cash &amp; bank in</th>
-                <th className={TH_R}>Cash &amp; bank out</th>
-                <th className={TH_R}>Net</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60">
-              {rows.map((r) => (
-                <tr key={r.day} className={ROW}>
-                  <td className={`${CELL_LEFT} font-medium`}>
-                    {dayLabel(r.day)}
-                  </td>
-                  <td className={CELL}>{r.entries}</td>
-                  <td className={cn(CELL, GAIN)}>
-                    {r.debit === 0 ? "—" : money(r.debit)}
-                  </td>
-                  <td className={cn(CELL, LOSS)}>
-                    {r.credit === 0 ? "—" : money(r.credit)}
-                  </td>
-                  <td className={cn(CELL, "text-muted-foreground")}>
-                    {r.cashDebit === 0 ? "—" : money(r.cashDebit)}
-                  </td>
-                  <td className={cn(CELL, "text-muted-foreground")}>
-                    {r.cashCredit === 0 ? "—" : money(r.cashCredit)}
-                  </td>
-                  <td className={cn(CELL, "font-medium")}>
-                    {money(r.debit - r.credit)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className={TOTAL}>
-                <td className={CELL_LEFT}>Total</td>
-                <td className={CELL}>{entryCount}</td>
-                <td className={CELL}>{money(inTotal)}</td>
-                <td className={CELL}>{money(outTotal)}</td>
-                <td className={CELL}>{money(sum((r) => r.cashDebit))}</td>
-                <td className={CELL}>{money(sum((r) => r.cashCredit))}</td>
-                <td className={CELL}>{money(inTotal - outTotal)}</td>
-              </tr>
-            </tfoot>
-          </TableWrap>
-        )}
-      </Panel>
-=======
->>>>>>> luck-zipper
     </div>
   );
 }
