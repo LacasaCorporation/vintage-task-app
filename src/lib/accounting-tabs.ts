@@ -3,6 +3,7 @@ import {
   BookOpen,
   CalendarDays,
   Landmark,
+  LayoutDashboard,
   Scale,
   ScrollText,
   Wallet,
@@ -17,6 +18,7 @@ import {
  * first download of the app, for a row of buttons.
  */
 export type AccountingTab =
+  | "dashboard"
   | "accounts"
   | "journal"
   | "receipt"
@@ -31,6 +33,12 @@ export const ACCOUNTING_TABS: {
   icon: typeof BookOpen;
   hint: string;
 }[] = [
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    icon: LayoutDashboard,
+    hint: "Cash, debts and profit at a glance",
+  },
   {
     id: "accounts",
     label: "Chart of accounts",

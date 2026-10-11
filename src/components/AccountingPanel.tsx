@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import PageTabs from "@/components/PageTabs";
 import AccountLedgerDialog from "@/components/AccountLedgerDialog";
 import AccountFormDialog from "@/components/AccountFormDialog";
+import AccountingDashboard from "@/components/AccountingDashboard";
 import JournalEntryForm, {
   type EntryFormKind,
 } from "@/components/JournalEntryForm";
@@ -252,6 +253,13 @@ export default function AccountingPanel({
         <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" /> Loading the ledger…
         </div>
+      ) : tab === "dashboard" ? (
+        <AccountingDashboard
+          accounts={accounts}
+          entries={entries}
+          money={money}
+          onOpen={onTabChange}
+        />
       ) : tab === "accounts" ? (
         <Panel
           title="Chart of accounts"
