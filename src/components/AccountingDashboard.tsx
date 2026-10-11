@@ -255,7 +255,7 @@ export default function AccountingDashboard({
           value={money(Math.abs(netProfit))}
           sub={`Income ${money(income)} · expenses ${money(expense)}`}
           tone={netProfit >= 0 ? "violet" : "rose"}
-          onClick={() => onOpen("pandl")}
+          onClick={() => onOpen("accounts")}
         />
       </div>
 

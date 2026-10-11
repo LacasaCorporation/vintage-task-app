@@ -1,5 +1,4 @@
 import {
-  BarChart3,
   BookOpen,
   CalendarDays,
   Landmark,
@@ -62,12 +61,6 @@ export const ACCOUNTING_TABS: {
     label: "Receipt / payment",
     icon: Wallet,
     hint: "Money received from a customer, or paid to a supplier",
-  },
-  {
-    id: "pandl",
-    label: "Profit & Loss",
-    icon: BarChart3,
-    hint: "Trading account, income, expenses and net profit",
   },
   {
     id: "cashbook",
