@@ -223,6 +223,27 @@ export default function PrimaryNav({
 
       <div className="my-2 h-px bg-border/60" />
 
+      {/* reports: what the whole set of books says, read four ways */}
+      {canViewAccounting && (
+        <div>
+          <NavRow
+            label="Reports"
+            Icon={FileBarChart}
+            active={inCosting && view?.kind === "reports"}
+            onClick={() => onSelectView({ kind: "reports", area: "financial" })}
+          />
+
+          {inCosting && view?.kind === "reports" && (
+            <div className="ml-2 border-l border-border/60 pl-1">
+              <ReportsSidebar
+                area={view.area}
+                onChange={(area) => onSelectView({ kind: "reports", area })}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {canViewPurchase && (
         <div>
           <div
@@ -467,27 +488,6 @@ export default function PrimaryNav({
                   onClick={() => onSelectView({ kind: "accounting", tab: t.id })}
                 />
               ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* reports: what the whole set of books says, read four ways */}
-      {canViewAccounting && (
-        <div>
-          <NavRow
-            label="Reports"
-            Icon={FileBarChart}
-            active={inCosting && view?.kind === "reports"}
-            onClick={() => onSelectView({ kind: "reports", area: "financial" })}
-          />
-
-          {inCosting && view?.kind === "reports" && (
-            <div className="ml-2 border-l border-border/60 pl-1">
-              <ReportsSidebar
-                area={view.area}
-                onChange={(area) => onSelectView({ kind: "reports", area })}
-              />
             </div>
           )}
         </div>
