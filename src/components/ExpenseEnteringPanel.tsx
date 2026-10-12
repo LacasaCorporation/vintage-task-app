@@ -88,14 +88,23 @@ function ExpenseForm({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const categories = options?.categories ?? [];
+  /**
+   * Only the accounts on this side of the split. The class is not a choice on
+   * the form — it is the panel the form was opened from — so the list offers
+   * what that class can be charged to and nothing else.
+   */
+  const categories = (options?.categories ?? []).filter(
+    (c) => c.kind === kind,
+  );
   const payFrom = options?.payFrom ?? [];
   const vendor = vendors?.find((v) => v._id === vendorId);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (categories.length === 0) {
-      toast.error("Set up an expense account first — add one in Accounting.");
+      toast.error(
+        `No ${kind} expense accounts yet — add one to the chart in Accounting.`,
+      );
       return;
     }
     if (!(num(amount) > 0)) {
@@ -175,7 +184,7 @@ function ExpenseForm({
 
         <div>
           <label className={fieldLabel} htmlFor="exp-category">
-            Expense account
+            {kind === "direct" ? "Direct" : "Indirect"} expense account
           </label>
           <select
             id="exp-category"
@@ -183,14 +192,24 @@ function ExpenseForm({
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             required
+            disabled={categories.length === 0}
           >
-            <option value="">Choose an account…</option>
+            <option value="">
+              {categories.length === 0
+                ? `No ${kind} accounts yet`
+                : "Choose an account…"}
+            </option>
             {categories.map((c) => (
               <option key={c.id} value={c.name}>
                 {c.name}
               </option>
             ))}
           </select>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {kind === "direct"
+              ? "Accounts that go into the cost of what you make."
+              : "Accounts for the cost of running the business."}
+          </p>
         </div>
 
         <div>

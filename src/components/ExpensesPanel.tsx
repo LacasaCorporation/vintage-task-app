@@ -185,11 +185,27 @@ function ExpenseForm({
             className={selectCls}
           >
             <option value="">Choose an expense account…</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
+            {/* grouped by side, so it is clear which half a cost belongs to */}
+            {(["direct", "indirect"] as const).map((side) => {
+              const rows = categories.filter((c) => c.kind === side);
+              if (rows.length === 0) return null;
+              return (
+                <optgroup
+                  key={side}
+                  label={
+                    side === "direct"
+                      ? "Direct — cost of what you make"
+                      : "Indirect — cost of running the business"
+                  }
+                >
+                  {rows.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
           </select>
         </label>
       </div>

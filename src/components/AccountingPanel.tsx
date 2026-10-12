@@ -66,6 +66,17 @@ const TYPE_CHIP: Record<string, string> = {
   expense: "bg-rose-500/10 text-rose-700 dark:text-rose-400",
 };
 
+/** The side of the expense split, read at a glance in the chart. */
+const EXPENSE_KIND_CHIP: Record<string, string> = {
+  direct: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300",
+  indirect: "bg-stone-500/10 text-stone-700 dark:text-stone-300",
+};
+
+const EXPENSE_KIND_LABEL: Record<string, string> = {
+  direct: "Direct",
+  indirect: "Indirect",
+};
+
 /** Today, as `yyyy-mm-dd`. Fixed once at load so a render stays pure. */
 const TODAY = (() => {
   const d = new Date();
@@ -362,6 +373,19 @@ export default function AccountingPanel({
                             {a.name}
                           </span>
                         )}
+                        {!a.isGroup &&
+                          a.type === "expense" &&
+                          a.expenseKind !== undefined && (
+                            <span
+                              className={cn(
+                                "ml-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 align-middle text-[10px] font-medium",
+                                EXPENSE_KIND_CHIP[a.expenseKind],
+                              )}
+                              title={`${EXPENSE_KIND_LABEL[a.expenseKind]} expense — the register offers it when entering a ${a.expenseKind} expense`}
+                            >
+                              {EXPENSE_KIND_LABEL[a.expenseKind]}
+                            </span>
+                          )}
                         {a.isBank && (
                           <span
                             className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 align-middle text-[10px] font-medium text-primary"

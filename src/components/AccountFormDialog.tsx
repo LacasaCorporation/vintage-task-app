@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { AccountRow, AccountType } from "@/convex/accounting";
+import type { ExpenseKind } from "@/convex/accountingDefaults";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,7 +41,22 @@ type Draft = {
   bsb: string;
   currency: string;
   note: string;
+  /** "" when the account does not sit on either side of the expense split. */
+  expenseKind: ExpenseKind | "";
 };
+
+const EXPENSE_SIDES: { id: ExpenseKind; label: string; hint: string }[] = [
+  {
+    id: "direct",
+    label: "Direct",
+    hint: "Spend that goes into what a product costs to make",
+  },
+  {
+    id: "indirect",
+    label: "Indirect",
+    hint: "Spend that runs the business",
+  },
+];
 
 const TYPES: { id: AccountType; label: string; hint: string }[] = [
   { id: "asset", label: "Asset", hint: "What the business owns" },
@@ -78,6 +94,7 @@ const emptyDraft = (type: AccountType = "asset"): Draft => ({
   bsb: "",
   currency: "",
   note: "",
+  expenseKind: "",
 });
 
 const draftOf = (a: AccountRow): Draft => ({
@@ -92,6 +109,7 @@ const draftOf = (a: AccountRow): Draft => ({
   bsb: a.bsb ?? "",
   currency: a.currency ?? "",
   note: a.note ?? "",
+  expenseKind: a.expenseKind ?? "",
 });
 
 /** A titled block of fields, so the form reads in sections rather than a wall. */
@@ -244,6 +262,7 @@ export default function AccountFormDialog({
           accountNumber: draft.accountNumber,
           bsb: draft.bsb,
           currency: draft.currency,
+          expenseKind: draft.expenseKind === "" ? undefined : draft.expenseKind,
         });
         toast.success(`${draft.code} ${draft.name} added.`);
         onSaved(id);
@@ -261,6 +280,7 @@ export default function AccountFormDialog({
           accountNumber: draft.accountNumber,
           bsb: draft.bsb,
           currency: draft.currency,
+          expenseKind: draft.expenseKind === "" ? undefined : draft.expenseKind,
         });
         toast.success("Account updated.");
         onSaved(account._id);
@@ -303,6 +323,16 @@ export default function AccountFormDialog({
       ["Sits under", pathFor(account, byId) || "Top level"],
       ["Role", account.isGroup ? "Group / heading" : "Posting account"],
     ];
+    if (account.type === "expense" && !account.isGroup) {
+      rows.push([
+        "Expense side",
+        account.expenseKind === "direct"
+          ? "Direct — part of what a product costs to make"
+          : account.expenseKind === "indirect"
+            ? "Indirect — spent running the business"
+            : "Not set",
+      ]);
+    }
     if (account.isBank) {
       rows.push(
         ["Held at", account.bankName ?? "—"],
@@ -499,6 +529,8 @@ export default function AccountFormDialog({
                       // a heading and a bank are mutually exclusive, and a
                       // parent from the old type no longer applies
                       isBank: t.id === "income" || t.id === "expense" ? false : d.isBank,
+                      // the side only means anything on an expense account
+                      expenseKind: t.id === "expense" ? d.expenseKind : "",
                       parentId: "",
                     }));
                   }}
@@ -539,6 +571,40 @@ export default function AccountFormDialog({
                 </span>
               </span>
             </label>
+
+            {draft.type === "expense" && !draft.isGroup && (
+              <div className="mt-3">
+                <p className="mb-1.5 text-[11px] font-semibold tracking-wide uppercase">
+                  Expense side
+                </p>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {EXPENSE_SIDES.map((side) => (
+                    <button
+                      key={side.id}
+                      type="button"
+                      aria-pressed={draft.expenseKind === side.id}
+                      onClick={() => set("expenseKind", side.id)}
+                      title={side.hint}
+                      className={cn(
+                        "rounded-lg border px-2 py-2 text-left text-xs font-medium transition-colors",
+                        draft.expenseKind === side.id
+                          ? "border-primary/40 bg-primary/10 text-primary"
+                          : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+                      )}
+                    >
+                      <span className="block">{side.label}</span>
+                      <span className="mt-0.5 block text-[11px] font-normal">
+                        {side.hint}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  The expense register offers direct accounts when entering a
+                  direct expense, and indirect ones otherwise.
+                </p>
+              </div>
+            )}
           </Section>
 
           {/* ── grouping ─────────────────────────────────────────────── */}

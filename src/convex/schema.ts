@@ -1459,6 +1459,16 @@ const schema = defineSchema(
       parentId: v.optional(v.id("accounts")),
       note: v.optional(v.string()),
       /**
+       * Which side of the expense split this account is on. Only meaningful on
+       * an expense account: a direct expense is spend that goes into what a
+       * product costs to make, an indirect one is spent running the business.
+       * The expense register reads it to offer the accounts that belong to the
+       * class being entered, rather than every expense account at once.
+       */
+      expenseKind: v.optional(
+        v.union(v.literal("direct"), v.literal("indirect")),
+      ),
+      /**
        * Bank detail. Only meaningful on an account that actually holds money
        * at a bank: the name it is held at, the account number and BSB/routing
        * line. Cash accounts keep this off.

@@ -1,6 +1,13 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
-import { GRIR_CODE, moneyAccountIds, STOCK_CODE } from "./accountingDefaults";
+import {
+  COMMON_EXPENSE_ACCOUNTS,
+  GRIR_CODE,
+  moneyAccountIds,
+  STOCK_CODE,
+  standardExpenseKind,
+  type ExpenseKind,
+} from "./accountingDefaults";
 import { stockValuation } from "./stockValuation";
 import { syncReceivedGrvs } from "./grv";
 import { requireItem } from "./authorize";
@@ -27,6 +34,11 @@ export type AccountRow = {
   accountNumber?: string;
   bsb?: string;
   currency?: string;
+  /**
+   * On an expense account, which side of the split it belongs to: direct spend
+   * goes into what a product costs to make, indirect spend runs the business.
+   */
+  expenseKind?: ExpenseKind;
   /** Debit-positive balance from posted lines, plus the opening balance. */
   balance: number;
   debit: number;
@@ -74,6 +86,8 @@ const STOCK_ACCOUNTS: {
   name: string;
   type: AccountType;
   parent: string;
+  /** The trading pair are costs of what was made, so they sit on the direct side. */
+  expenseKind?: ExpenseKind;
 }[] = [
   {
     code: STOCK_CODE.openingAsset,
@@ -92,12 +106,14 @@ const STOCK_ACCOUNTS: {
     name: "Opening stock (trading)",
     type: "expense",
     parent: "5000",
+    expenseKind: "direct",
   },
   {
     code: STOCK_CODE.closingTrading,
     name: "Closing stock (trading)",
     type: "expense",
     parent: "5000",
+    expenseKind: "direct",
   },
 ];
 
@@ -115,6 +131,7 @@ const GRIR_ACCOUNTS: {
   name: string;
   type: AccountType;
   parent: string;
+  expenseKind?: ExpenseKind;
 }[] = [
   {
     code: GRIR_CODE,
@@ -137,6 +154,8 @@ const DEFAULT_ACCOUNTS: {
   parent?: string;
   isBank?: boolean;
   bankName?: string;
+  /** Only meaningful on an expense account: the side of the split it is on. */
+  expenseKind?: ExpenseKind;
 }[] = [
   { code: "1000", name: "Assets", type: "asset", isGroup: true },
   { code: "1100", name: "Cash in hand", type: "asset", parent: "1000" },
@@ -197,21 +216,10 @@ const DEFAULT_ACCOUNTS: {
   { code: "4200", name: "Other income", type: "income", parent: "4000" },
 
   { code: "5000", name: "Expenses", type: "expense", isGroup: true },
-  {
-    code: "5100",
-    name: "Cost of goods sold",
-    type: "expense",
-    parent: "5000",
-  },
-  {
-    code: "5200",
-    name: "Raw material purchased",
-    type: "expense",
-    parent: "5000",
-  },
-  { code: "5300", name: "Rent", type: "expense", parent: "5000" },
-  { code: "5400", name: "Salaries & wages", type: "expense", parent: "5000" },
-  { code: "5500", name: "Utilities", type: "expense", parent: "5000" },
+
+  // the expenses every firm meets, each already on the side of the split the
+  // expense register enters it from
+  ...COMMON_EXPENSE_ACCOUNTS,
 
   ...STOCK_ACCOUNTS,
   ...GRIR_ACCOUNTS,
@@ -235,12 +243,16 @@ async function nextEntryNumber(
 }
 
 /**
- * Give a chart that predates the posting accounts the ones it is missing.
+ * Give a chart that predates the standard accounts the ones it is missing.
  *
- * Opening and closing stock, and the goods-received-not-billed clearing
- * account, are ordinary posting accounts, so a firm that already has a chart is
- * not rebuilt: the missing rows are added under the same headings the rest of
- * the chart uses, once, and left alone afterwards.
+ * The stock accounts, the goods-received-not-billed clearing account and the
+ * common expenses are ordinary posting accounts, so a firm that already has a
+ * chart is not rebuilt: the missing rows are added under the same headings the
+ * rest of the chart uses. A standard account that is already there is left
+ * exactly as it is — its name may have been changed on purpose — but an expense
+ * account that never had a side of the split recorded is given the standard
+ * one, so the entry form can file it. All of it is idempotent: once nothing is
+ * missing, this writes nothing.
  */
 async function ensurePostingAccounts(
   ctx: MutationCtx,
@@ -252,8 +264,26 @@ async function ensurePostingAccounts(
     .collect();
   const byCode = new Map(accounts.map((a) => [a.code, a]));
   let added = false;
-  for (const a of [...STOCK_ACCOUNTS, ...GRIR_ACCOUNTS]) {
-    if (byCode.has(a.code)) continue;
+  for (const a of [
+    ...STOCK_ACCOUNTS,
+    ...GRIR_ACCOUNTS,
+    ...COMMON_EXPENSE_ACCOUNTS,
+  ]) {
+    const existing = byCode.get(a.code);
+    if (existing !== undefined) {
+      // a standard expense account from before the split was kept: tag it so
+      // the register can tell which half it belongs to
+      const kind = standardExpenseKind(a.code);
+      if (
+        kind !== undefined &&
+        existing.expenseKind === undefined &&
+        existing.type === "expense"
+      ) {
+        await ctx.db.patch(existing._id, { expenseKind: kind });
+        added = true;
+      }
+      continue;
+    }
     const parentId = byCode.get(a.parent)?._id;
     if (parentId === undefined) continue;
     await ctx.db.insert("accounts", {
@@ -262,6 +292,7 @@ async function ensurePostingAccounts(
       name: a.name,
       type: a.type,
       parentId,
+      expenseKind: a.expenseKind,
     });
     added = true;
   }
@@ -297,6 +328,7 @@ export const ensureDefaults = mutation({
         parentId,
         isBank: a.isBank === true ? true : undefined,
         bankName: a.bankName,
+        expenseKind: a.expenseKind,
       });
       idOf.set(a.code, id);
     }
@@ -357,6 +389,7 @@ export const listAccounts = query({
           accountNumber: a.accountNumber,
           bsb: a.bsb,
           currency: a.currency,
+          expenseKind: a.expenseKind,
           balance,
           debit,
           credit,
@@ -592,6 +625,22 @@ async function assertParent(
   }
 }
 
+/**
+ * Only an expense account carries a side of the direct/indirect split, and a
+ * group never does — a heading holds no spend of its own. Anything else has the
+ * field cleared rather than left behind from an earlier type.
+ */
+function expenseSide(args: {
+  type: AccountType;
+  isGroup?: boolean;
+  expenseKind?: ExpenseKind;
+}): ExpenseKind | undefined {
+  if (args.type !== "expense" || args.isGroup === true) return undefined;
+  return args.expenseKind === "direct" || args.expenseKind === "indirect"
+    ? args.expenseKind
+    : undefined;
+}
+
 /** Bank detail is stripped unless the account is actually flagged as a bank. */
 function bankFields(args: {
   isBank?: boolean;
@@ -658,6 +707,10 @@ export const createAccount = mutation({
     accountNumber: v.optional(v.string()),
     bsb: v.optional(v.string()),
     currency: v.optional(v.string()),
+    /** On an expense account, which side of the split it sits on. */
+    expenseKind: v.optional(
+      v.union(v.literal("direct"), v.literal("indirect")),
+    ),
   },
   handler: async (ctx, args): Promise<Id<"accounts">> => {
     const userId = await scopeUserId(ctx);
@@ -687,6 +740,7 @@ export const createAccount = mutation({
       parentId: args.parentId,
       note: args.note?.trim() || undefined,
       ...bankFields(args),
+      expenseKind: expenseSide(args),
     });
   },
 });
@@ -705,6 +759,10 @@ export const updateAccount = mutation({
     accountNumber: v.optional(v.string()),
     bsb: v.optional(v.string()),
     currency: v.optional(v.string()),
+    /** On an expense account, which side of the split it sits on. */
+    expenseKind: v.optional(
+      v.union(v.literal("direct"), v.literal("indirect")),
+    ),
   },
   handler: async (ctx, args): Promise<void> => {
     const userId = await scopeUserId(ctx);
@@ -772,6 +830,7 @@ export const updateAccount = mutation({
       parentId: args.parentId,
       note: args.note?.trim() || undefined,
       ...bankFields(args),
+      expenseKind: expenseSide(args),
     });
   },
 });

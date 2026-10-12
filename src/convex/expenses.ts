@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { scopeUserId } from "./org";
 import { postEntry } from "./accounting";
-import { resolveDefaults, STOCK_CODE } from "./accountingDefaults";
+import { expenseClassOf, resolveDefaults } from "./accountingDefaults";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
@@ -14,21 +14,6 @@ export const EXPENSE_KINDS = ["direct", "indirect"] as const;
 export type ExpenseKind = (typeof EXPENSE_KINDS)[number];
 
 /**
- * The accounts whose spend is part of what a product costs to make. Anything
- * charged to one of them is a direct expense; everything else is spent
- * running the business.
- *
- * Only used to read rows recorded before the split existed — an expense
- * entered now says which class it belongs to outright.
- */
-const DIRECT_ACCOUNT_CODES = new Set<string>([
-  "5100", // cost of goods sold
-  "5200", // raw material purchased
-  STOCK_CODE.openingTrading,
-  STOCK_CODE.closingTrading,
-]);
-
-/**
  * Which class an expense belongs to, never left unanswered.
  *
  * A row that carries its kind is taken at its word. An older one is read off
@@ -37,15 +22,13 @@ const DIRECT_ACCOUNT_CODES = new Set<string>([
  */
 function classOf(
   expense: ExpenseDoc,
-  codeOf: Map<string, string>,
+  accountOf: Map<string, { code: string; expenseKind?: ExpenseKind }>,
 ): ExpenseKind {
   if (expense.kind === "direct" || expense.kind === "indirect") {
     return expense.kind;
   }
-  const code = codeOf.get(expense.category.toLowerCase());
-  return code !== undefined && DIRECT_ACCOUNT_CODES.has(code)
-    ? "direct"
-    : "indirect";
+  const account = accountOf.get(expense.category.toLowerCase());
+  return account === undefined ? "indirect" : expenseClassOf(account);
 }
 
 
@@ -66,9 +49,13 @@ export const list = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
     const nameOf = new Map(accounts.map((a) => [a._id, a.name]));
-    /** Account name (lowercased) → code, for reading a row's class. */
+    /** Account name (lowercased) → code, for printing beside the name. */
     const codeOf = new Map(
       accounts.map((a) => [a.name.toLowerCase(), a.code] as const),
+    );
+    /** Account name (lowercased) → the account, for reading a row's class. */
+    const accountOf = new Map(
+      accounts.map((a) => [a.name.toLowerCase(), a] as const),
     );
     const entries = await ctx.db
       .query("journalEntries")
@@ -79,7 +66,7 @@ export const list = query({
       .sort((a, b) => b.at - a.at)
       .map((e) => ({
         ...e,
-        kind: classOf(e, codeOf),
+        kind: classOf(e, accountOf),
         categoryCode: codeOf.get(e.category.toLowerCase()),
         paidFromName: e.paidFrom !== undefined ? nameOf.get(e.paidFrom) : undefined,
         // undefined means the row never reached the ledger — the panel offers
@@ -133,9 +120,19 @@ export const options = query({
       payFrom = [];
     }
     return {
+      /**
+       * Every expense account, each carrying the side of the split it is on,
+       * so the form can show the accounts that belong to the class being
+       * entered instead of the whole chart.
+       */
       categories: accounts
         .filter((a) => a.type === "expense" && a.isGroup !== true)
-        .map((a) => ({ id: a._id, name: a.name }))
+        .map((a) => ({
+          id: a._id,
+          name: a.name,
+          code: a.code,
+          kind: expenseClassOf(a),
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       payFrom,
     };
@@ -233,7 +230,14 @@ export const create = mutation({
       vendor: args.vendor?.trim().slice(0, 120) || undefined,
       reference: args.reference?.trim().slice(0, 60) || undefined,
       note: args.note?.trim().slice(0, 500) || undefined,
-      kind: args.kind ?? "indirect",
+      // the account decides the side of the split when it says which it is;
+      // the caller's kind fills in for a hand-made account that carries none,
+      // and the code does as a last resort — so a row never lands in both
+      // halves of the register or in neither
+      kind:
+        expenseAccount.expenseKind ??
+        args.kind ??
+        expenseClassOf(expenseAccount),
       createdAt: Date.now(),
     });
 

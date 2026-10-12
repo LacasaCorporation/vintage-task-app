@@ -82,6 +82,90 @@ export const STOCK_CODE = {
   closingTrading: "5155",
 } as const;
 
+/** The two sides of an expense: what makes the product, and what runs the shop. */
+export type ExpenseKind = "direct" | "indirect";
+
+/**
+ * The expenses a firm meets most often, each on the side the register enters
+ * it.
+ *
+ * A direct expense goes into what a product costs to make, so it lands in the
+ * cost of goods sold the trading account strikes; an indirect one is spent
+ * running the business and is charged below the gross profit. Both are
+ * ordinary expense accounts under the same heading — the split is a reading of
+ * the chart, not a second set of books — and every account says which side it
+ * belongs to, so the register can offer the right half of the list.
+ *
+ * The seeder gives a new firm all of them, and `ensureDefaults` adds to an
+ * existing chart whichever of them it is missing, so a firm that started
+ * before the split still gets the common ones without its chart being rebuilt.
+ */
+export const COMMON_EXPENSE_ACCOUNTS: {
+  code: string;
+  name: string;
+  /** Every one of these is an expense account. */
+  type: "expense";
+  /** The heading they sit under — code 5000, Expenses. */
+  parent: string;
+  expenseKind: ExpenseKind;
+}[] = [
+  // ── direct: what the product costs to make ───────────────────────────
+  { code: "5100", name: "Cost of goods sold", type: "expense", parent: "5000", expenseKind: "direct" },
+  { code: "5200", name: "Raw material purchased", type: "expense", parent: "5000", expenseKind: "direct" },
+  { code: "5210", name: "Production wages", type: "expense", parent: "5000", expenseKind: "direct" },
+  { code: "5220", name: "Direct expenses", type: "expense", parent: "5000", expenseKind: "direct" },
+  { code: "5230", name: "Production fuel & power", type: "expense", parent: "5000", expenseKind: "direct" },
+  { code: "5240", name: "Freight & carriage inward", type: "expense", parent: "5000", expenseKind: "direct" },
+  { code: "5250", name: "Subcontract work", type: "expense", parent: "5000", expenseKind: "direct" },
+  { code: "5260", name: "Packing materials", type: "expense", parent: "5000", expenseKind: "direct" },
+  { code: "5270", name: "Factory rent", type: "expense", parent: "5000", expenseKind: "direct" },
+  { code: "5280", name: "Plant repairs & maintenance", type: "expense", parent: "5000", expenseKind: "direct" },
+
+  // ── indirect: what it costs to run the business ──────────────────────
+  { code: "5300", name: "Rent", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5310", name: "Insurance", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5320", name: "Office supplies & stationery", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5330", name: "Telephone & internet", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5340", name: "Marketing & advertising", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5350", name: "Professional fees", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5360", name: "Bank charges", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5370", name: "Repairs & maintenance", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5380", name: "Travel & motor vehicle", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5390", name: "Depreciation", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5400", name: "Salaries & wages", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5410", name: "Employee benefits", type: "expense", parent: "5000", expenseKind: "indirect" },
+  { code: "5500", name: "Utilities", type: "expense", parent: "5000", expenseKind: "indirect" },
+];
+
+/** The standard account carrying this code, if it is a common expense. */
+export function standardExpenseKind(code: string): ExpenseKind | undefined {
+  return COMMON_EXPENSE_ACCOUNTS.find((a) => a.code === code)?.expenseKind;
+}
+
+/**
+ * Which side of the split an account belongs to.
+ *
+ * What the account says, when it says anything; otherwise the code it carries,
+ * so a chart seeded before the side was recorded reads the same way. Anything
+ * unrecognised is spent running the business, which is where an expense of
+ * unclear purpose does the least damage to the cost of goods sold.
+ */
+export function expenseClassOf(account: {
+  code: string;
+  expenseKind?: ExpenseKind;
+}): ExpenseKind {
+  if (account.expenseKind === "direct" || account.expenseKind === "indirect") {
+    return account.expenseKind;
+  }
+  if (
+    account.code === STOCK_CODE.openingTrading ||
+    account.code === STOCK_CODE.closingTrading
+  ) {
+    return "direct";
+  }
+  return standardExpenseKind(account.code) ?? "indirect";
+}
+
 /** The accounts a posting treats as money in or out of the till / bank. */
 export async function moneyAccountIds(ctx: Ctx, ownerId: Id<"users">) {
   const { cash, bank } = await resolveDefaults(ctx, ownerId);
