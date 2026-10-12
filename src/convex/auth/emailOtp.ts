@@ -16,6 +16,12 @@ export const emailOtp = Email({
     return generateRandomString(random, alphabet, 6);
   },
   async sendVerificationRequest({ identifier: email, token }) {
+    // Local backend with no integration key: there is no gateway to call, so
+    // logging the code is the only way email sign-in can complete here.
+    if (localOtpFallback()) {
+      console.log(`[local dev] Sign-in code for ${email}: ${token}`);
+      return;
+    }
     try {
       await axios.post(
         freebuffEmailOtpUrl(),
@@ -32,6 +38,18 @@ export const emailOtp = Email({
 // this project by its own key: VLY_INTEGRATION_KEY, a Convex environment
 // variable set when the project was created. The email's wording is fixed by
 // the gateway.
+//
+// With no key on a loopback backend there is no gateway to reach at all, so
+// the sign-in code is written to the function logs instead of failing the
+// request. Requiring a loopback CONVEX_SITE_URL means a deployed backend that
+// is merely missing its key still fails loudly rather than quietly printing
+// one-time codes.
+function localOtpFallback(): boolean {
+  if (process.env.VLY_INTEGRATION_KEY) return false;
+  const site = process.env.CONVEX_SITE_URL ?? "";
+  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\/?$/.test(site);
+}
+
 function freebuffEmailOtpUrl(): string {
   const base =
     process.env.VLY_INTEGRATION_BASE_URL || "https://integrations.vly.ai";
