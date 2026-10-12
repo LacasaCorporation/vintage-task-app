@@ -150,7 +150,13 @@ export const trialBalance = query({
 });
 
 export type StatementLine = {
-  _id: Id<"accounts">;
+  /**
+   * The account the figure sits on, when the chart has one. Stock that has not
+   * been posted yet is shown on the account the posting will write to, and a
+   * chart too old to have that account gets a name of its own rather than an
+   * empty line.
+   */
+  _id: Id<"accounts"> | string;
   code: string;
   name: string;
   /** Signed the way the statement reads: assets and expenses positive. */
@@ -176,6 +182,12 @@ export type StatementSection = {
  * balances were, the two sides should meet; the difference is printed rather
  * than hidden, because a balance sheet that quietly disagrees is worse than
  * one that admits it.
+ *
+ * Stock is read the same way the trading account reads it, from the ledger
+ * when the period has been posted and from the shelves when it has not — so a
+ * firm whose stock has not been posted yet still sees what it is holding under
+ * its assets, and the profit printed here is the profit the trading account
+ * struck rather than a different one.
  */
 export const financialPosition = query({
   args: { from: v.optional(v.number()), to: v.optional(v.number()) },
@@ -188,6 +200,13 @@ export const financialPosition = query({
         assets: 0,
         liabilities: 0,
         equity: 0,
+        income: 0,
+        expenses: 0,
+        expensesPosted: 0,
+        stockOpening: 0,
+        stockClosing: 0,
+        stockOnShelves: 0,
+        stockUnposted: false,
         profit: 0,
         credits: 0,
         difference: 0,
@@ -234,11 +253,104 @@ export const financialPosition = query({
         .map((a) => line(a, type === "asset" || type === "expense"))
         .filter((l) => l.balance !== 0 || l.debit !== 0 || l.credit !== 0);
 
+    /**
+     * Stock on hand, on the footing the trading account strikes its result on.
+     *
+     * The trading account charges opening stock as a cost and takes closing
+     * stock off that cost, reading both from the ledger when the period has
+     * been posted and from the shelves when it has not. The balance sheet has
+     * to read them the same way, or the two statements describe different
+     * firms: purchases whose stock has not been posted read here as a loss and
+     * there as no cost at all, and the stock the firm is actually holding — the
+     * thing a balance sheet exists to state — is missing from the assets while
+     * the shelves are full.
+     */
+    const stockOf = (source: LedgerAccount[], code: string) =>
+      source.find((a) => a.code === code && !a.isGroup);
+    const postedOpening = stockOf(periodLeaves, STOCK_CODE.openingTrading);
+    const postedClosing = stockOf(periodLeaves, STOCK_CODE.closingTrading);
+    let stockOpening = round(
+      (postedOpening?.debit ?? 0) - (postedOpening?.credit ?? 0),
+    );
+    let stockClosing = round(
+      (postedClosing?.credit ?? 0) - (postedClosing?.debit ?? 0),
+    );
+    // a period posted before the trading accounts existed still knows its
+    // opening stock, because the asset side of the same entry carries it
+    if (stockOpening === 0) {
+      const openingAssetLine = stockOf(periodLeaves, STOCK_CODE.openingAsset);
+      if (openingAssetLine !== undefined && openingAssetLine.debit > 0) {
+        stockOpening = round(openingAssetLine.debit - openingAssetLine.credit);
+      }
+    }
+    const valuation = await stockValuation(ctx, userId, from ?? 0, asAt);
+    if (stockOpening === 0 && valuation.opening > 0) {
+      stockOpening = valuation.opening;
+    }
+    if (stockClosing === 0 && valuation.closing > 0) {
+      stockClosing = valuation.closing;
+    }
+
+    /**
+     * Whether this period's stock is in the books.
+     *
+     * The stock posting writes opening stock to the trading account and closing
+     * stock to both the trading account and the closing-stock asset, so a period
+     * carrying none of them has not been posted: its stock is still only on the
+     * shelves, and both statements read it from there until somebody posts it.
+     */
+    const closingAsset = stockOf(leaves, STOCK_CODE.closingAsset);
+    const postedClosingAsset = round(
+      (closingAsset?.debit ?? 0) - (closingAsset?.credit ?? 0),
+    );
+    const stockInBooks =
+      (postedOpening?.debit ?? 0) !== 0 ||
+      (postedClosing?.credit ?? 0) !== 0 ||
+      postedClosingAsset !== 0;
+
+    /**
+     * The two sides of the posting this statement has to stand in for.
+     *
+     * Closing stock is what the firm is holding, so it belongs under the
+     * assets; opening stock arrived as the owner's capital, so it belongs under
+     * equity, credited to the same account the posting would credit. Carrying
+     * both is what keeps the statement level before the posting exists — and
+     * carrying neither once it does is what stops the stock being counted twice.
+     */
+    const shelfClosingStock = !stockInBooks && stockClosing > 0 ? stockClosing : 0;
+    const shelfOpeningCapital =
+      !stockInBooks && stockOpening > 0 ? stockOpening : 0;
+    const capitalAccount =
+      leaves.find((a) => a.code === "3100") ??
+      leaves.find((a) => a.name === "Owner capital");
+
     const sections: StatementSection[] = TYPE_ORDER.map((type) => {
       const lines =
         type === "income" || type === "expense"
           ? linesFor(periodLeaves, type)
           : linesFor(leaves, type);
+      if (type === "asset" && shelfClosingStock > 0) {
+        // the account the posting writes to, so the figure stays where it is
+        // when the posting arrives rather than moving down the list
+        lines.unshift({
+          _id: closingAsset?._id ?? `${STOCK_CODE.closingAsset}-on-shelves`,
+          code: closingAsset?.code ?? STOCK_CODE.closingAsset,
+          name: closingAsset?.name ?? "Closing stock",
+          debit: shelfClosingStock,
+          credit: 0,
+          balance: shelfClosingStock,
+        });
+      }
+      if (type === "equity" && shelfOpeningCapital > 0) {
+        lines.unshift({
+          _id: capitalAccount?._id ?? "stock-brought-forward",
+          code: capitalAccount?.code ?? "3100",
+          name: capitalAccount?.name ?? "Owner capital",
+          debit: 0,
+          credit: shelfOpeningCapital,
+          balance: shelfOpeningCapital,
+        });
+      }
       return {
         type,
         label: TYPE_LABELS[type],
@@ -251,7 +363,23 @@ export const financialPosition = query({
     const liabilities = sections.find((s) => s.type === "liability")?.total ?? 0;
     const equity = sections.find((s) => s.type === "equity")?.total ?? 0;
     const income = sections.find((s) => s.type === "income")?.total ?? 0;
-    const expenses = sections.find((s) => s.type === "expense")?.total ?? 0;
+    /**
+     * Expenses on the footing the trading account strikes its result on: the
+     * stock accounts are left out here and opening and closing stock are
+     * brought in below, which is the same sum the profit and loss account
+     * charges. Counting the posted stock accounts as well would charge the
+     * materials twice and print a profit the statement above disagrees with.
+     */
+    const stockCodes: string[] = [
+      STOCK_CODE.openingTrading,
+      STOCK_CODE.closingTrading,
+    ];
+    const expensesPosted = round(
+      periodLeaves
+        .filter((a) => a.type === "expense" && !stockCodes.includes(a.code))
+        .reduce((s, a) => s + a.debit - a.credit, 0),
+    );
+    const expenses = round(expensesPosted + stockOpening - stockClosing);
     const profit = round(income - expenses);
     const credits = round(liabilities + equity + profit);
     return {
@@ -260,10 +388,19 @@ export const financialPosition = query({
       assets,
       liabilities,
       equity,
+      income,
+      expenses,
+      expensesPosted,
+      stockOpening,
+      stockClosing,
+      /** Closing stock shown under the assets that is still only on the shelves. */
+      stockOnShelves: shelfClosingStock,
+      /** Whether any of this period's stock is still waiting to be posted. */
+      stockUnposted: shelfClosingStock > 0 || shelfOpeningCapital > 0,
       profit,
       credits,
       difference: round(assets - credits),
-      empty: leaves.length === 0,
+      empty: leaves.length === 0 && shelfClosingStock === 0,
     };
   },
 });

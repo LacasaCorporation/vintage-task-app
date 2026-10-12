@@ -553,6 +553,40 @@ function BalanceSheet({ range }: { range: Range }) {
     from: range.from === 0 ? undefined : range.from,
     to: range.to,
   });
+  const postStock = useMutation(api.accounting.postStockAdjustment);
+  const [posting, setPosting] = useState(false);
+
+  /**
+   * Closing stock the shelves hold but the books have not been told about.
+   *
+   * The trading account reads it either way, so the figures below are right
+   * whether or not it has been posted; posting is what puts it in the ledger,
+   * where the rest of the books can see it.
+   */
+  const onShelves = data?.stockOnShelves ?? 0;
+  const stockUnposted = data?.stockUnposted === true;
+
+  const postToLedger = async () => {
+    setPosting(true);
+    try {
+      const res = await postStock({
+        from: range.from,
+        to: range.to,
+        label: range.label,
+      });
+      toast.success(
+        res.posted
+          ? `Posted closing stock ${money(res.closing)} to the ledger.`
+          : "There is no stock on hand in this period to post.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not post the stock.",
+      );
+    } finally {
+      setPosting(false);
+    }
+  };
 
   const section = (type: string): Section | null =>
     data?.sections.find((s) => s.type === type) ?? null;
@@ -607,6 +641,11 @@ function BalanceSheet({ range }: { range: Range }) {
         <Tile
           label="Equity"
           value={money(Math.abs(data?.equity ?? 0))}
+          hint={
+            stockUnposted
+              ? "Stock brought forward is carried as the owner's capital"
+              : undefined
+          }
           tone="text-violet-600 dark:text-violet-400"
         />
         <Tile
@@ -625,6 +664,14 @@ function BalanceSheet({ range }: { range: Range }) {
             Assets of {money(data.assets)} are matched by {money(data.liabilities)}{" "}
             of liabilities, {money(data.equity)} of equity and {money(data.profit)} of
             profit for the period.
+            {onShelves > 0 && (
+              <>
+                {" "}
+                The closing stock of {money(onShelves)} shown under the assets is
+                read from the shelves — post it to the ledger below to carry it
+                in the books as well.
+              </>
+            )}
           </>
         ) : (
           <>
@@ -640,17 +687,53 @@ function BalanceSheet({ range }: { range: Range }) {
         <div className="space-y-4">
           {block("Liabilities", liabilities, "text-amber-600 dark:text-amber-400")}
           {block("Equity", equity, "text-violet-600 dark:text-violet-400")}
-          <Panel title="Profit for the period" count={range.label}>
+          <Panel
+            title="Profit for the period"
+            count={range.label}
+            actions={
+              stockUnposted ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void postToLedger()}
+                  disabled={posting}
+                  className="h-7 gap-1.5 rounded-lg border-primary/30 bg-primary/[0.06] px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
+                >
+                  {posting ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="size-3.5" />
+                  )}
+                  {posting ? "Posting…" : "Post stock to ledger"}
+                </Button>
+              ) : undefined
+            }
+          >
             <TableWrap>
               <tbody className="divide-y divide-border/60">
                 <tr className={ROW}>
                   <td className={CELL_LEFT}>Income posted in the period</td>
-                  <td className={CELL}>{sum(section("income"))}</td>
+                  <td className={CELL}>{money(data?.income ?? 0)}</td>
                 </tr>
                 <tr className={ROW}>
                   <td className={CELL_LEFT}>Expenses posted in the period</td>
-                  <td className={CELL}>{sum(section("expense"))}</td>
+                  <td className={CELL}>{money(data?.expensesPosted ?? 0)}</td>
                 </tr>
+                {(data?.stockOpening ?? 0) !== 0 && (
+                  <tr className={ROW}>
+                    <td className={CELL_LEFT}>
+                      Opening stock charged to cost
+                    </td>
+                    <td className={CELL}>{money(data?.stockOpening ?? 0)}</td>
+                  </tr>
+                )}
+                {(data?.stockClosing ?? 0) !== 0 && (
+                  <tr className={ROW}>
+                    <td className={CELL_LEFT}>Closing stock taken off cost</td>
+                    <td className={CELL}>{money(-(data?.stockClosing ?? 0))}</td>
+                  </tr>
+                )}
                 <tr className={TOTAL}>
                   <td className={CELL_LEFT}>
                     Profit carried to the credit side
