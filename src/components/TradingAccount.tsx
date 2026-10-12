@@ -104,14 +104,12 @@ export default function TradingAccount({ range }: { range: Range }) {
   const opening = valuation?.opening ?? 0;
   const closing = valuation?.closing ?? 0;
   /**
-   * Purchases, on the same footing the ledger reads them: every account that
-   * is a purchase, not just the first one found. A firm that splits its
-   * materials across two accounts would otherwise see half of them here and
-   * all of them in the profit and loss account.
+   * Purchases, read from the report itself rather than worked out again here:
+   * the trading account and the profit and loss account below it have to agree
+   * on what was bought, or the same cost is charged in one place and hidden in
+   * the other.
    */
-  const purchases = (plData?.expense ?? [])
-    .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
-    .reduce((s, l) => s + l.amount, 0);
+  const purchases = plData?.trading?.purchases ?? 0;
   const totalIncome = plData?.totalIncome ?? 0;
   const totalExpense = plData?.totalExpense ?? 0;
   const cogs = opening + purchases - closing;
@@ -155,12 +153,16 @@ export default function TradingAccount({ range }: { range: Range }) {
     name: l.name,
     amount: l.amount,
   }));
-  const expenseRows = (plData?.expense ?? []).map((l) => ({
-    _id: l._id,
-    code: l.code,
-    name: l.name,
-    amount: l.amount,
-  }));
+  // purchases are already a cost of the goods sold above, so they are not
+  // repeated as an operating expense here
+  const expenseRows = (plData?.expense ?? [])
+    .filter((l) => l.purchase !== true)
+    .map((l) => ({
+      _id: l._id,
+      code: l.code,
+      name: l.name,
+      amount: l.amount,
+    }));
 
   const materialRows = stock?.materials ?? [];
   const productRows = stock?.products ?? [];

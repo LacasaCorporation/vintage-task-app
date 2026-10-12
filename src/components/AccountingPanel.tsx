@@ -576,6 +576,9 @@ export default function AccountingPanel({
             setLedgerAccountId(null);
             window.setTimeout(() => setEntryForm("journal"), 0);
           }}
+        />
+      )}
+
       {stockTreatmentOpen && (
         <StockTreatmentDialog
           open={stockTreatmentOpen}

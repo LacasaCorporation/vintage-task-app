@@ -12,7 +12,8 @@ import { resolveDefaults, round2, settledTax } from "./accountingDefaults";
  *   bill          debit purchases + tax, credit payable
  *   bill settled  debit payable, credit cash or bank
  *   goods in      debit inventory, credit goods received not billed
- *   bill for them debit goods received not billed, credit payable
+ *   bill for them debit purchases, credit inventory — the stock becomes the
+ *                 cost, and the debt moves to the supplier
  *   invoice       debit receivable, credit sales + tax
  *   invoice paid  debit cash or bank, credit receivable
  *
@@ -103,10 +104,25 @@ export async function postBill(
 
   /**
    * A bill raised from a goods received voucher pays for goods that were
-   * already in stock and already owed: the voucher debited inventory and
-   * credited goods-received-not-billed. So this entry clears that credit into
-   * accounts payable rather than charging the material a second time, and the
-   * balance sheet is left carrying it as stock instead of an expense.
+   * already in stock and already owed, so the voucher and the bill together
+   * read as one purchase: the voucher put the goods on the shelves, and this
+   * bill charges them to the purchase account and hands the debt for them to
+   * the supplier.
+   *
+   *   goods in       debit inventory, credit goods received not billed
+   *   bill for them  debit purchases + goods received not billed,
+   *                  credit inventory + payable
+   *
+   * Charging the cost here instead of leaving it in stock is what lets the
+   * trading account strike a true result: a purchase with nothing sold yet is
+   * a purchase set against closing stock, not a profit. What is still on the
+   * shelves at the period end is carried by the stock posting, so the material
+   * is never counted twice.
+   *
+   * The bill and the voucher can price the goods differently. The cost is the
+   * bill's figure, the stock relieved is the voucher's, and any tax that moved
+   * between the two goes to the tax account — so the entry stays level without
+   * charging the material twice or losing the difference.
    *
    * A bill raised without a voucher has no accrual to clear, so it charges
    * materials to the purchase account as it always did.
@@ -115,8 +131,15 @@ export async function postBill(
     const grv = await ctx.db.get(bill.grvId);
     if (grv !== null && grv.ownerId === ownerId) {
       const accrued = await accruedForGrv(ctx, ownerId, grv);
-      const { grir, inventory } = await resolveDefaults(ctx, ownerId);
-      const diff = round2(bill.total - accrued);
+      const { grir, inventory, purchase } = await resolveDefaults(ctx, ownerId);
+      // read back off the voucher's own accrual, so a voucher that never
+      // posted relieves nothing and the bill stands as a plain purchase
+      const grvTax =
+        accrued === 0
+          ? 0
+          : settledTax(grv.total, grv.taxPct, grv.taxAmount).tax;
+      const stocked = round2(accrued - grvTax);
+      const taxDiff = round2(tax - grvTax);
       const lines: {
         accountId: Id<"accounts">;
         debit: number;
@@ -129,14 +152,26 @@ export async function postBill(
           credit: 0,
           memo: `Clears ${grv.number}`,
         },
-        // the paperwork priced the goods differently from what arrived, so the
-        // cost of the stock still on the shelves is restated to the real figure
+        // the cost of what was bought, charged against the account the trading
+        // account reads its purchases from
+        {
+          accountId: purchase._id,
+          debit: net,
+          credit: 0,
+          memo: `Bought on ${grv.number}`,
+        },
+        // the stock leaves the asset account and becomes that cost
         {
           accountId: inventory._id,
-          debit: diff > 0 ? diff : 0,
-          credit: diff < 0 ? -diff : 0,
-          memo: "Price difference on the bill",
+          debit: 0,
+          credit: stocked,
+          memo: `Billed — ${grv.number}`,
         },
+        ...(taxDiff > 0
+          ? [{ accountId: d.tax._id, debit: taxDiff, credit: 0 }]
+          : taxDiff < 0
+            ? [{ accountId: d.tax._id, debit: 0, credit: -taxDiff }]
+            : []),
         {
           accountId: d.payable._id,
           debit: 0,

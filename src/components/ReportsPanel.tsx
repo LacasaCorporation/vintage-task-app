@@ -730,7 +730,7 @@ function ProfitAndLoss({ range }: { range: Range }) {
   const shelfClosing = valuation?.closing ?? 0;
   /** Purchases, on the same footing the ledger reads them: every account. */
   const shelfPurchases = (data?.expense ?? [])
-    .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
+    .filter((l) => l.purchase === true)
     .reduce((s, l) => s + l.amount, 0);
   const shelfCogs = shelfOpening + shelfPurchases - shelfClosing;
 
@@ -839,12 +839,11 @@ function ProfitAndLoss({ range }: { range: Range }) {
    * The ledger's expenses carry the stock lines inside them; the columns below
    * are the accounts on their own, so the stock effect is lifted out here and
    * shown in the trading account instead of hiding in the expense total.
-   * Purchase accounts (5200 / "purchase") are already charged as "To Purchases"
-   * in the trading account, so they are excluded here to prevent the same cost
-   * appearing twice.
+   * Purchases are already charged as "To Purchases" in the trading account, so
+   * they are excluded here to prevent the same cost appearing twice.
    */
   const purchasesInExpense = (data?.expense ?? [])
-    .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
+    .filter((l) => l.purchase === true)
     .reduce((s, l) => s + l.amount, 0);
   const stockEffect = trading.openingStock - trading.closingStock;
   const otherExpenses = totalExpense - stockEffect - purchasesInExpense;
@@ -1159,9 +1158,7 @@ function ProfitAndLoss({ range }: { range: Range }) {
         {column("Income", income, totalIncome, GAIN)}
         {column(
           "Operating expenses",
-          expense.filter(
-            (l) => l.code !== "5200" && !/purchase/i.test(l.name),
-          ),
+          expense.filter((l) => l.purchase !== true),
           otherExpenses,
           LOSS,
         )}

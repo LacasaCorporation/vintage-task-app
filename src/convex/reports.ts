@@ -302,6 +302,32 @@ export const profitAndLoss = query({
     const accounts = await ledgerIn(ctx, userId, { from, to });
     const leaves = accounts.filter((a) => !a.isGroup);
 
+    /**
+     * The account a purchase lands in.
+     *
+     * Read the way the postings resolve it — whatever Settings → Accounting
+     * names, or one of the standard codes the chart is seeded with. Reading it
+     * off 5200 alone hid a firm's purchases whenever the bill charged "Cost of
+     * goods sold" (5100) instead; with closing stock still taken off, the
+     * trading account then struck a gross profit off a purchase that never
+     * reached it.
+     */
+    const settings = await ctx.db
+      .query("settings")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .first();
+    const configuredPurchase = settings?.accounting?.purchaseAccountId;
+    const isPurchase = (a: {
+      _id: Id<"accounts">;
+      code: string;
+      name: string;
+    }) =>
+      a._id === configuredPurchase ||
+      a.code === "5200" ||
+      a.code === "5100" ||
+      /purchas/i.test(a.name) ||
+      /cost of goods sold/i.test(a.name);
+
     // The two stock accounts belong to the trading account, not to the list of
     // expenses: opening stock is a cost of the goods sold and closing stock is
     // a deduction from that cost. They are read out here so the statement can
@@ -323,6 +349,12 @@ export const profitAndLoss = query({
           debit: round(a.debit),
           credit: round(a.credit),
           amount: round(type === "income" ? a.credit - a.debit : a.debit - a.credit),
+          /**
+           * A purchase account, so the trading account and the operating
+           * expenses below can each take their own half of the cost without
+           * both claiming it.
+           */
+          purchase: type === "expense" && isPurchase(a),
         }))
         .filter((l) => l.amount !== 0)
         .sort((x, y) => y.amount - x.amount);
@@ -357,19 +389,16 @@ export const profitAndLoss = query({
       closingStock = valuation.closing;
     }
     /**
-     * Materials bought in the period.
+     * Materials bought in the period, read off the rows marked as purchases.
      *
-     * Purchases are read from the expense account (5200 Raw material purchased
-     * and any account whose name matches "purchase"). Goods received vouchers
-     * debit an inventory asset (1300/1400) rather than the purchase account,
-     * but those receipts are already captured via the closing stock valuation —
-     * adding them here as well would charge the same goods twice (once as a
-     * purchase and once via COGS when closing stock reduces cost).
+     * A bill charges its cost to the purchase account and takes the same
+     * figure out of stock, so a purchase with nothing sold yet is a purchase
+     * set against closing stock rather than a profit. What is still on the
+     * shelves at the period end is carried by the stock accounts, so the goods
+     * are never counted twice.
      */
     const purchases = round(
-      expense
-        .filter((l) => l.code === "5200" || /purchase/i.test(l.name))
-        .reduce((s, l) => s + l.amount, 0),
+      expense.filter((l) => l.purchase).reduce((s, l) => s + l.amount, 0),
     );
     const cogs = round(openingStock + purchases - closingStock);
     /**
