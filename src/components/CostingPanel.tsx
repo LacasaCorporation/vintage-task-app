@@ -23,6 +23,7 @@ import {
   Printer,
   Save,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -1141,108 +1142,172 @@ export default function CostingPanel({
             </div>
           )}
 
-          {/* add-row bar: both kinds of line on one compact row */}
+          {/* add-row bars: raw materials and labour/expenses on separate lines */}
           {canCreate && !isFinished && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-1 rounded-xl border bg-card px-2 py-1.5 shadow-sm">
-              <span
-                className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
-                title="Add a raw material from the master price list"
-              >
-                <Package className="size-3" />
-                Material
-              </span>
-              <ItemPicker
-                className="min-w-[170px] flex-1"
-                size="sm"
-                items={materialOptions}
-                value={addingMaterialId}
-                onChange={setAddingMaterialId}
-                placeholder="Choose or search material…"
-                searchPlaceholder="Search name, code or category…"
-                emptyLabel="No material matches that."
-                aria-label="Choose a raw material"
-                onCreateNew={(term) =>
-                  navigate(
-                    `/materials/new?name=${encodeURIComponent(term.trim())}`,
-                  )
-                }
-              />
-              <Input
-                type="number"
-                min="0"
-                step="any"
-                value={materialQty}
-                onChange={(e) => setMaterialQty(e.target.value)}
-                aria-label="Material quantity"
-                className="h-7 w-14 rounded-lg text-xs"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="size-7 shrink-0 rounded-lg"
-                disabled={!addingMaterialId || items === undefined}
-                onClick={addMaterialRowGuarded}
-                title="Add this material to the sheet"
-              >
-                <Plus className="size-3.5" />
-              </Button>
-
-              <span className="mx-1 h-4 w-px bg-border" />
-
-              <span
-                className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
-                title="Add labour, transport, packaging or any other cost"
-              >
-                <Plus className="size-3" />
-                Custom
-              </span>
-              <Input
-                value={customLabel}
-                onChange={(e) => setCustomLabel(e.target.value)}
-                placeholder="e.g. Labor, Transport…"
-                aria-label="Custom line label"
-                className="h-7 w-32 rounded-lg text-xs"
-              />
-              <Input
-                type="number"
-                min="0"
-                step="any"
-                value={customQty}
-                onChange={(e) => setCustomQty(e.target.value)}
-                aria-label="Custom line quantity"
-                className="h-7 w-12 rounded-lg text-xs"
-              />
-              <Input
-                type="number"
-                min="0"
-                step="any"
-                value={customPrice}
-                onChange={(e) => setCustomPrice(e.target.value)}
-                aria-label="Custom line unit price"
-                className="h-7 w-14 rounded-lg text-xs"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="size-7 shrink-0 rounded-lg"
-                disabled={items === undefined}
-                onClick={() => guardProduction("Adding a custom line", () => void addCustomRow())}
-                title="Add this custom line to the sheet"
-              >
-                <Plus className="size-3.5" />
-              </Button>
-
-              {materials.length === 0 && (
-                <button
-                  type="button"
-                  onClick={() => onSelectView({ kind: "materials" })}
-                  className="text-[11px] text-primary hover:underline"
+            <div className="mt-1.5 space-y-1.5">
+              {/* Row 1: Raw Materials */}
+              <div className="flex flex-wrap items-center gap-1.5 rounded-xl border bg-card px-2.5 py-1.5 shadow-sm">
+                <span
+                  className="flex items-center gap-1.5 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase shrink-0"
+                  title="Add a raw material from the master price list"
                 >
-                  + Add raw materials first
-                </button>
-              )}
+                  <Package className="size-3 text-sky-500" />
+                  Raw Material
+                </span>
+                <ItemPicker
+                  className="min-w-[180px] flex-1"
+                  size="sm"
+                  items={materialOptions}
+                  value={addingMaterialId}
+                  onChange={setAddingMaterialId}
+                  placeholder="Choose or search raw material…"
+                  searchPlaceholder="Search name, code or category…"
+                  emptyLabel="No material matches that."
+                  aria-label="Choose a raw material"
+                  onCreateNew={(term) =>
+                    navigate(
+                      `/materials/new?name=${encodeURIComponent(term.trim())}`,
+                    )
+                  }
+                />
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[10px] text-muted-foreground font-medium">Qty:</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={materialQty}
+                    onChange={(e) => setMaterialQty(e.target.value)}
+                    aria-label="Material quantity"
+                    placeholder="Qty"
+                    className="h-7 w-16 rounded-lg text-xs"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2.5 shrink-0 rounded-lg text-xs font-medium gap-1 text-primary hover:bg-primary/10"
+                  disabled={!addingMaterialId || items === undefined}
+                  onClick={addMaterialRowGuarded}
+                  title="Add this raw material to the sheet"
+                >
+                  <Plus className="size-3.5" />
+                  Add Material
+                </Button>
+
+                {materials.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectView({ kind: "materials" })}
+                    className="ml-auto text-[11px] text-primary hover:underline"
+                  >
+                    + Add raw materials first
+                  </button>
+                )}
+              </div>
+
+              {/* Row 2: Labour Charge & Budget Expenses */}
+              <div className="flex flex-wrap items-center gap-1.5 rounded-xl border bg-card px-2.5 py-1.5 shadow-sm">
+                <span
+                  className="flex items-center gap-1.5 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase shrink-0"
+                  title="Add labour charge, transport, workshop expenses or budget cost"
+                >
+                  <Wrench className="size-3 text-amber-500" />
+                  Labour & Expenses
+                </span>
+
+                {/* Quick preset chips */}
+                <div className="hidden sm:flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setCustomLabel("Labour charge")}
+                    className={cn(
+                      "rounded-md px-1.5 py-0.5 text-[10px] font-medium border transition-colors",
+                      customLabel === "Labour charge"
+                        ? "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300"
+                        : "bg-muted/50 border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )}
+                  >
+                    Labour
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCustomLabel("Expenses / Overhead")}
+                    className={cn(
+                      "rounded-md px-1.5 py-0.5 text-[10px] font-medium border transition-colors",
+                      customLabel === "Expenses / Overhead"
+                        ? "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300"
+                        : "bg-muted/50 border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )}
+                  >
+                    Expenses
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCustomLabel("Transport")}
+                    className={cn(
+                      "rounded-md px-1.5 py-0.5 text-[10px] font-medium border transition-colors",
+                      customLabel === "Transport"
+                        ? "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300"
+                        : "bg-muted/50 border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                    )}
+                  >
+                    Transport
+                  </button>
+                </div>
+
+                <Input
+                  value={customLabel}
+                  onChange={(e) => setCustomLabel(e.target.value)}
+                  placeholder="e.g. Labour charge, Transport, Workshop expenses…"
+                  aria-label="Labour or expense description"
+                  className="h-7 min-w-[160px] flex-1 rounded-lg text-xs"
+                />
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[10px] text-muted-foreground font-medium">Qty:</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={customQty}
+                    onChange={(e) => setCustomQty(e.target.value)}
+                    aria-label="Custom line quantity"
+                    placeholder="Qty"
+                    className="h-7 w-14 rounded-lg text-xs"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[10px] text-muted-foreground font-medium">Rate:</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={customPrice}
+                    onChange={(e) => setCustomPrice(e.target.value)}
+                    aria-label="Custom line unit price"
+                    placeholder="Rate"
+                    className="h-7 w-20 rounded-lg text-xs"
+                  />
+                </div>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2.5 shrink-0 rounded-lg text-xs font-medium gap-1 text-primary hover:bg-primary/10"
+                  disabled={items === undefined}
+                  onClick={() =>
+                    guardProduction("Adding a custom line", () => void addCustomRow())
+                  }
+                  title="Add this labour charge or expense to the sheet"
+                >
+                  <Plus className="size-3.5" />
+                  Add Cost
+                </Button>
+              </div>
             </div>
           )}
 
