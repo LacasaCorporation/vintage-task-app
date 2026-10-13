@@ -1875,12 +1875,23 @@ export const setFgFlag = mutation({
       await flagAncestors(ctx, userId, jobIds, Date.now());
       // also reset any parent job that was previously marked "completed" so
       // the job row doesn't show stale "Completed" state while a product
-      // under it is being re-run
+      // under it is being re-run, and sync the parent project
       for (const jid of jobIds) {
         const parentJob = await ctx.db.get(jid);
         if (parentJob === null || parentJob.ownerId !== userId) continue;
         if (parentJob.status === "completed" || isStageDone(parentJob.projectStatus)) {
           await ctx.db.patch(jid, { status: "planning", projectStatus: undefined });
+        }
+        await syncProjectCompletion(ctx, userId, parentJob.projectId);
+      }
+      if (fg.projectName) {
+        const project = await ctx.db
+          .query("projects")
+          .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+          .filter((q) => q.eq(q.field("name"), fg.projectName))
+          .first();
+        if (project) {
+          await syncProjectCompletion(ctx, userId, project._id);
         }
       }
     } else {
@@ -1911,7 +1922,15 @@ export const setProjectFlag = mutation({
     const flaggedAt = flagged ? Date.now() : undefined;
 
     if (flagged) {
-      await ctx.db.patch(id, { isFlagged: true, flaggedAt });
+      const shouldResetProject =
+        project.status === "completed" || isStageDone(project.projectStatus);
+      await ctx.db.patch(id, {
+        isFlagged: true,
+        flaggedAt,
+        ...(shouldResetProject
+          ? { status: "planning", projectStatus: undefined }
+          : {}),
+      });
       const fgs = await ctx.db
         .query("finishedGoods")
         .withIndex("by_owner", (q) => q.eq("ownerId", userId))
@@ -1943,6 +1962,7 @@ export const setProjectFlag = mutation({
           });
         }
       }
+      await syncProjectCompletion(ctx, userId, id);
       return;
     }
 

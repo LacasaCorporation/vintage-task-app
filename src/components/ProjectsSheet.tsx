@@ -499,7 +499,13 @@ export default function ProjectsSheet({
           `"${p.name.replace(/"/g, '""')}"`,
           `"${(p.project?.client ?? "").replace(/"/g, '""')}"`,
           `"${(p.project?.assignee ?? "").replace(/"/g, '""')}"`,
-          p.project?.status ? STATUS_META[p.project.status]?.label ?? p.project.status : "",
+          (() => {
+            const hasOpen = p.jobs.length > 0 && p.jobs.some((j) => j.status !== "completed");
+            const eff = p.project?.status === "completed" && hasOpen
+              ? p.jobs.every((j) => j.status === "planning") ? "planning" : "in_progress"
+              : p.project?.status;
+            return eff ? STATUS_META[eff]?.label ?? eff : "";
+          })(),
           p.project?.priority ?? "",
           p.project?.dueAt
             ? new Date(p.project.dueAt).toLocaleDateString()
@@ -964,8 +970,17 @@ export default function ProjectsSheet({
           <ul className="divide-y divide-border/60">
             {filtered.map((p) => {
               const detail = p.project;
-              const status = detail?.status
-                ? STATUS_META[detail.status]
+              const hasOpenJobs =
+                p.jobs.length > 0 &&
+                p.jobs.some((j) => j.status !== "completed");
+              const effectiveStatus =
+                detail?.status === "completed" && hasOpenJobs
+                  ? p.jobs.every((j) => j.status === "planning")
+                    ? "planning"
+                    : "in_progress"
+                  : detail?.status;
+              const status = effectiveStatus
+                ? STATUS_META[effectiveStatus]
                 : undefined;
               const due = detail?.dueAt !== undefined ? dueLabel(detail.dueAt) : null;
               // products booked to this project that hang off none of its jobs

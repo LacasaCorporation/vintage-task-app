@@ -16,12 +16,15 @@ import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import {
   DEFAULT_PROJECT_STATUSES,
+  PROJECT_STATUS_COMPLETED,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
+  isStageDone,
   middleProjectStatus,
   projectStatusesOrDefaults,
 } from "../lib/project-statuses";
 import { batchQty } from "../lib/product-cost";
+import { isProductDone, productsOfJob, syncProjectCompletion } from "./jobs";
 
 /**
  * How many units the running production has already landed into `stock`.
@@ -389,12 +392,37 @@ export const stop = mutation({
       productionConsumed: undefined,
       productionQty: undefined,
       // the abandoned units go back off the books
-      inProduction: (fg.inProduction ?? 0) - (fg.productionQty ?? 0),
+      inProduction: undefined,
       isCompleted: undefined,
       completedAt: undefined,
       // the work is no longer under way, so it goes back to "Listed"
       projectStatus: PROJECT_STATUS_START,
     });
+
+    // When reversing production on a product, reopen parent jobs and parent project
+    const jobIds = jobIdsOf(fg);
+    for (const jid of jobIds) {
+      const parentJob = await ctx.db.get(jid);
+      if (parentJob === null || parentJob.ownerId !== userId) continue;
+      if (parentJob.status === "completed" || isStageDone(parentJob.projectStatus)) {
+        await ctx.db.patch(jid, {
+          status: "planning",
+          projectStatus: undefined,
+          completedAt: undefined,
+        });
+      }
+      await syncProjectCompletion(ctx, userId, parentJob.projectId);
+    }
+    if (fg.projectName) {
+      const project = await ctx.db
+        .query("projects")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .filter((q) => q.eq(q.field("name"), fg.projectName))
+        .first();
+      if (project) {
+        await syncProjectCompletion(ctx, userId, project._id);
+      }
+    }
   },
 });
 
@@ -493,6 +521,34 @@ export const finish = mutation({
       productionStartedAt: undefined,
       productionConsumed: undefined,
     });
+
+    const jobIds = jobIdsOf(fg);
+    for (const jid of jobIds) {
+      const parentJob = await ctx.db.get(jid);
+      if (parentJob === null || parentJob.ownerId !== userId) continue;
+      const products = await productsOfJob(ctx, userId, jid);
+      const allDone = products.every(
+        (p) => p._id === fgId || isProductDone(p),
+      );
+      if (allDone) {
+        await ctx.db.patch(jid, {
+          status: "completed",
+          projectStatus: PROJECT_STATUS_COMPLETED,
+          completedAt: parentJob.completedAt ?? Date.now(),
+        });
+        await syncProjectCompletion(ctx, userId, parentJob.projectId);
+      }
+    }
+    if (fg.projectName) {
+      const project = await ctx.db
+        .query("projects")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .filter((q) => q.eq(q.field("name"), fg.projectName))
+        .first();
+      if (project) {
+        await syncProjectCompletion(ctx, userId, project._id);
+      }
+    }
   },
 });
 

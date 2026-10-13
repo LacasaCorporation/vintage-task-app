@@ -196,15 +196,23 @@ export function ProjectHierarchy({
 
   const visible = useMemo(
     () =>
-      projects.filter((project) =>
-        matchesStatusFilter(
-          statusFilter ?? "all",
-          projectDocStatus(project, projectStatuses),
-          project.status === "completed" || project.status === "cancelled",
-        ),
-      ),
+      projects.filter((project) => {
+        const allProjectJobs = jobs.filter((j) => j.projectId === project._id);
+        const hasOpenJobs =
+          allProjectJobs.length > 0 &&
+          allProjectJobs.some(
+            (job) => !isStageDone(jobProjectStatus(job, projectStatuses)),
+          );
+        const rawStatus = projectDocStatus(project, projectStatuses);
+        const effStatus =
+          isStageDone(rawStatus) && hasOpenJobs
+            ? PROJECT_STATUS_START
+            : rawStatus;
+        const isDone = isStageDone(effStatus);
+        return matchesStatusFilter(statusFilter ?? "all", effStatus, isDone);
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projects, statusFilter, statusKey],
+    [projects, jobs, statusFilter, statusKey],
   );
 
   if (visible.length === 0) {
@@ -226,15 +234,24 @@ export function ProjectHierarchy({
   return (
     <ul className="divide-y divide-border/70">
       {visible.map((project) => {
-        const status = projectDocStatus(project, projectStatuses);
+        const allProjectJobs = jobs.filter(
+          (job) => job.projectId === project._id,
+        );
+        const hasOpenJobs =
+          allProjectJobs.length > 0 &&
+          allProjectJobs.some(
+            (job) => !isStageDone(jobProjectStatus(job, projectStatuses)),
+          );
+        const rawStatus = projectDocStatus(project, projectStatuses);
+        const status =
+          isStageDone(rawStatus) && hasOpenJobs
+            ? PROJECT_STATUS_START
+            : rawStatus;
         const projectDone = isStageDone(status);
         const isCollapsed = collapsed.has(project._id);
         // the project's completion, counted from the products under it: how
         // many are finished over how many there are (its jobs when it holds
         // no products at all)
-        const allProjectJobs = jobs.filter(
-          (job) => job.projectId === project._id,
-        );
         const jobsFinished = allProjectJobs.filter((job) =>
           isStageDone(jobProjectStatus(job, projectStatuses)),
         ).length;

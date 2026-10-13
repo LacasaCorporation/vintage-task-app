@@ -106,18 +106,42 @@ export async function syncProjectCompletion(
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect()
   ).filter((job) => job.status !== "cancelled");
-  if (jobs.length === 0) return;
+  if (jobs.length === 0) {
+    const products = (
+      await ctx.db
+        .query("finishedGoods")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect()
+    ).filter(
+      (f) =>
+        (f.projectName ?? "").trim().toLowerCase() ===
+        project.name.trim().toLowerCase(),
+    );
+    if (products.length === 0) return;
+    const everyDone = products.every(isProductDone);
+    const finished =
+      project.status === "completed" || isStageDone(project.projectStatus);
+    if (everyDone === finished) return;
+    await ctx.db.patch(
+      projectId,
+      everyDone
+        ? { projectStatus: PROJECT_STATUS_COMPLETED, status: "completed" }
+        : { projectStatus: undefined, status: "planning" },
+    );
+    return;
+  }
   const everyDone = jobs.every(
     (job) => job.status === "completed" || isStageDone(job.projectStatus),
   );
   const finished =
     project.status === "completed" || isStageDone(project.projectStatus);
   if (everyDone === finished) return;
+  const allPlanning = jobs.every((job) => job.status === "planning");
   await ctx.db.patch(
     projectId,
     everyDone
       ? { projectStatus: PROJECT_STATUS_COMPLETED, status: "completed" }
-      : { projectStatus: undefined, status: "in_progress" },
+      : { projectStatus: undefined, status: allPlanning ? "planning" : "in_progress" },
   );
 }
 
@@ -529,6 +553,8 @@ export const setJobFlag = mutation({
       }
       // cascade up to the project this job belongs to
       await flagAncestors(ctx, userId, [id], Date.now());
+      // sync parent project completion since job status or products were reset
+      await syncProjectCompletion(ctx, userId, job.projectId);
     } else {
       // nothing flagged is left under this job, so the project may drop too
       await clearAncestorsIfOrphaned(ctx, userId, [id]);
