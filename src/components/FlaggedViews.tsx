@@ -43,6 +43,7 @@ import {
   isStageDone,
   middleProjectStatuses,
   PROJECT_STATUS_FINISH,
+  PROJECT_STATUS_START,
   projectStatusDetailsOrDefaults,
   projectStatusesOrDefaults,
   productLockedReason,

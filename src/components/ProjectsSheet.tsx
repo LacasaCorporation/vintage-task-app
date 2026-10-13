@@ -319,60 +319,55 @@ export default function ProjectsSheet({
   /** All FG products — the clone picker searches across every project. */
   const allProducts = finishedGoods;
 
-  /**
-   * Toggle the flag on a job. Flagging flags all of its products too; a job
-   * that is only flagged because a product is flagged under it cannot be
-   * unflagged until that product clears its own flag.
-   */
+  /** Flag a job (flags the job and all its products to send to production). */
   const toggleJobFlag = async (job: JobDoc) => {
+    if (job.isFlagged) {
+      toast.info("This job is in production. To remove it, unflag from the Productions tab.");
+      return;
+    }
     setFlagBusy(`j:${job._id}`);
     try {
-      await setJobFlag({ id: job._id, flagged: !job.isFlagged });
-      toast.success(
-        job.isFlagged
-          ? "Flag removed from the job."
-          : "Job flagged — its products and project were flagged too.",
-      );
+      await setJobFlag({ id: job._id, flagged: true });
+      toast.success("Job flagged — sent to production with its products.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
+      toast.error(error instanceof Error ? error.message : "Couldn't flag the job.");
     } finally {
       setFlagBusy(null);
     }
   };
 
   /**
-   * Toggle the flag on a project. Flagging cascades down through every job
-   * and product under it; the project keeps the flag for as long as anything
-   * beneath it is still flagged.
+   * Flag a project to send it to production. Flagging cascades down through every job
+   * and product under it.
    */
   const toggleProjectFlag = async (project: ProjectDoc) => {
+    if (project.isFlagged) {
+      toast.info("This project is in production. To remove it, unflag from the Productions tab.");
+      return;
+    }
     setFlagBusy(`p:${project._id}`);
     try {
-      await setProjectFlag({ id: project._id, flagged: !project.isFlagged });
-      toast.success(
-        project.isFlagged
-          ? "Flag removed from the project."
-          : "Project flagged — its jobs and products were flagged too.",
-      );
+      await setProjectFlag({ id: project._id, flagged: true });
+      toast.success("Project flagged — sent to production with its jobs and products.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
+      toast.error(error instanceof Error ? error.message : "Couldn't flag the project.");
     } finally {
       setFlagBusy(null);
     }
   };
 
-  /** Toggle the flag on a product (flagged products are subtasks of their job). */
+  /** Flag a product to send it to production. */
   const toggleFgFlag = async (fg: FgDoc) => {
+    if (fg.isFlagged) {
+      toast.info("This product is in production. To remove it, unflag from the Productions tab.");
+      return;
+    }
     setFlagBusy(`f:${fg._id}`);
     try {
-      await setFgFlag({ id: fg._id, flagged: !fg.isFlagged });
-      toast.success(
-        fg.isFlagged
-          ? "Flag removed from product."
-          : "Product flagged — its job and project are flagged too.",
-      );
+      await setFgFlag({ id: fg._id, flagged: true });
+      toast.success("Product flagged — sent to production.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the flag.");
+      toast.error(error instanceof Error ? error.message : "Couldn't flag the product.");
     } finally {
       setFlagBusy(null);
     }
@@ -1124,8 +1119,8 @@ export default function ProjectsSheet({
                           type="button"
                           title={
                             detail.isFlagged
-                              ? "Remove flag from this project"
-                              : "Flag this project — flags its jobs and products too"
+                              ? "In production — unflag from the Productions tab"
+                              : "Flag this project — send to production"
                           }
                           aria-label={
                             detail.isFlagged
@@ -1417,18 +1412,14 @@ export default function ProjectsSheet({
                               <button
                                 type="button"
                                 title={
-                                  job.status === "completed"
-                                    ? "Completed — all flagged products are done"
-                                    : job.isFlagged && hasFlaggedProduct
-                                      ? "Held by a flagged product — remove that flag first"
-                                      : job.isFlagged
-                                        ? "Remove flag from this job"
-                                        : "Flag this job — flags all its products too"
+                                  job.isFlagged
+                                    ? "In production — unflag from the Productions tab"
+                                    : "Flag job — send to production"
                                 }
                                 aria-label={
                                   job.isFlagged
-                                    ? "Remove flag from job"
-                                    : "Flag job"
+                                    ? "Job is in production — unflag from the Productions tab"
+                                    : "Flag job — send to production"
                                 }
                                 className={cn(
                                   "flex size-5 shrink-0 items-center justify-center rounded-md transition-colors",
@@ -1439,7 +1430,7 @@ export default function ProjectsSheet({
                                       : "text-muted-foreground/40 hover:text-amber-500",
                                 )}
                                 onClick={() => void toggleJobFlag(job)}
-                                disabled={flagBusy !== null || (job.isFlagged && hasFlaggedProduct)}
+                                disabled={flagBusy !== null}
                               >
                                 {flagBusy === `j:${job._id}` ? (
                                   <Loader2 className="size-3 animate-spin" />
@@ -1716,8 +1707,8 @@ export default function ProjectsSheet({
                                     type="button"
                                     title={
                                       fg.isFlagged
-                                        ? "Remove flag from product"
-                                        : "Flag product — show it under its job"
+                                        ? "In production — unflag from the Productions tab"
+                                        : "Flag product — send to production"
                                     }
                                     aria-label={
                                       fg.isFlagged
@@ -1830,8 +1821,8 @@ export default function ProjectsSheet({
                             type="button"
                             title={
                               fg.isFlagged
-                                ? "Remove flag from product"
-                                : "Flag product — show it under its job"
+                                ? "In production — unflag from the Productions tab"
+                                : "Flag product — send to production"
                             }
                             aria-label={
                               fg.isFlagged
