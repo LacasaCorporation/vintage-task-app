@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import ProjectsWorkspace from "@/components/ProjectsWorkspace";
@@ -58,6 +58,7 @@ export default function ProductionsBoard({
   const setFgCompletedM = useMutation(api.costing.setFgCompleted);
   const setJobProjectStatusM = useMutation(api.jobs.setJobProjectStatus);
   const { confirm } = useAppDialogs();
+  const convex = useConvex();
   const statusDetailsQuery = useQuery(api.settings.listProjectStatusDetails);
   const setProjectStatusesM = useMutation(api.settings.setProjectStatuses);
   // one query holds the statuses and the details the editor keeps — colour,
@@ -180,6 +181,25 @@ export default function ProductionsBoard({
       if (blocked !== null) {
         toast.error(blocked);
         return;
+      }
+      try {
+        const items = await convex.query(api.costing.listFgItems, { fgId: fg._id });
+        const totalCost = (items ?? []).reduce(
+          (sum, it) => sum + (it.qty || 0) * (it.unitPrice || 0),
+          0,
+        );
+        if ((items ?? []).length === 0 || totalCost <= 0) {
+          const goAhead = await confirm({
+            title: `Finish “${fg.name}” with zero cost?`,
+            message:
+              "This product has no recipe lines or its total cost is 0.00. Finishing it will land zero-costed stock on the books. Do you want to finish it anyway?",
+            confirmLabel: "Finish anyway",
+            danger: true,
+          });
+          if (!goAhead) return;
+        }
+      } catch {
+        // continue
       }
     }
     setBusyKey(`f:${fg._id}`);

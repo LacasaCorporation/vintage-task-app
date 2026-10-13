@@ -44,8 +44,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router";
+import { PROJECT_STATUS_FINISH } from "@/lib/project-statuses";
 
 type FgDoc = Doc<"finishedGoods">;
+
+/**
+ * Whether a product is finished and locked on the books.
+ */
+const isFinished = (fg: FgDoc) =>
+  fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH;
 
 /**
  * A product that is on the line or already finished. Its costs and stock are
@@ -54,7 +61,7 @@ type FgDoc = Doc<"finishedGoods">;
 const isLocked = (fg: FgDoc) =>
   fg.productionStartedAt !== undefined ||
   (fg.inProduction ?? 0) > 0 ||
-  fg.isCompleted === true;
+  isFinished(fg);
 
 /** How the product list is narrowed down by production state. */
 type ProductionFilter =
@@ -218,6 +225,17 @@ export default function ProductForm({
         title: `“${fg.name}” is in production`,
         message:
           "Stop production before deleting this product. Stopping puts the raw materials it is using back into stock.",
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
+    // finished products cannot be deleted at all
+    if (isFinished(fg)) {
+      await confirm({
+        title: `“${fg.name}” is finished`,
+        message:
+          "Finished products cannot be deleted at all. Their costs and landed stock are permanently on the books.",
         confirmLabel: "Got it",
         danger: true,
       });
@@ -580,14 +598,22 @@ export default function ProductForm({
                           <button
                             type="button"
                             aria-label={`Delete “${f.name}”`}
+                            disabled={isFinished(f)}
                             title={
-                              isLocked(f)
-                                ? canDoItem("completedProducts", "delete")
-                                  ? "Completed — confirm to delete"
-                                  : "Completed — needs permission to delete"
-                                : "Delete product"
+                              isFinished(f)
+                                ? "Finished products cannot be deleted"
+                                : isLocked(f)
+                                  ? canDoItem("completedProducts", "delete")
+                                    ? "Completed — confirm to delete"
+                                    : "Completed — needs permission to delete"
+                                  : "Delete product"
                             }
-                            className="grid size-6 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-destructive"
+                            className={cn(
+                              "grid size-6 place-items-center rounded-md text-muted-foreground/70 transition-colors",
+                              isFinished(f)
+                                ? "cursor-not-allowed opacity-30"
+                                : "hover:bg-accent hover:text-destructive",
+                            )}
                             onClick={() => void handleDelete(f)}
                           >
                             <Trash2 className="size-3.5" />

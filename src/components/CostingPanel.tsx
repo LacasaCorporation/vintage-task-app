@@ -366,6 +366,14 @@ export default function CostingPanel({
   // the sheet renders as a modal over everything else, so anything it needs to
   // show the user has to live inside that modal
   const sheetOpen = (view?.kind === "fg" || sheetId !== null) && activeFg !== null;
+  /**
+   * A finished product's recipe is on the books — it is shown read-only. The
+   * add-row bar, inline inputs, and the row-level edit/delete/copy buttons are
+   * all suppressed while this is true.
+   */
+  const isFinished =
+    activeFg !== null &&
+    (activeFg.isCompleted === true || activeFg.projectStatus === "Finish");
   const { format, format: money, code: currencyCode } = useWorkspaceCurrency();
   const markupPct = activeFg?.markupPct ?? 0;
 
@@ -1155,8 +1163,18 @@ export default function CostingPanel({
             </div>
           )}
 
+          {/* finished-product read-only notice — replaces the add-row bar */}
+          {isFinished && (
+            <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-300">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              <span>
+                <strong>Production finished.</strong> This recipe is locked and cannot be changed.
+              </span>
+            </div>
+          )}
+
           {/* add-row bar: both kinds of line on one compact row */}
-          {canCreate && (
+          {canCreate && !isFinished && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1 rounded-xl border bg-card px-2 py-1.5 shadow-sm">
               <span
                 className="flex items-center gap-1 pr-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
@@ -1387,60 +1405,72 @@ export default function CostingPanel({
                             </div>
                           </td>
                           <td className="px-1 py-1 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={qty}
-                              onChange={(e) =>
-                                updateDraft(row._id, { qty: Number(e.target.value) })
-                              }
-                              className={cn(lineCls, "text-right tabular-nums")}
-                              aria-label="Quantity"
-                            />
+                            {isFinished ? (
+                              <span className={cn(lineCls, "flex items-center justify-end text-right tabular-nums")}>{qty}</span>
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={qty}
+                                onChange={(e) =>
+                                  updateDraft(row._id, { qty: Number(e.target.value) })
+                                }
+                                className={cn(lineCls, "text-right tabular-nums")}
+                                aria-label="Quantity"
+                              />
+                            )}
                           </td>
                           <td className="px-2 py-1 align-top text-[11px] text-muted-foreground">
                             {row.unit ?? "—"}
                           </td>
                           <td className="px-1 py-1 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              step="any"
-                              value={rate}
-                              onChange={(e) =>
-                                updateDraft(row._id, {
-                                  unitPrice: Number(e.target.value),
-                                })
-                              }
-                              className={cn(
-                                lineCls,
-                                "text-right tabular-nums",
-                                rate === 0 && "text-amber-600 dark:text-amber-400",
-                              )}
-                              aria-label="Unit price"
-                            />
+                            {isFinished ? (
+                              <span className={cn(lineCls, "flex items-center justify-end text-right tabular-nums", rate === 0 && "text-amber-600 dark:text-amber-400")}>{money(rate)}</span>
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={rate}
+                                onChange={(e) =>
+                                  updateDraft(row._id, {
+                                    unitPrice: Number(e.target.value),
+                                  })
+                                }
+                                className={cn(
+                                  lineCls,
+                                  "text-right tabular-nums",
+                                  rate === 0 && "text-amber-600 dark:text-amber-400",
+                                )}
+                                aria-label="Unit price"
+                              />
+                            )}
                           </td>
                           <td className="px-1 py-1 align-top">
-                            <input
-                              type="number"
-                              min="0"
-                              max="100"
-                              step="any"
-                              value={taxPct}
-                              onChange={(e) =>
-                                updateDraft(row._id, {
-                                  taxPct: cleanRate(Number(e.target.value)),
-                                })
-                              }
-                              title={`Tax on this line — ${cleanRate(taxPct)}% of ${money(amount)} is ${money(lineTax)}`}
-                              className={cn(
-                                lineCls,
-                                "text-right tabular-nums",
-                                taxPct === 0 && "text-muted-foreground",
-                              )}
-                              aria-label="Tax percent"
-                            />
+                            {isFinished ? (
+                              <span className={cn(lineCls, "flex items-center justify-end text-right tabular-nums", taxPct === 0 && "text-muted-foreground")}>{taxPct}%</span>
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="any"
+                                value={taxPct}
+                                onChange={(e) =>
+                                  updateDraft(row._id, {
+                                    taxPct: cleanRate(Number(e.target.value)),
+                                  })
+                                }
+                                title={`Tax on this line — ${cleanRate(taxPct)}% of ${money(amount)} is ${money(lineTax)}`}
+                                className={cn(
+                                  lineCls,
+                                  "text-right tabular-nums",
+                                  taxPct === 0 && "text-muted-foreground",
+                                )}
+                                aria-label="Tax percent"
+                              />
+                            )}
                             <div className="pr-1.5 text-right text-[9px] leading-none text-muted-foreground/70 tabular-nums">
                               {money(lineTax)}
                             </div>
@@ -1452,6 +1482,7 @@ export default function CostingPanel({
                             {money(amount + lineTax)}
                           </td>
                           <td className="px-1 py-1 align-top text-right">
+                          {!isFinished && (
                           <span
                             className="hidden items-center gap-0.5 group-hover/row:inline-flex"
                             aria-label={`Actions for ${row.label}`}
@@ -1509,6 +1540,7 @@ export default function CostingPanel({
                               </button>
                             )}
                           </span>
+                          )}
                           </td>
                         </tr>
                       );

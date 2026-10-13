@@ -1,4 +1,4 @@
-import { useMutation } from "convex/react";
+import { useConvex, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useAppDialogs } from "@/components/AppDialogs";
@@ -30,6 +30,7 @@ function isFinished(fg: StatusProduct): boolean {
  */
 export function useFgStatusChange() {
   const { confirm } = useAppDialogs();
+  const convex = useConvex();
   const setFgStatus = useMutation(api.costing.setFgProjectStatus);
   return async (fg: StatusProduct, status: string): Promise<boolean> => {
     const reopening = status !== PROJECT_STATUS_FINISH && isFinished(fg);
@@ -42,6 +43,28 @@ export function useFgStatusChange() {
         danger: true,
       });
       if (!goAhead) return false;
+    }
+    const finishing = status === PROJECT_STATUS_FINISH && !isFinished(fg);
+    if (finishing) {
+      try {
+        const items = await convex.query(api.costing.listFgItems, { fgId: fg._id });
+        const totalCost = (items ?? []).reduce(
+          (sum, it) => sum + (it.qty || 0) * (it.unitPrice || 0),
+          0,
+        );
+        if ((items ?? []).length === 0 || totalCost <= 0) {
+          const goAhead = await confirm({
+            title: `Finish “${fg.name}” with zero cost?`,
+            message:
+              "This product has no recipe lines or its total cost is 0.00. Finishing it will land zero-costed stock on the books. Do you want to finish it anyway?",
+            confirmLabel: "Finish anyway",
+            danger: true,
+          });
+          if (!goAhead) return false;
+        }
+      } catch {
+        // continue
+      }
     }
     try {
       await setFgStatus({ id: fg._id, status, confirmReverse: reopening });

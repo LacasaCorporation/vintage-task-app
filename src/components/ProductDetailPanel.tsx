@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import {
   AlarmClock,
   CalendarDays,
@@ -123,6 +123,7 @@ export default function ProductDetailPanel({
   const detachFromJobM = useMutation(api.costing.detachFromJob);
   const detachFromProjectM = useMutation(api.costing.detachFromProject);
   const { confirm } = useAppDialogs();
+  const convex = useConvex();
   const setCompleted = useMutation(api.costing.setFgCompleted);
   const addStep = useMutation(api.productTasks.addStep);
   const toggleStep = useMutation(api.productTasks.toggleStep);
@@ -165,7 +166,10 @@ export default function ProductDetailPanel({
   const mayEdit = canEdit && (rights?.canEdit ?? true);
   const mayComplete = canEdit && (rights?.canComplete ?? true);
   const mayOptions = canEdit && (rights?.canChangeOptions ?? true);
-  const mayDelete = canEdit && (rights?.canDelete ?? true);
+  const mayDelete =
+    canEdit &&
+    (rights?.canDelete ?? true) &&
+    !(fg.isCompleted === true || fg.projectStatus === "Finish");
   const attachments = useMemo(
     () => parseAttachments(fg.attachments),
     [fg.attachments],
@@ -207,6 +211,25 @@ export default function ProductDetailPanel({
       if (blocked !== null) {
         toast.error(blocked);
         return;
+      }
+      try {
+        const items = await convex.query(api.costing.listFgItems, { fgId: fg._id });
+        const totalCost = (items ?? []).reduce(
+          (sum, it) => sum + (it.qty || 0) * (it.unitPrice || 0),
+          0,
+        );
+        if ((items ?? []).length === 0 || totalCost <= 0) {
+          const goAhead = await confirm({
+            title: `Finish “${fg.name}” with zero cost?`,
+            message:
+              "This product has no recipe lines or its total cost is 0.00. Finishing it will land zero-costed stock on the books. Do you want to finish it anyway?",
+            confirmLabel: "Finish anyway",
+            danger: true,
+          });
+          if (!goAhead) return;
+        }
+      } catch {
+        // continue if query error
       }
     }
     setBusy(true);

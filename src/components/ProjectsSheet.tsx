@@ -698,8 +698,15 @@ export default function ProjectsSheet({
 
   /** Delete the product the side panel is showing, after the usual confirm. */
   const handleDeleteProductFromPane = async (fg: FgDoc) => {
-    // finished or in-production work is part of the project's record: the
-    // server refuses the delete, so say why before the confirm
+    if (fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH) {
+      await confirm({
+        title: `“${fg.name}” can’t be deleted`,
+        message: "Finished products cannot be deleted at all. Their costs and landed stock are permanently on the books.",
+        confirmLabel: "Got it",
+        danger: true,
+      });
+      return;
+    }
     const locked = productLockedReason(fg);
     if (locked !== null) {
       await confirm({

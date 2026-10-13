@@ -2293,6 +2293,10 @@ export const addFgItem = mutation({
     const fg = await ctx.db.get(fgId);
     if (fg === null || fg.ownerId !== userId)
       throw new Error("That product no longer exists.");
+    if (fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH)
+      throw new Error(
+        "This product's production is finished. Its recipe cannot be modified.",
+      );
     if (qty <= 0) throw new Error("Quantity must be greater than zero.");
 
     if (materialId !== undefined) {
@@ -2376,6 +2380,14 @@ export const updateItem = mutation({
     const item = await ctx.db.get(id);
     if (item === null) throw new Error("That line no longer exists.");
     if (item.ownerId !== userId) throw new Error("Not your line.");
+    // block edits on lines that belong to a finished product
+    if (item.fgId !== undefined) {
+      const fg = await ctx.db.get(item.fgId);
+      if (fg !== null && (fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH))
+        throw new Error(
+          "This product's production is finished. Its recipe cannot be modified.",
+        );
+    }
     if (patch.qty !== undefined && patch.qty < 0) throw new Error("Qty can't be negative.");
     if (patch.unitPrice !== undefined && patch.unitPrice < 0)
       throw new Error("Price can't be negative.");
@@ -2412,6 +2424,11 @@ export const removeItem = mutation({
     if (item === null) throw new Error("That line no longer exists.");
     if (item.ownerId !== userId) throw new Error("Not your line.");
     const fg = item.fgId !== undefined ? await ctx.db.get(item.fgId) : null;
+    // block deletes on lines belonging to a finished product
+    if (fg !== null && (fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH))
+      throw new Error(
+        "This product's production is finished. Its recipe cannot be modified.",
+      );
     await ctx.db.delete(id);
     // the removed material goes back into stock while production is running
     if (fg !== null && fg.ownerId === userId) {
@@ -2433,6 +2450,9 @@ export const mergeFgDuplicateItems = mutation({
     const fg = await ctx.db.get(fgId);
     if (fg === null || fg.ownerId !== userId)
       throw new Error("That product no longer exists.");
+    if (fg.isCompleted === true || fg.projectStatus === PROJECT_STATUS_FINISH) {
+      return 0;
+    }
     const items = await ctx.db
       .query("costingItems")
       .withIndex("by_fg", (q) => q.eq("fgId", fgId))
