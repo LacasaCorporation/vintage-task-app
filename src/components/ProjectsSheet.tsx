@@ -27,7 +27,6 @@ import { Suspense, lazy, useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "@/lib/toast";
 import { useAppDialogs } from "@/components/AppDialogs";
-import { ProductionButton } from "@/components/FlaggedLists";
 import ActiveToggle from "@/components/ActiveToggle";
 // the same rule the server uses to know which products sit in which job
 import { jobIdsOf } from "@/lib/project-work";
@@ -1665,7 +1664,7 @@ export default function ProjectsSheet({
                                   >
                                     <Plus className="size-3" />
                                   </button>
-                                  <ProductionButton fg={fg} jobId={job._id} />
+                                  {/* ProductionButton intentionally omitted — start/reverse production is only available from the Productions tab */}
                                   {/* a finished or in-production product cannot
                                       be moved, so the control says why instead
                                       of failing when it is used */}

@@ -495,6 +495,11 @@ export const setJobFlag = mutation({
       // snapshot for products to inherit when flagged
       fgDueAt: job.dueAt,
       fgPriority: job.priority,
+      // when re-flagging a previously completed job, reset its status so it
+      // doesn't carry stale "Completed" state into the new production run
+      ...(flagged && (job.status === "completed" || isStageDone(job.projectStatus))
+        ? { status: "planning" as const, projectStatus: undefined }
+        : {}),
     });
 
     if (flagged) {
@@ -512,10 +517,14 @@ export const setJobFlag = mutation({
           // details start in sync (they can be edited per product afterwards)
           dueAt: job.fgDueAt ?? job.dueAt,
           priority: job.fgPriority ?? job.priority,
-          // a newly flagged product starts its life as "Listed"
-          ...(fg.projectStatus === undefined
-            ? { projectStatus: PROJECT_STATUS_START }
-            : {}),
+          // always reset to Listed when (re-)flagged — clear old completion state
+          projectStatus: PROJECT_STATUS_START,
+          isCompleted: undefined,
+          completedAt: undefined,
+          productionStartedAt: undefined,
+          productionQty: undefined,
+          productionConsumed: undefined,
+          inProduction: undefined,
         });
       }
       // cascade up to the project this job belongs to

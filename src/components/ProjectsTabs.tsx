@@ -7,7 +7,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { useMemo } from "react";
-import { ProductionButton } from "@/components/FlaggedLists";
 import ActiveToggle from "@/components/ActiveToggle";
 import type { FilterOption } from "@/components/FilterMenu";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
@@ -458,7 +457,7 @@ export function ProductsList({
                           <Sigma className="size-3.5" />
                         </button>
                       )}
-                      <ProductionButton fg={fg} />
+                      {/* ProductionButton intentionally omitted — only shown in Productions tab */}
                     </span>
                   </td>
                 </tr>

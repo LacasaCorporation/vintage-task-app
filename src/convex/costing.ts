@@ -1857,12 +1857,32 @@ export const setFgFlag = mutation({
         await ctx.db.patch(id, { dueAt: parent.dueAt });
       if (fg.priority === undefined && parent?.priority !== undefined)
         await ctx.db.patch(id, { priority: parent.priority });
-      // a newly flagged product starts its life as "Listed"
-      if (fg.projectStatus === undefined) {
-        await ctx.db.patch(id, { projectStatus: PROJECT_STATUS_START });
-      }
+      // a (re-)flagged product always restarts from "Listed" — regardless of
+      // whether it was previously completed or mid-production. Clear any
+      // leftover completion state so old history does not bleed through.
+      await ctx.db.patch(id, {
+        projectStatus: PROJECT_STATUS_START,
+        isCompleted: undefined,
+        completedAt: undefined,
+        // also clear any leftover production run state so the board
+        // does not show a stale "in production" badge
+        productionStartedAt: undefined,
+        productionQty: undefined,
+        productionConsumed: undefined,
+        inProduction: undefined,
+      });
       // cascade up: a flagged product flags its job, and the job's project
       await flagAncestors(ctx, userId, jobIds, Date.now());
+      // also reset any parent job that was previously marked "completed" so
+      // the job row doesn't show stale "Completed" state while a product
+      // under it is being re-run
+      for (const jid of jobIds) {
+        const parentJob = await ctx.db.get(jid);
+        if (parentJob === null || parentJob.ownerId !== userId) continue;
+        if (parentJob.status === "completed" || isStageDone(parentJob.projectStatus)) {
+          await ctx.db.patch(jid, { status: "planning", projectStatus: undefined });
+        }
+      }
     } else {
       // the product was the last flagged thing under its job or project, so
       // they drop the flag it lent them
@@ -1901,6 +1921,10 @@ export const setProjectFlag = mutation({
         if (job.isFlagged !== true) {
           await ctx.db.patch(job._id, { isFlagged: true, flaggedAt });
         }
+        // reset previously-completed job status so it doesn't show stale "Completed"
+        if (job.status === "completed" || isStageDone(job.projectStatus)) {
+          await ctx.db.patch(job._id, { status: "planning", projectStatus: undefined });
+        }
         for (const fg of fgs) {
           if (fg.isFlagged === true || !jobIdsOf(fg).includes(job._id)) continue;
           await ctx.db.patch(fg._id, {
@@ -1908,9 +1932,14 @@ export const setProjectFlag = mutation({
             flaggedAt,
             dueAt: fg.dueAt ?? job.dueAt,
             priority: fg.priority ?? job.priority,
-            ...(fg.projectStatus === undefined
-              ? { projectStatus: PROJECT_STATUS_START }
-              : {}),
+            // always reset to Listed when (re-)flagged — clear old completion state
+            projectStatus: PROJECT_STATUS_START,
+            isCompleted: undefined,
+            completedAt: undefined,
+            productionStartedAt: undefined,
+            productionQty: undefined,
+            productionConsumed: undefined,
+            inProduction: undefined,
           });
         }
       }
