@@ -532,23 +532,11 @@ export function FlaggedItemsList({
                     {showTags && (
                       <span className={tagChip}>{data.projectNameOf(job)}</span>
                     )}
-                    <StatusSelect
-                      value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
-                      statuses={middleProjectStatuses(
+                    <StatusChip
+                      status={fgProjectStatus(
+                        fg,
                         projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
-                        fgProjectStatus(
-                          fg,
-                          projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
-                        ),
                       )}
-                      projectColors
-                      disabled={fg.productionStartedAt === undefined}
-                      title={
-                        fg.productionStartedAt === undefined
-                          ? "Start production to change the status"
-                          : "Change the status"
-                      }
-                      onChange={(status) => void changeFgStatus(fg, status)}
                     />
                     <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
                     <RemoveFromProductionButton
@@ -961,20 +949,11 @@ export function FlaggedProductsList({
           {/* one status per row: while production is running, ProductionButton
               already says "In production", so the plain status chip would
               repeat it */}
-          <StatusSelect
-            value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
-            statuses={middleProjectStatuses(
+          <StatusChip
+            status={fgProjectStatus(
+              fg,
               projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
-              fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]),
             )}
-            projectColors
-            disabled={fg.productionStartedAt === undefined}
-            title={
-              fg.productionStartedAt === undefined
-                ? "Start production to change the status"
-                : "Change the status"
-            }
-            onChange={(status) => void changeFgStatus(fg, status)}
           />
           <ProductionButton fg={fg} jobId={parentJob?._id} hideStatusPill />
           <RemoveFromProductionButton
@@ -2487,17 +2466,9 @@ export function FlaggedDetail({
                 </DetailRow>
 
                 <DetailRow icon={Flag} label="Status">
-                  <select
-                    value={fgProjectStatus(fg, projectStatuses)}
-                    onChange={(e) => void changeFgStatus(fg, e.target.value)}
-                    disabled={busy}
-                    className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-                  >
-                    {middleProjectStatuses(
-                      projectStatuses,
-                      fgProjectStatus(fg, projectStatuses),
-                    ).map((status) => <option key={status} value={status}>{status}</option>)}
-                  </select>
+                  <div>
+                    <StatusChip status={fgProjectStatus(fg, projectStatuses)} />
+                  </div>
                 </DetailRow>
 
                 <DetailRow icon={Tag} label="Unit">

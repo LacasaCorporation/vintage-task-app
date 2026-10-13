@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "convex/react";
 import { Factory, PackageCheck, PackageOpen } from "lucide-react";
 import { api } from "@/convex/_generated/api";
-import type { FgDoc } from "@/components/FlaggedLists";
+import { StatusChip, type FgDoc } from "@/components/FlaggedLists";
 import { PRODUCT_SOURCE_LABEL } from "@/lib/stock-labels";
 import { batchQty } from "@/lib/product-cost";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
@@ -73,8 +73,8 @@ export default function ProductionDetails({ fg }: { fg: FgDoc }) {
   const { format: money } = useWorkspaceCurrency();
 
   const unit = fg.unit ?? "pcs";
-  const running = fg.productionStartedAt !== undefined;
-  const finished = fg.isCompleted === true || fg.projectStatus === "Finish";
+  const currentStatus =
+    fg.projectStatus ?? (fg.isCompleted ? "Finish" : "Listed");
 
   /** The sheet as one line per material, priced for a single unit. */
   const recipe = useMemo(
@@ -111,18 +111,7 @@ export default function ProductionDetails({ fg }: { fg: FgDoc }) {
       <header className="flex items-center gap-2">
         <Factory className="size-4 shrink-0 text-primary" />
         <h3 className="min-w-0 flex-1 text-sm font-semibold">Production</h3>
-        <span
-          className={cn(
-            "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
-            running
-              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-              : finished
-                ? "bg-muted text-muted-foreground"
-                : "bg-sky-500/10 text-sky-700 dark:text-sky-400",
-          )}
-        >
-          {running ? "In production" : finished ? "Finished" : "Not started"}
-        </span>
+        <StatusChip status={currentStatus} />
       </header>
 
       {/* ── the numbers ──────────────────────────────────────────── */}

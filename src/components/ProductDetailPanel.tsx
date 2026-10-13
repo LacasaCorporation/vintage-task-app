@@ -3,7 +3,6 @@ import { useMutation, useQuery } from "convex/react";
 import {
   AlarmClock,
   CalendarDays,
-  Check,
   FileText,
   Flag,
   Hash,
@@ -32,7 +31,6 @@ import ProductionDetails from "@/components/ProductionDetails";
 import NodeIssues from "@/components/NodeIssues";
 import type { FgDoc, JobDoc } from "@/components/FlaggedLists";
 import { PRIORITY_META, tagChip } from "@/components/FlaggedLists";
-import { useFgStatusChange } from "@/lib/useFgStatusChange";
 
 /** Pill base used by the priority row, matching the other project chips. */
 const chipBase =
@@ -53,8 +51,6 @@ import {
 import { assigneeLabel, assigneesOfTask } from "@/lib/task-people";
 import {
   finishBlockedReason,
-  middleProjectStatuses,
-  PROJECT_STATUS_FINISH,
   projectStatusesOrDefaults,
 } from "@/lib/project-statuses";
 import { messageFrom } from "@/lib/errors";
@@ -127,7 +123,6 @@ export default function ProductDetailPanel({
   const detachFromJobM = useMutation(api.costing.detachFromJob);
   const detachFromProjectM = useMutation(api.costing.detachFromProject);
   const { confirm } = useAppDialogs();
-  const changeFgStatus = useFgStatusChange();
   const setCompleted = useMutation(api.costing.setFgCompleted);
   const addStep = useMutation(api.productTasks.addStep);
   const toggleStep = useMutation(api.productTasks.toggleStep);
@@ -165,24 +160,6 @@ export default function ProductDetailPanel({
   const project = parentJob
     ? projects.find((p) => p._id === parentJob.projectId)
     : undefined;
-  const currentStatus =
-    fg.projectStatus ?? (fg.isCompleted ? "Finish" : "Listed");
-  // once production has started, Listed and Finish are off limits: they are
-  // reached by starting production and by finishing the job
-  const offeredStatuses =
-    fg.productionStartedAt === undefined
-      ? projectStatuses
-      : middleProjectStatuses(projectStatuses, currentStatus);
-  // Finish is offered only while there is a batch to land — a product is
-  // finished by being produced — but the status it is already on is always
-  // kept, so the field never reads blank
-  const finishable = finishBlockedReason(fg) === null;
-  const statusChoices = offeredStatuses.filter(
-    (status) =>
-      status !== PROJECT_STATUS_FINISH ||
-      finishable ||
-      status === currentStatus,
-  );
 
   // the role gates the panel; the product's own grant narrows it
   const mayEdit = canEdit && (rights?.canEdit ?? true);
@@ -704,21 +681,6 @@ export default function ProductDetailPanel({
               )}
             </Row>
 
-            {/* status */}
-            <Row icon={Check} label="Status" locked={!mayOptions}>
-              <select
-                value={currentStatus}
-                onChange={(e) => void changeFgStatus(fg, e.target.value)}
-                disabled={busy}
-                className="w-full rounded-lg border bg-card px-2.5 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                {statusChoices.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </Row>
 
             {/* qty, shown next to the name in every product row */}
             <Row icon={Hash} label="Qty" locked={!mayEdit}>

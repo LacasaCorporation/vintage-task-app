@@ -55,6 +55,7 @@ import {
   DueChips,
   ProductionButton,
   RemoveFromProductionButton,
+  StatusChip,
   fgProjectStatus,
   jobProjectStatus,
   matchesStatusFilter,
@@ -562,23 +563,7 @@ function JobRow({
                 inherited={fg.dueAt === undefined && job.dueAt !== undefined}
               />
               <PriorityChip priority={fg.priority} />
-              {/* the status is readable here, but only editable once the
-                  product is actually in production */}
-              <StatusSelect
-                value={fgProjectStatus(fg, projectStatuses)}
-                statuses={middleProjectStatuses(
-                  projectStatuses,
-                  fgProjectStatus(fg, projectStatuses),
-                )}
-                projectColors
-                disabled={fg.productionStartedAt === undefined}
-                title={
-                  fg.productionStartedAt === undefined
-                    ? "Start production to change the status"
-                    : "Change the status"
-                }
-                onChange={(status) => void changeFgStatus(fg, status)}
-              />
+              <StatusChip status={fgProjectStatus(fg, projectStatuses)} />
               <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
               <RemoveFromProductionButton
                 kind="product"
