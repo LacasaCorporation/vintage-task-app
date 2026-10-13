@@ -296,6 +296,8 @@ export function AddProductToJobDialog({
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("");
   const [qty, setQty] = useState("");
+  const [markup, setMarkup] = useState("0");
+  const [salesTax, setSalesTax] = useState("0");
   // the unit is a managed master value, so it is picked rather than typed
   const units = useQuery(api.costing.listUnits) ?? [];
   const [saving, setSaving] = useState(false);
@@ -333,6 +335,14 @@ export function AddProductToJobDialog({
             ? Number(qty)
             : undefined,
         unit: unit.trim() || undefined,
+        markupPct:
+          Number.isFinite(Number(markup)) && Number(markup) >= 0
+            ? Number(markup)
+            : 0,
+        salesTaxPct:
+          Number.isFinite(Number(salesTax)) && Number(salesTax) >= 0
+            ? Number(salesTax)
+            : 0,
       });
       toast.success(`“${clean}” added to job “${job.name}”.`);
       onClose();
@@ -434,29 +444,44 @@ export function AddProductToJobDialog({
               )}
             </div>
           </div>
-          {/* margin and cost are worked out by the costing sheet, so they are
-              shown frozen here rather than typed in */}
-          <div className="grid grid-cols-2 gap-3 rounded-xl border border-dashed bg-muted/20 p-2.5">
-            {[
-              { label: "Margin %", value: "0%" },
-              { label: "Cost", value: "—" },
-            ].map((field) => (
-              <div key={field.label} className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">
-                  {field.label}
-                </label>
-                <div
-                  className="flex h-9 items-center rounded-lg border border-dashed bg-card/60 px-2.5 text-sm text-muted-foreground/70 select-none"
-                  title="Calculated from the product's costing sheet"
-                >
-                  {field.value}
-                </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Margin %</label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={markup}
+                  onChange={(e) => setMarkup(e.target.value)}
+                  placeholder="0"
+                  aria-label="Margin percent"
+                  className={inputCls}
+                />
+                <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground">
+                  %
+                </span>
               </div>
-            ))}
-            <p className="col-span-2 text-[11px] text-muted-foreground">
-              Margin and cost are calculated by the costing sheet — they fill in
-              once the product has its material lines.
-            </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Product Tax %</label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="any"
+                  value={salesTax}
+                  onChange={(e) => setSalesTax(e.target.value)}
+                  placeholder="0"
+                  aria-label="Selling product tax percent"
+                  className={inputCls}
+                />
+                <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground">
+                  %
+                </span>
+              </div>
+            </div>
           </div>
           <DialogFooter className="pt-1">
             <Button
@@ -600,6 +625,12 @@ export function EditProductDialog({
   const [name, setName] = useState(fg.name);
   const [qty, setQty] = useState(fg.qty === undefined ? "" : String(fg.qty));
   const [unit, setUnit] = useState(fg.unit ?? "");
+  const [markup, setMarkup] = useState(
+    fg.markupPct !== undefined ? String(fg.markupPct) : "0",
+  );
+  const [salesTax, setSalesTax] = useState(
+    fg.salesTaxPct !== undefined ? String(fg.salesTaxPct) : "0",
+  );
   const [note, setNote] = useState(fg.note ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -646,6 +677,14 @@ export function EditProductDialog({
         code: fg.code ?? "",
         qty: qty.trim() === "" ? undefined : Number(qty),
         unit: unit.trim(),
+        markupPct:
+          Number.isFinite(Number(markup)) && Number(markup) >= 0
+            ? Number(markup)
+            : 0,
+        salesTaxPct:
+          Number.isFinite(Number(salesTax)) && Number(salesTax) >= 0
+            ? Number(salesTax)
+            : 0,
         // a job carries its own project, so linking sets that itself
         projectName:
           connected || chosenJob !== null
@@ -789,6 +828,45 @@ export function EditProductDialog({
                 placeholder="e.g. pcs"
                 className={inputCls}
               />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Margin %</label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={0}
+                  step="any"
+                  value={markup}
+                  onChange={(e) => setMarkup(e.target.value)}
+                  placeholder="0"
+                  aria-label="Margin percent"
+                  className={inputCls}
+                />
+                <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground">
+                  %
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium">Product Tax %</label>
+              <div className="relative">
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="any"
+                  value={salesTax}
+                  onChange={(e) => setSalesTax(e.target.value)}
+                  placeholder="0"
+                  aria-label="Selling product tax percent"
+                  className={inputCls}
+                />
+                <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground">
+                  %
+                </span>
+              </div>
             </div>
           </div>
           <div className="space-y-1.5">

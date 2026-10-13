@@ -449,7 +449,8 @@ export default function ProductForm({
                   // per unit, matching the raw material list; the job link
                   // multiplies by its own batch when the project totals it
                   const cost = costByFg.get(f._id) ?? 0;
-                  const total = cost * (1 + (f.markupPct ?? 0) / 100);
+                  const priceBeforeTax = cost * (1 + (f.markupPct ?? 0) / 100);
+                  const total = priceBeforeTax * (1 + (f.salesTaxPct ?? 0) / 100);
                   const stock = f.stock ?? 0;
                   const active = activeFgId === f._id;
                   const ledger = stockByProduct.get(f._id);

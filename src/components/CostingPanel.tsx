@@ -376,6 +376,7 @@ export default function CostingPanel({
     (activeFg.isCompleted === true || activeFg.projectStatus === "Finish");
   const { format, format: money, code: currencyCode } = useWorkspaceCurrency();
   const markupPct = activeFg?.markupPct ?? 0;
+  const salesTaxPct = activeFg?.salesTaxPct ?? 0;
 
   // keyed on whichever product the sheet is showing, not on the view kind —
   // the sheet also opens as an overlay, where the view is still the list
@@ -496,34 +497,41 @@ export default function CostingPanel({
   );
 
   /**
-   * The sheet prices ONE product. The batch quantity is deliberately absent
-   * here — it is applied on the project line, where the product's cost is
-   * multiplied by how many are being made.
-   *
-   * Tax is charged per line, the same way a bill is, so a recipe where boards
-   * are 18% and glue is 12% totals honestly. Margin is taken on the true cost
-   * — what the recipe costs including the tax already paid on it — and the
-   * sales price is that cost plus the margin.
+  /**
+   * The sheet prices ONE product:
+   * Production cost = sum of (qty * unit price) of the recipe lines, excluding purchase tax.
+   * Margin is added to production cost to get base price.
+   * Selling product tax is calculated on base price.
+   * Sales price = base price + product tax.
    */
   const totals = useMemo(() => {
-    const priced = priceTaxedLines(pricedRows, 0);
-    const cost = priced.grand;
-    const markup = cost * (markupPct / 100);
+    const productionCost = pricedRows.reduce(
+      (sum, r) => sum + r.qty * r.unitPrice,
+      0,
+    );
+    const markupAmount = productionCost * (markupPct / 100);
+    const priceBeforeTax = productionCost + markupAmount;
+    const taxAmount = priceBeforeTax * (salesTaxPct / 100);
+    const salesPrice = priceBeforeTax + taxAmount;
     return {
-      subtotal: priced.subtotal,
-      tax: priced.tax,
-      cost,
-      markup,
-      grand: cost + markup,
-      blendedTax: blendedRate(priced.net, priced.tax),
+      productionCost,
+      subtotal: productionCost,
+      cost: productionCost,
+      markup: markupAmount,
+      markupAmount,
+      priceBeforeTax,
+      salesTaxPct,
+      taxAmount,
+      tax: taxAmount,
+      grand: salesPrice,
+      salesPrice,
+      blendedTax: salesTaxPct,
     };
-  }, [pricedRows, markupPct]);
+  }, [pricedRows, markupPct, salesTaxPct]);
 
   /**
-   * What the sheet is trying to tell the user before they save it: a line
-   * priced at nothing, a material whose own tax rate was quietly dropped, a
-   * batch that eats more of a material than is in stock. Warnings block
-   * nothing — they are read, then acted on.
+   * What the sheet warns about before saving: lines priced at zero or
+   * shortages in inventory.
    */
   const warnings = useMemo(() => {
     const out: { id: string; text: string; note?: boolean }[] = [];
@@ -534,27 +542,11 @@ export default function CostingPanel({
         row.materialId !== undefined
           ? materials.find((x) => x._id === row.materialId)
           : undefined;
-      const rate = cleanRate(line.taxPct);
       if (line.qty > 0 && line.unitPrice === 0) {
         out.push({
           id: `price-${row._id}`,
           text: `“${row.label}” has no unit price`,
         });
-      }
-      if (rate === 0) {
-        const materialTax = material?.purchaseTaxPct ?? 0;
-        if (materialTax > 0) {
-          out.push({
-            id: `tax-${row._id}`,
-            text: `“${row.label}” is at 0% but ${material?.name ?? "the material"} carries ${materialTax}%`,
-          });
-        } else if (material === undefined) {
-          out.push({
-            id: `taxc-${row._id}`,
-            text: `“${row.label}” has no tax rate — labour is often exempt`,
-            note: true,
-          });
-        }
       }
       if (material !== undefined && (material.stock ?? 0) < line.qty) {
         out.push({
@@ -658,7 +650,7 @@ export default function CostingPanel({
     if (!activeFg) return;
     const result = await promptMulti({
       title: `Edit line — ${row.label}`,
-      message: "Change the description, quantity, unit price or tax.",
+      message: "Change the description, quantity or unit price.",
       columns: 2,
       confirmLabel: "Apply",
       fields: [
@@ -671,19 +663,11 @@ export default function CostingPanel({
           type: "number",
           required: true,
         },
-        {
-          key: "tax",
-          label: "Tax %",
-          initial: String(row.taxPct ?? 0),
-          type: "number",
-          required: true,
-        },
       ],
     });
     if (result === null) return;
     const qty = Number(result.qty);
     const price = Number(result.price);
-    const tax = Number(result.tax);
     if (!Number.isFinite(qty) || qty <= 0) {
       toast.error("Quantity must be greater than zero.");
       return;
@@ -692,17 +676,13 @@ export default function CostingPanel({
       toast.error("Price can't be negative.");
       return;
     }
-    if (!Number.isFinite(tax) || tax < 0 || tax > 100) {
-      toast.error("Tax must be between 0 and 100.");
-      return;
-    }
     try {
       await updateItem({
         id: row._id,
         label: result.label,
         qty,
         unitPrice: price,
-        taxPct: tax,
+        taxPct: 0,
       });
       toast.success("Line updated.");
     } catch (error) {
@@ -759,12 +739,11 @@ export default function CostingPanel({
         label: customLabel.trim() || "Custom line",
         qty,
         unitPrice: price,
-        taxPct: Number.isFinite(Number(customTax)) ? Number(customTax) : 0,
+        taxPct: 0,
       });
       setCustomLabel("");
       setCustomQty("1");
       setCustomPrice("0");
-      setCustomTax("0");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
     }
@@ -778,31 +757,24 @@ export default function CostingPanel({
         "Qty",
         "Unit",
         `Unit price (${currencyCode})`,
-        "Tax %",
         `Amount (${currencyCode})`,
-        `Tax (${currencyCode})`,
-        `Total (${currencyCode})`,
       ].join(","),
       ...pricedRows.map((l, i) => {
         const r = rows[i];
         const amount = l.qty * l.unitPrice;
-        const tax = amount * (cleanRate(l.taxPct) / 100);
         return [
           `"${(r?.label ?? "").replace(/"/g, '""')}"`,
           String(l.qty),
           r?.unit ?? "",
           l.unitPrice.toFixed(2),
-          String(cleanRate(l.taxPct)),
           amount.toFixed(2),
-          tax.toFixed(2),
-          (amount + tax).toFixed(2),
         ].join(",");
       }),
-      `"Sub total",,,,,,,"${totals.subtotal.toFixed(2)}",`,
-      `"Total tax",,,,,,,"${totals.tax.toFixed(2)}",`,
-      `"Total cost",,,,,,,"${totals.cost.toFixed(2)}",`,
-      `"Margin (${markupPct}%)",,,,,,,"${totals.markup.toFixed(2)}",`,
-      `"SALES PRICE",,,,,,,"${totals.grand.toFixed(2)}",`,
+      `"Production cost",,,,"${totals.productionCost.toFixed(2)}"`,
+      `"Margin (${markupPct}%)",,,,"${totals.markupAmount.toFixed(2)}"`,
+      `"Price before tax",,,,"${totals.priceBeforeTax.toFixed(2)}"`,
+      `"Product tax (${salesTaxPct}%)",,,,"${totals.taxAmount.toFixed(2)}"`,
+      `"SALES PRICE",,,,"${totals.salesPrice.toFixed(2)}"`,
     ];
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -834,7 +806,6 @@ export default function CostingPanel({
       .map((l, i) => {
         const r = rows[i];
         const amount = l.qty * l.unitPrice;
-        const tax = amount * (cleanRate(l.taxPct) / 100);
         return `
         <tr>
           <td class="num">${i + 1}</td>
@@ -842,10 +813,7 @@ export default function CostingPanel({
           <td class="num">${l.qty.toLocaleString()}</td>
           <td class="muted">${escapeHtml(r?.unit ?? "—")}</td>
           ${withAmounts ? `<td class="num">${format(l.unitPrice)}</td>
-          <td class="num">${cleanRate(l.taxPct)}%</td>
-          <td class="num">${format(amount)}</td>
-          <td class="num muted">${format(tax)}</td>
-          <td class="num strong">${format(amount + tax)}</td>` : ""}
+          <td class="num strong">${format(amount)}</td>` : ""}
         </tr>`;
       })
       .join("");
@@ -891,7 +859,7 @@ export default function CostingPanel({
       <h1>${escapeHtml(activeFg.name)}</h1>
       <div class="meta">
         Project: ${escapeHtml(activeFg.projectName ?? "Standalone")}${codeLine ? ` &nbsp;·&nbsp; ${escapeHtml(codeLine)}` : ""}<br />
-        ${activeFg.unit ? `Sold per: ${escapeHtml(activeFg.unit)}${withAmounts ? ` &nbsp;·&nbsp; Margin: ${markupPct}%` : ""}` : ""}
+        ${activeFg.unit ? `Sold per: ${escapeHtml(activeFg.unit)}${withAmounts ? ` &nbsp;·&nbsp; Margin: ${markupPct}% &nbsp;·&nbsp; Tax: ${salesTaxPct}%` : ""}` : ""}
       </div>
     </div>
     <div style="text-align:right">
@@ -901,17 +869,17 @@ export default function CostingPanel({
   </div>
   <table>
     <thead>
-      <tr><th class="num">#</th><th>Description</th><th class="num">Qty</th><th>Unit</th>${withAmounts ? `<th class="num">Unit price</th><th class="num">Tax %</th><th class="num">Amount</th><th class="num">Tax</th><th class="num">Total</th>` : ""}</tr>
+      <tr><th class="num">#</th><th>Description</th><th class="num">Qty</th><th>Unit</th>${withAmounts ? `<th class="num">Unit price</th><th class="num">Amount</th>` : ""}</tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>
   ${withAmounts ? `
   <table class="totals">
-    <tr><td class="lbl">Sub total</td><td class="val">${money(totals.subtotal)}</td></tr>
-    <tr><td class="lbl">Tax amount</td><td class="val">${money(totals.tax)}</td></tr>
-    <tr><td class="lbl">Total cost</td><td class="val">${money(totals.cost)}</td></tr>
-    <tr><td class="lbl">Margin (${markupPct}%)</td><td class="val">+${money(totals.markup)}</td></tr>
-    <tr class="grand"><td class="lbl">Sales price</td><td class="val">${money(totals.grand)}</td></tr>
+    <tr><td class="lbl">Production cost</td><td class="val">${money(totals.productionCost)}</td></tr>
+    <tr><td class="lbl">Margin (${markupPct}%)</td><td class="val">+${money(totals.markupAmount)}</td></tr>
+    <tr><td class="lbl">Price before tax</td><td class="val">${money(totals.priceBeforeTax)}</td></tr>
+    <tr><td class="lbl">Product tax (${salesTaxPct}%)</td><td class="val">+${money(totals.taxAmount)}</td></tr>
+    <tr class="grand"><td class="lbl">Sales price</td><td class="val">${money(totals.salesPrice)}</td></tr>
   </table>` : ""}
   ${activeFg.note ? `<p class="note">${escapeHtml(activeFg.note)}</p>` : ""}
   <script>window.onload = function () { window.print(); };</script>
@@ -1254,23 +1222,6 @@ export default function CostingPanel({
                 aria-label="Custom line unit price"
                 className="h-7 w-14 rounded-lg text-xs"
               />
-              <div className="relative">
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="any"
-                  value={customTax}
-                  onChange={(e) => setCustomTax(e.target.value)}
-                  aria-label="Custom line tax percent"
-                  title={`Tax on this custom line — the firm default is ${defaultTax?.taxPct ?? 0}%`}
-                  className="h-7 w-12 rounded-lg pr-4 text-xs tabular-nums"
-                />
-                <Percent
-                  className="pointer-events-none absolute top-1/2 right-1 size-2.5 -translate-y-1/2 text-muted-foreground/70"
-                  aria-hidden
-                />
-              </div>
               <Button
                 type="button"
                 size="sm"
@@ -1324,28 +1275,21 @@ export default function CostingPanel({
                     <th className="w-[4.25rem] px-2 py-1.5 text-right font-semibold">Qty</th>
                     <th className="w-14 px-2 py-1.5 font-semibold">Unit</th>
                     <th className="w-24 px-2 py-1.5 text-right font-semibold">Rate</th>
-                    <th className="w-[4.5rem] px-2 py-1.5 text-right font-semibold">
-                      <span className="inline-flex items-center justify-end gap-0.5">
-                        <Percent className="size-2.5" aria-hidden />
-                        Tax
-                      </span>
-                    </th>
                     <th className="w-28 px-2 py-1.5 text-right font-semibold">Amount</th>
-                    <th className="w-28 px-2 py-1.5 text-right font-semibold">Total</th>
                     <th className="w-9 px-1 py-1.5" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
                   {items === undefined ? (
                     <tr>
-                      <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
+                      <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
                         <Loader2 className="mx-auto mb-2 size-4 animate-spin" />
                         Loading rows…
                       </td>
                     </tr>
                   ) : rows.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
+                      <td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
                         Empty sheet — add a raw material or a custom line above.
                       </td>
                     </tr>
@@ -1447,39 +1391,8 @@ export default function CostingPanel({
                               />
                             )}
                           </td>
-                          <td className="px-1 py-1 align-top">
-                            {isFinished ? (
-                              <span className={cn(lineCls, "flex items-center justify-end text-right tabular-nums", taxPct === 0 && "text-muted-foreground")}>{taxPct}%</span>
-                            ) : (
-                              <input
-                                type="number"
-                                min="0"
-                                max="100"
-                                step="any"
-                                value={taxPct}
-                                onChange={(e) =>
-                                  updateDraft(row._id, {
-                                    taxPct: cleanRate(Number(e.target.value)),
-                                  })
-                                }
-                                title={`Tax on this line — ${cleanRate(taxPct)}% of ${money(amount)} is ${money(lineTax)}`}
-                                className={cn(
-                                  lineCls,
-                                  "text-right tabular-nums",
-                                  taxPct === 0 && "text-muted-foreground",
-                                )}
-                                aria-label="Tax percent"
-                              />
-                            )}
-                            <div className="pr-1.5 text-right text-[9px] leading-none text-muted-foreground/70 tabular-nums">
-                              {money(lineTax)}
-                            </div>
-                          </td>
-                          <td className="px-2 py-1 align-top text-right text-xs font-medium tabular-nums">
-                            {money(amount)}
-                          </td>
                           <td className="px-2 py-1 align-top text-right text-xs font-semibold tabular-nums">
-                            {money(amount + lineTax)}
+                            {money(amount)}
                           </td>
                           <td className="px-1 py-1 align-top text-right">
                           {!isFinished && (
@@ -1558,13 +1471,7 @@ export default function CostingPanel({
                         <span className="ml-1.5 opacity-70">{rows.length}</span>
                       </td>
                       <td className="px-2 py-1 text-right text-xs font-semibold tabular-nums">
-                        {money(totals.tax)}
-                      </td>
-                      <td className="px-2 py-1 text-right text-xs text-muted-foreground tabular-nums">
-                        {money(totals.subtotal)}
-                      </td>
-                      <td className="px-2 py-1 text-right text-xs font-semibold tabular-nums">
-                        {money(totals.cost)}
+                        {money(totals.productionCost)}
                       </td>
                       <td />
                     </tr>
@@ -1575,66 +1482,88 @@ export default function CostingPanel({
           </section>
 
           {rows.length > 0 && (
-            /* ── totals: sub total → tax → cost → margin → sales price ──
-                One strip at the foot of the sheet, so a whole recipe adds up
-                without scrolling and without opening anything. */
-            <div className="mt-1.5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border shadow-sm sm:grid-cols-3 lg:grid-cols-5">
+            /* ── totals: production cost → margin → product tax → sales price ── */
+            <div className="mt-1.5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border shadow-sm sm:grid-cols-4">
               <Stat
-                label="Sub total"
-                value={money(totals.subtotal)}
-                hint={`${rows.length} line${rows.length === 1 ? "" : "s"} · before tax`}
+                label="Production cost"
+                value={money(totals.productionCost)}
+                hint={`${rows.length} line${rows.length === 1 ? "" : "s"} · direct cost`}
               />
-              <Stat
-                label="Tax amount"
-                value={money(totals.tax)}
-                hint={
-                  totals.tax > 0
-                    ? `blended ${totals.blendedTax}%`
-                    : `no tax on any line · default ${defaultTax?.taxPct ?? 0}%`
-                }
-                strong={totals.tax > 0}
-              />
-              <Stat
-                label="Total cost"
-                value={money(totals.cost)}
-                hint="sub total + tax"
-                strong
-              />
-              {/* margin is edited in place, the way it always was */}
+              {/* margin is edited in place, or read-only if finished */}
               <div className="min-w-0 bg-card px-3 py-1.5">
                 <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
                   Margin
                 </div>
                 <div className="flex items-baseline gap-0.5">
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={markupPct}
-                    onChange={(e) => {
-                      const v = Number(e.target.value);
-                      if (Number.isFinite(v) && v >= 0 && activeFg) {
-                        void updateFg({ id: activeFg._id, markupPct: v }).catch(() =>
-                          toast.error("Couldn't update the margin."),
-                        );
-                      }
-                    }}
-                    aria-label="Margin percent"
-                    className="w-10 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
-                  />
+                  {isFinished ? (
+                    <span className="text-sm font-semibold tabular-nums">{markupPct}</span>
+                  ) : (
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={markupPct}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        if (Number.isFinite(v) && v >= 0 && activeFg) {
+                          void updateFg({ id: activeFg._id, markupPct: v }).catch(() =>
+                            toast.error("Couldn't update the margin."),
+                          );
+                        }
+                      }}
+                      aria-label="Margin percent"
+                      className="w-12 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
+                    />
+                  )}
                   <span className="text-[11px] text-muted-foreground">%</span>
                   <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                    {money(totals.markup)}
+                    +{money(totals.markupAmount)}
                   </span>
                 </div>
                 <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
-                  on total cost
+                  on production cost
+                </div>
+              </div>
+              {/* product selling tax is edited in place, or read-only if finished */}
+              <div className="min-w-0 bg-card px-3 py-1.5">
+                <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
+                  Product Tax
+                </div>
+                <div className="flex items-baseline gap-0.5">
+                  {isFinished ? (
+                    <span className="text-sm font-semibold tabular-nums">{salesTaxPct}</span>
+                  ) : (
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="any"
+                      value={salesTaxPct}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        if (Number.isFinite(v) && v >= 0 && activeFg) {
+                          void updateFg({ id: activeFg._id, salesTaxPct: v }).catch(() =>
+                            toast.error("Couldn't update the product tax."),
+                          );
+                        }
+                      }}
+                      aria-label="Selling product tax percent"
+                      className="w-12 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
+                    />
+                  )}
+                  <span className="text-[11px] text-muted-foreground">%</span>
+                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                    +{money(totals.taxAmount)}
+                  </span>
+                </div>
+                <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
+                  selling product tax
                 </div>
               </div>
               <Stat
                 label="Sales price"
-                value={money(totals.grand)}
-                hint={`per ${activeFg.unit ?? "pcs"}`}
+                value={money(totals.salesPrice)}
+                hint={`per ${activeFg.unit ?? "pcs"}${totals.taxAmount > 0 ? ` · excl. tax ${money(totals.priceBeforeTax)}` : ""}`}
                 accent
               />
             </div>
