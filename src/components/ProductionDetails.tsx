@@ -86,6 +86,8 @@ export default function ProductionDetails({ fg }: { fg: FgDoc }) {
         qty: line.qty,
         unitPrice: line.unitPrice,
         cost: line.qty * line.unitPrice,
+        kind: line.kind as "labour" | "expense" | "custom" | undefined,
+        materialId: line.materialId,
       })),
     [items],
   );
@@ -94,6 +96,24 @@ export default function ProductionDetails({ fg }: { fg: FgDoc }) {
     () => recipe.reduce((sum, line) => sum + line.cost, 0),
     [recipe],
   );
+
+  /** Split the per-unit cost into materials / labour / expenses for the budget breakdown. */
+  const costBreakdown = useMemo(() => {
+    let materialsCost = 0;
+    let labourCost = 0;
+    let expensesCost = 0;
+    for (const line of recipe) {
+      if (line.materialId !== undefined) {
+        materialsCost += line.cost;
+      } else if (line.kind === "labour") {
+        labourCost += line.cost;
+      } else {
+        expensesCost += line.cost;
+      }
+    }
+    return { materialsCost, labourCost, expensesCost };
+  }, [recipe]);
+
   const batch = batchQty(fg);
   const perBatch = perUnit * batch;
 
@@ -179,6 +199,22 @@ export default function ProductionDetails({ fg }: { fg: FgDoc }) {
                 <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
                   {line.label}
                 </span>
+                {/* kind badge for non-material lines */}
+                {line.materialId === undefined && (
+                  line.kind === "labour" ? (
+                    <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 leading-tight">
+                      LABOUR
+                    </span>
+                  ) : line.kind === "expense" ? (
+                    <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300 leading-tight">
+                      EXPENSE
+                    </span>
+                  ) : (
+                    <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold bg-muted text-muted-foreground leading-tight">
+                      CUSTOM
+                    </span>
+                  )
+                )}
                 <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
                   {qtyText(line.qty)} {line.unit ?? ""} × {money(line.unitPrice)}
                 </span>
@@ -187,8 +223,25 @@ export default function ProductionDetails({ fg }: { fg: FgDoc }) {
                 </span>
               </li>
             ))}
+            {/* Budget breakdown footer */}
+            {(costBreakdown.labourCost > 0 || costBreakdown.expensesCost > 0) && (
+              <>
+                <li className="flex items-center gap-2 bg-sky-500/[0.04] px-2.5 py-1 text-[10px] text-sky-700 dark:text-sky-400">
+                  <span className="min-w-0 flex-1">Materials</span>
+                  <span className="w-16 shrink-0 text-right tabular-nums font-medium">{money(costBreakdown.materialsCost)}</span>
+                </li>
+                <li className="flex items-center gap-2 bg-amber-500/[0.04] px-2.5 py-1 text-[10px] text-amber-700 dark:text-amber-400">
+                  <span className="min-w-0 flex-1">Labour</span>
+                  <span className="w-16 shrink-0 text-right tabular-nums font-medium">{money(costBreakdown.labourCost)}</span>
+                </li>
+                <li className="flex items-center gap-2 bg-violet-500/[0.04] px-2.5 py-1 text-[10px] text-violet-700 dark:text-violet-400">
+                  <span className="min-w-0 flex-1">Expenses</span>
+                  <span className="w-16 shrink-0 text-right tabular-nums font-medium">{money(costBreakdown.expensesCost)}</span>
+                </li>
+              </>
+            )}
             <li className="flex items-center gap-2 bg-muted/40 px-2.5 py-1.5 text-[11px] font-semibold">
-              <span className="min-w-0 flex-1">Production cost</span>
+              <span className="min-w-0 flex-1">Total cost</span>
               <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
                 {qtyText(batch)} × {money(perUnit)}
               </span>

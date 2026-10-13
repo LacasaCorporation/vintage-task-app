@@ -321,6 +321,8 @@ export default function CostingPanel({
   const [customPrice, setCustomPrice] = useState("0");
   /** Tax on the custom line being added. Defaults to the firm rate. */
   const [customTax, setCustomTax] = useState("0");
+  /** Whether the labour/expense row is tagged as labour, expense, or plain custom. */
+  const [customKind, setCustomKind] = useState<"labour" | "expense" | "custom">("custom");
 
   // Draft state — edits stay local until "Save" is pressed.
   const [drafts, setDrafts] = useState<
@@ -506,15 +508,32 @@ export default function CostingPanel({
    * Sales price = base price + product tax.
    */
   const totals = useMemo(() => {
-    const productionCost = pricedRows.reduce(
-      (sum, r) => sum + r.qty * r.unitPrice,
-      0,
-    );
+    let materialsCost = 0;
+    let labourCost = 0;
+    let expensesCost = 0;
+    pricedRows.forEach((r, i) => {
+      const row = rows[i];
+      const amount = r.qty * r.unitPrice;
+      if (row?.materialId !== undefined) {
+        materialsCost += amount;
+      } else if (row?.kind === "labour") {
+        labourCost += amount;
+      } else if (row?.kind === "expense") {
+        expensesCost += amount;
+      } else {
+        // untagged custom lines count as expenses for budget purposes
+        expensesCost += amount;
+      }
+    });
+    const productionCost = materialsCost + labourCost + expensesCost;
     const markupAmount = productionCost * (markupPct / 100);
     const priceBeforeTax = productionCost + markupAmount;
     const taxAmount = priceBeforeTax * (salesTaxPct / 100);
     const salesPrice = priceBeforeTax + taxAmount;
     return {
+      materialsCost,
+      labourCost,
+      expensesCost,
       productionCost,
       subtotal: productionCost,
       cost: productionCost,
@@ -528,7 +547,7 @@ export default function CostingPanel({
       salesPrice,
       blendedTax: salesTaxPct,
     };
-  }, [pricedRows, markupPct, salesTaxPct]);
+  }, [pricedRows, rows, markupPct, salesTaxPct]);
 
   /**
    * What the sheet warns about before saving: lines priced at zero or
@@ -737,14 +756,16 @@ export default function CostingPanel({
     try {
       await addFgItem({
         fgId: activeFg._id,
-        label: customLabel.trim() || "Custom line",
+        label: customLabel.trim() || (customKind === "labour" ? "Labour charge" : customKind === "expense" ? "Expense" : "Custom line"),
         qty,
         unitPrice: price,
         taxPct: 0,
+        kind: customKind,
       });
       setCustomLabel("");
       setCustomQty("1");
       setCustomPrice("0");
+      // keep kind so the user can quickly add more of the same type
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't add the row.");
     }
@@ -1217,14 +1238,14 @@ export default function CostingPanel({
                   Labour & Expenses
                 </span>
 
-                {/* Quick preset chips */}
+                {/* Quick preset chips — each sets both label and kind */}
                 <div className="hidden sm:flex items-center gap-1 shrink-0">
                   <button
                     type="button"
-                    onClick={() => setCustomLabel("Labour charge")}
+                    onClick={() => { setCustomLabel("Labour charge"); setCustomKind("labour"); }}
                     className={cn(
                       "rounded-md px-1.5 py-0.5 text-[10px] font-medium border transition-colors",
-                      customLabel === "Labour charge"
+                      customKind === "labour"
                         ? "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300"
                         : "bg-muted/50 border-border text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
@@ -1233,11 +1254,11 @@ export default function CostingPanel({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCustomLabel("Expenses / Overhead")}
+                    onClick={() => { setCustomLabel("Expenses / Overhead"); setCustomKind("expense"); }}
                     className={cn(
                       "rounded-md px-1.5 py-0.5 text-[10px] font-medium border transition-colors",
-                      customLabel === "Expenses / Overhead"
-                        ? "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300"
+                      customKind === "expense" && customLabel !== "Transport"
+                        ? "bg-violet-500/15 border-violet-500/40 text-violet-700 dark:text-violet-300"
                         : "bg-muted/50 border-border text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                   >
@@ -1245,11 +1266,11 @@ export default function CostingPanel({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCustomLabel("Transport")}
+                    onClick={() => { setCustomLabel("Transport"); setCustomKind("expense"); }}
                     className={cn(
                       "rounded-md px-1.5 py-0.5 text-[10px] font-medium border transition-colors",
-                      customLabel === "Transport"
-                        ? "bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300"
+                      customKind === "expense" && customLabel === "Transport"
+                        ? "bg-violet-500/15 border-violet-500/40 text-violet-700 dark:text-violet-300"
                         : "bg-muted/50 border-border text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                   >
@@ -1374,6 +1395,22 @@ export default function CostingPanel({
                           : undefined;
                       const short =
                         material !== undefined && (material.stock ?? 0) < qty;
+                      // kind badge for non-material rows
+                      const kindBadge =
+                        material !== undefined ? null
+                        : row.kind === "labour" ? (
+                          <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 leading-tight">
+                            LABOUR
+                          </span>
+                        ) : row.kind === "expense" ? (
+                          <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300 leading-tight">
+                            EXPENSE
+                          </span>
+                        ) : (
+                          <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold bg-muted text-muted-foreground leading-tight">
+                            CUSTOM
+                          </span>
+                        );
                       return (
                         <tr
                           key={row._id}
@@ -1392,6 +1429,7 @@ export default function CostingPanel({
                               <span className="truncate text-xs font-medium">
                                 {row.label}
                               </span>
+                              {kindBadge}
                               {material !== undefined && (
                                 <span
                                   className={cn(
@@ -1547,90 +1585,112 @@ export default function CostingPanel({
           </section>
 
           {rows.length > 0 && (
-            /* ── totals: production cost → margin → product tax → sales price ── */
-            <div className="mt-1.5 grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border shadow-sm sm:grid-cols-4">
-              <Stat
-                label="Production cost"
-                value={money(totals.productionCost)}
-                hint={`${rows.length} line${rows.length === 1 ? "" : "s"} · direct cost`}
-              />
-              {/* margin is edited in place, or read-only if finished */}
-              <div className="min-w-0 bg-card px-3 py-1.5">
-                <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
-                  Margin
-                </div>
-                <div className="flex items-baseline gap-0.5">
-                  {isFinished ? (
-                    <span className="text-sm font-semibold tabular-nums">{markupPct}</span>
-                  ) : (
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={markupPct}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        if (Number.isFinite(v) && v >= 0 && activeFg) {
-                          void updateFg({ id: activeFg._id, markupPct: v }).catch(() =>
-                            toast.error("Couldn't update the margin."),
-                          );
-                        }
-                      }}
-                      aria-label="Margin percent"
-                      className="w-12 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
-                    />
-                  )}
-                  <span className="text-[11px] text-muted-foreground">%</span>
-                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                    +{money(totals.markupAmount)}
-                  </span>
-                </div>
-                <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
-                  on production cost
-                </div>
+            /* ── totals: breakdown → margin → product tax → sales price ── */
+            <div className="mt-1.5 space-y-px overflow-hidden rounded-xl border bg-border shadow-sm">
+              {/* Cost breakdown row — materials / labour / expenses */}
+              <div className="grid grid-cols-3 gap-px bg-border">
+                <Stat
+                  label="Materials"
+                  value={money(totals.materialsCost)}
+                  hint="raw material cost"
+                />
+                <Stat
+                  label="Labour"
+                  value={money(totals.labourCost)}
+                  hint="tagged labour lines"
+                />
+                <Stat
+                  label="Other Expenses"
+                  value={money(totals.expensesCost)}
+                  hint="expenses & custom lines"
+                />
               </div>
-              {/* product selling tax is edited in place, or read-only if finished */}
-              <div className="min-w-0 bg-card px-3 py-1.5">
-                <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
-                  Product Tax
+              {/* Summary row — total cost, margin, tax, sales price */}
+              <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-4">
+                <Stat
+                  label="Total cost"
+                  value={money(totals.productionCost)}
+                  hint={`${rows.length} line${rows.length === 1 ? "" : "s"} · all categories`}
+                  strong
+                />
+                {/* margin is edited in place, or read-only if finished */}
+                <div className="min-w-0 bg-card px-3 py-1.5">
+                  <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
+                    Margin
+                  </div>
+                  <div className="flex items-baseline gap-0.5">
+                    {isFinished ? (
+                      <span className="text-sm font-semibold tabular-nums">{markupPct}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={markupPct}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (Number.isFinite(v) && v >= 0 && activeFg) {
+                            void updateFg({ id: activeFg._id, markupPct: v }).catch(() =>
+                              toast.error("Couldn't update the margin."),
+                            );
+                          }
+                        }}
+                        aria-label="Margin percent"
+                        className="w-12 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
+                      />
+                    )}
+                    <span className="text-[11px] text-muted-foreground">%</span>
+                    <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                      +{money(totals.markupAmount)}
+                    </span>
+                  </div>
+                  <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
+                    on total cost
+                  </div>
                 </div>
-                <div className="flex items-baseline gap-0.5">
-                  {isFinished ? (
-                    <span className="text-sm font-semibold tabular-nums">{salesTaxPct}</span>
-                  ) : (
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="any"
-                      value={salesTaxPct}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        if (Number.isFinite(v) && v >= 0 && activeFg) {
-                          void updateFg({ id: activeFg._id, salesTaxPct: v }).catch(() =>
-                            toast.error("Couldn't update the product tax."),
-                          );
-                        }
-                      }}
-                      aria-label="Selling product tax percent"
-                      className="w-12 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
-                    />
-                  )}
-                  <span className="text-[11px] text-muted-foreground">%</span>
-                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                    +{money(totals.taxAmount)}
-                  </span>
+                {/* product selling tax is edited in place, or read-only if finished */}
+                <div className="min-w-0 bg-card px-3 py-1.5">
+                  <div className="text-[9px] leading-tight font-semibold tracking-widest text-muted-foreground uppercase">
+                    Product Tax
+                  </div>
+                  <div className="flex items-baseline gap-0.5">
+                    {isFinished ? (
+                      <span className="text-sm font-semibold tabular-nums">{salesTaxPct}</span>
+                    ) : (
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="any"
+                        value={salesTaxPct}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (Number.isFinite(v) && v >= 0 && activeFg) {
+                            void updateFg({ id: activeFg._id, salesTaxPct: v }).catch(() =>
+                              toast.error("Couldn't update the product tax."),
+                            );
+                          }
+                        }}
+                        aria-label="Selling product tax percent"
+                        className="w-12 border-b border-transparent bg-transparent px-0.5 text-sm font-semibold tabular-nums outline-none focus:border-primary/60"
+                      />
+                    )}
+                    <span className="text-[11px] text-muted-foreground">%</span>
+                    <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                      +{money(totals.taxAmount)}
+                    </span>
+                  </div>
+                  <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
+                    selling product tax
+                  </div>
                 </div>
-                <div className="truncate text-[10px] leading-tight text-muted-foreground/70">
-                  selling product tax
-                </div>
+                <Stat
+                  label="Sales price"
+                  value={money(totals.salesPrice)}
+                  hint={`per ${activeFg.unit ?? "pcs"}${totals.taxAmount > 0 ? ` · excl. tax ${money(totals.priceBeforeTax)}` : ""}`}
+                  accent
+                />
               </div>
-              <Stat
-                label="Sales price"
-                value={money(totals.salesPrice)}
-                hint={`per ${activeFg.unit ?? "pcs"}${totals.taxAmount > 0 ? ` · excl. tax ${money(totals.priceBeforeTax)}` : ""}`}
-                accent
-              />
             </div>
           )}
 
