@@ -419,6 +419,17 @@ export default function CostingPanel({
     [materials, money],
   );
 
+  const selectedMaterial = useMemo(
+    () => (addingMaterialId ? materials.find((m) => m._id === addingMaterialId) : undefined),
+    [addingMaterialId, materials],
+  );
+  const selectedMaterialQty = Number(materialQty) || 0;
+  const selectedMaterialRate = selectedMaterial?.pricePerUnit ?? 0;
+  const selectedMaterialAmount = selectedMaterialQty * selectedMaterialRate;
+  const selectedMaterialStock = selectedMaterial?.stock ?? 0;
+  const isMaterialStockShort =
+    selectedMaterial !== undefined && selectedMaterialStock < selectedMaterialQty;
+
   // Collapse duplicate rows (same description/price/unit) once per sheet open.
   useEffect(() => {
     if (!activeFg || items === undefined || items.length < 2) return;
@@ -1204,6 +1215,57 @@ export default function CostingPanel({
                     className="h-7 w-16 rounded-lg text-xs"
                   />
                 </div>
+
+                {selectedMaterial && (
+                  <>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[10px] text-muted-foreground font-medium">Unit:</span>
+                      <span className="rounded-md bg-muted/70 px-1.5 py-0.5 text-xs font-medium text-foreground border border-border/50">
+                        {selectedMaterial.unit || "—"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[10px] text-muted-foreground font-medium">Rate:</span>
+                      <span className="text-xs font-semibold tabular-nums text-foreground">
+                        {money(selectedMaterialRate)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[10px] text-muted-foreground font-medium">Total:</span>
+                      <span className="text-xs font-bold tabular-nums text-primary">
+                        {money(selectedMaterialAmount)}
+                      </span>
+                    </div>
+
+                    <div
+                      className={cn(
+                        "flex items-center gap-1 shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium border tabular-nums transition-colors",
+                        isMaterialStockShort
+                          ? "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300"
+                          : "bg-muted/50 border-border/60 text-muted-foreground",
+                      )}
+                      title={
+                        isMaterialStockShort
+                          ? `Low stock! Only ${selectedMaterialStock.toLocaleString()} ${selectedMaterial.unit || ""} available on hand.`
+                          : `${selectedMaterialStock.toLocaleString()} ${selectedMaterial.unit || ""} on hand`
+                      }
+                    >
+                      {isMaterialStockShort ? (
+                        <AlertTriangle className="size-3 text-amber-500 shrink-0" />
+                      ) : (
+                        <Package className="size-3 text-muted-foreground/60 shrink-0" />
+                      )}
+                      <span className="text-[10px] opacity-80 font-medium">Stock:</span>
+                      <span className="font-semibold">
+                        {selectedMaterialStock.toLocaleString()}
+                        {selectedMaterial.unit ? ` ${selectedMaterial.unit}` : ""}
+                      </span>
+                    </div>
+                  </>
+                )}
+
                 <Button
                   type="button"
                   size="sm"
