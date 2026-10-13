@@ -77,14 +77,14 @@ export type FgDoc = Doc<"finishedGoods">;
  * refuses it. Frozen here rather than left to fail, so the row explains
  * itself. Reopening a finished product stays open — it asks first instead.
  */
-function tickBlocked(fg: FgDoc): boolean {
-  return fg.isCompleted !== true && finishBlockedReason(fg) !== null;
+function tickBlocked(fg: FgDoc, statuses?: readonly string[]): boolean {
+  return fg.isCompleted !== true && finishBlockedReason(fg, statuses) !== null;
 }
 
 /** What the tick means on this row, said before it is pressed. */
-function tickTitle(fg: FgDoc): string {
+function tickTitle(fg: FgDoc, statuses?: readonly string[]): string {
   if (fg.isCompleted === true) return "Reopen this product — you'll be asked to confirm";
-  return finishBlockedReason(fg) ?? "Mark this product as done";
+  return finishBlockedReason(fg, statuses) ?? "Mark this product as done";
 }
 
 // the shared lookups live with the rest of the task helpers, so a screen that
@@ -486,8 +486,8 @@ export function FlaggedItemsList({
                   >
                     <Checkbox
                       checked={fg.isCompleted ?? false}
-                      disabled={busyKey !== null || tickBlocked(fg)}
-                      title={tickTitle(fg)}
+                      disabled={busyKey !== null || tickBlocked(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+                      title={tickTitle(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
                       onCheckedChange={() => onToggleFg(fg)}
                       aria-label={
                         fg.isCompleted
@@ -532,11 +532,23 @@ export function FlaggedItemsList({
                     {showTags && (
                       <span className={tagChip}>{data.projectNameOf(job)}</span>
                     )}
-                    <StatusChip
-                      status={fgProjectStatus(
-                        fg,
+                    <StatusSelect
+                      value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+                      statuses={middleProjectStatuses(
                         projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
+                        fgProjectStatus(
+                          fg,
+                          projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
+                        ),
                       )}
+                      projectColors
+                      disabled={fg.productionStartedAt === undefined}
+                      title={
+                        fg.productionStartedAt === undefined
+                          ? "Start production to change the status"
+                          : "Change the status"
+                      }
+                      onChange={(status) => void changeFgStatus(fg, status)}
                     />
                     <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
                     <RemoveFromProductionButton
@@ -600,8 +612,8 @@ export function FlaggedItemsList({
               <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-lg bg-muted/40 px-2 py-1 pl-7 text-xs">
                 <Checkbox
                   checked={fg.isCompleted ?? false}
-                  disabled={busyKey !== null || tickBlocked(fg)}
-                  title={tickTitle(fg)}
+                  disabled={busyKey !== null || tickBlocked(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+                  title={tickTitle(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
                   onCheckedChange={() => onToggleFg(fg)}
                   aria-label={
                     fg.isCompleted
@@ -905,8 +917,8 @@ export function FlaggedProductsList({
         >
           <Checkbox
             checked={fg.isCompleted ?? false}
-            disabled={busyKey !== null || tickBlocked(fg)}
-            title={tickTitle(fg)}
+            disabled={busyKey !== null || tickBlocked(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+            title={tickTitle(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
             onCheckedChange={() => onToggleFg(fg)}
             aria-label={
               fg.isCompleted
@@ -949,11 +961,20 @@ export function FlaggedProductsList({
           {/* one status per row: while production is running, ProductionButton
               already says "In production", so the plain status chip would
               repeat it */}
-          <StatusChip
-            status={fgProjectStatus(
-              fg,
+          <StatusSelect
+            value={fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES])}
+            statuses={middleProjectStatuses(
               projectStatuses ?? [...DEFAULT_PROJECT_STATUSES],
+              fgProjectStatus(fg, projectStatuses ?? [...DEFAULT_PROJECT_STATUSES]),
             )}
+            projectColors
+            disabled={fg.productionStartedAt === undefined}
+            title={
+              fg.productionStartedAt === undefined
+                ? "Start production to change the status"
+                : "Change the status"
+            }
+            onChange={(status) => void changeFgStatus(fg, status)}
           />
           <ProductionButton fg={fg} jobId={parentJob?._id} hideStatusPill />
           <RemoveFromProductionButton
@@ -1274,8 +1295,8 @@ function BoardCardView({
         </button>
         <Checkbox
           checked={done}
-          disabled={busy || tickBlocked(card.fg)}
-          title={tickTitle(card.fg)}
+          disabled={busy || tickBlocked(card.fg, projectStatuses)}
+          title={tickTitle(card.fg, projectStatuses)}
           onCheckedChange={() => onToggleFg(card.fg)}
           aria-label={
             done ? `Reopen product “${card.fg.name}”` : `Mark product “${card.fg.name}” as done`

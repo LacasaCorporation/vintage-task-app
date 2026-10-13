@@ -15,6 +15,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import {
+  DEFAULT_PROJECT_STATUSES,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
   middleProjectStatus,
@@ -444,11 +445,26 @@ export function landableQty(fg: Doc<"finishedGoods">): number {
  * The client mirrors this in lib/project-statuses.ts, so a control that would
  * be refused explains itself instead of being offered.
  */
-export function finishBlockedReason(fg: Doc<"finishedGoods">): string | null {
-  if (landableQty(fg) > 0) return null;
-  return fg.productionStartedAt === undefined
-    ? "Start production before finishing this product — its units only reach the shelf when a batch is made."
-    : "This run has already landed all of its units. Start another batch to finish more of it.";
+export function finishBlockedReason(
+  fg: Doc<"finishedGoods">,
+  projectStatuses?: readonly string[],
+): string | null {
+  if (fg.productionStartedAt === undefined)
+    return "Start production before finishing this product — its units only reach the shelf when a batch is made.";
+  if (landableQty(fg) <= 0)
+    return "This run has already landed all of its units. Start another batch to finish more of it.";
+  const statuses = projectStatuses ?? DEFAULT_PROJECT_STATUSES;
+  const middle = statuses.slice(1, -1);
+  if (middle.length > 0) {
+    const lastMiddle = middle[middle.length - 1];
+    const current =
+      fg.projectStatus ??
+      (fg.isCompleted ? PROJECT_STATUS_FINISH : PROJECT_STATUS_START);
+    if (current !== lastMiddle && current !== PROJECT_STATUS_FINISH) {
+      return `Move the production status to “${lastMiddle}” before finishing this product.`;
+    }
+  }
+  return null;
 }
 
 /**

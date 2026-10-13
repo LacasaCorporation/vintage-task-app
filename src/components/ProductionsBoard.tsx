@@ -176,7 +176,7 @@ export default function ProductionsBoard({
       });
       if (!goAhead) return;
     } else {
-      const blocked = finishBlockedReason(fg);
+      const blocked = finishBlockedReason(fg, projectStatuses);
       if (blocked !== null) {
         toast.error(blocked);
         return;

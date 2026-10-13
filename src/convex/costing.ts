@@ -28,6 +28,7 @@ import {
   PROJECT_STATUS_COMPLETED,
   PROJECT_STATUS_FINISH,
   PROJECT_STATUS_START,
+  projectStatusesOrDefaults,
   stageStatusOf,
 } from "../lib/project-statuses";
 import { currencySymbol } from "../lib/currency";
@@ -1951,7 +1952,9 @@ export const setFgProjectStatus = mutation({
       // A product is finished by being produced: with no batch under way there
       // is nothing to land, so Finish cannot be picked by hand at all. The
       // product has to be started and work its way through the statuses.
-      const blocked = finishBlockedReason(fg);
+      const settings = await getSettings(ctx, userId);
+      const statuses = projectStatusesOrDefaults(settings?.projectStatuses);
+      const blocked = finishBlockedReason(fg, statuses);
       if (blocked !== null) throw new Error(blocked);
       await assertNoOpenIssues(ctx, "product", id, "product");
       // finishing a product is what puts its units on the shelf, so the
@@ -2026,7 +2029,9 @@ export const setFgCompleted = mutation({
       throw new Error("That product no longer exists.");
     const wasDone = fg.isCompleted === true;
     if (completed) {
-      const blocked = finishBlockedReason(fg);
+      const settings = await getSettings(ctx, userId);
+      const statuses = projectStatusesOrDefaults(settings?.projectStatuses);
+      const blocked = finishBlockedReason(fg, statuses);
       if (blocked !== null) throw new Error(blocked);
       await assertNoOpenIssues(ctx, "product", id, "product");
       // ticking a product off is finishing it: its units land in stock

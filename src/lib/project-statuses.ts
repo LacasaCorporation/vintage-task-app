@@ -138,15 +138,53 @@ export function landableQtyOf(fg: {
  * Mirrors the server's own `finishBlockedReason` in convex/production.ts, so a
  * frozen control explains itself instead of offering what the server refuses.
  */
-export function finishBlockedReason(fg: {
-  productionStartedAt?: number;
-  inProduction?: number;
-  productionQty?: number;
-}): string | null {
-  if (landableQtyOf(fg) > 0) return null;
-  return fg.productionStartedAt === undefined
-    ? "Start production before finishing this product — its units only reach the shelf when a batch is made."
-    : "This run has already landed all of its units. Start another batch to finish more of it.";
+/**
+ * The last production status before Finish (the final stage of work).
+ */
+export function lastProductionStatus(statuses: readonly string[]): string {
+  const middle = statuses.slice(1, -1);
+  if (middle.length === 0) return statuses[0] ?? PROJECT_STATUS_START;
+  return middle[middle.length - 1];
+}
+
+/**
+ * Why a product cannot be finished yet, or null when it can.
+ *
+ * Finishing is what puts a product's units on the shelf, so a batch has to be
+ * under way first: a product is finished by being produced, never by being
+ * ticked off. That is also what makes it go through the statuses — starting
+ * production is what moves it out of the first status, and the finish button
+ * is only open when the product has reached the final production status position.
+ *
+ * Mirrors the server's own `finishBlockedReason` in convex/production.ts, so a
+ * frozen control explains itself instead of offering what the server refuses.
+ */
+export function finishBlockedReason(
+  fg: {
+    productionStartedAt?: number;
+    inProduction?: number;
+    productionQty?: number;
+    projectStatus?: string;
+    isCompleted?: boolean;
+  },
+  projectStatuses?: readonly string[],
+): string | null {
+  if (fg.productionStartedAt === undefined)
+    return "Start production before finishing this product — its units only reach the shelf when a batch is made.";
+  if (landableQtyOf(fg) <= 0)
+    return "This run has already landed all of its units. Start another batch to finish more of it.";
+  const statuses = projectStatuses ?? DEFAULT_PROJECT_STATUSES;
+  const middle = statuses.slice(1, -1);
+  if (middle.length > 0) {
+    const lastMiddle = middle[middle.length - 1];
+    const current =
+      fg.projectStatus ??
+      (fg.isCompleted ? PROJECT_STATUS_FINISH : PROJECT_STATUS_START);
+    if (current !== lastMiddle && current !== PROJECT_STATUS_FINISH) {
+      return `Move the production status to “${lastMiddle}” before finishing this product.`;
+    }
+  }
+  return null;
 }
 
 /** What the first status used to be called, so older saved sets still work. */

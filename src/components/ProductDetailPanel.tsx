@@ -202,6 +202,12 @@ export default function ProductDetailPanel({
         danger: true,
       });
       if (!goAhead) return;
+    } else {
+      const blocked = finishBlockedReason(fg, projectStatuses);
+      if (blocked !== null) {
+        toast.error(blocked);
+        return;
+      }
     }
     setBusy(true);
     try {
@@ -355,14 +361,14 @@ export default function ProductDetailPanel({
               disabled={
                 !mayComplete ||
                 busy ||
-                // finishing needs a batch to land, so the tick stays frozen
-                // until a run is under way
-                (fg.isCompleted !== true && finishBlockedReason(fg) !== null)
+                // finishing needs a batch to land, and the product must reach
+                // the last production status position
+                (fg.isCompleted !== true && finishBlockedReason(fg, projectStatuses) !== null)
               }
               title={
                 fg.isCompleted === true
                   ? "Reopen this product — you'll be asked to confirm"
-                  : (finishBlockedReason(fg) ?? "Mark this product as done")
+                  : (finishBlockedReason(fg, projectStatuses) ?? "Mark this product as done")
               }
               onCheckedChange={() => void toggleCompleted()}
               aria-label={

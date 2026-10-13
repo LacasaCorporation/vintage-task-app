@@ -39,6 +39,7 @@ import {
 import { useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
+  finishBlockedReason,
   isStageDone,
   middleProjectStatuses,
   PROJECT_STATUS_FINISH,
@@ -520,7 +521,12 @@ function JobRow({
             >
               <Checkbox
                 checked={fg.isCompleted ?? false}
-                disabled={busyKey !== null}
+                disabled={busyKey !== null || (fg.isCompleted !== true && finishBlockedReason(fg, projectStatuses) !== null)}
+                title={
+                  fg.isCompleted === true
+                    ? "Reopen this product — you'll be asked to confirm"
+                    : (finishBlockedReason(fg, projectStatuses) ?? "Mark this product as done")
+                }
                 onCheckedChange={() => onToggleFg(fg)}
                 aria-label={
                   fg.isCompleted
@@ -563,7 +569,21 @@ function JobRow({
                 inherited={fg.dueAt === undefined && job.dueAt !== undefined}
               />
               <PriorityChip priority={fg.priority} />
-              <StatusChip status={fgProjectStatus(fg, projectStatuses)} />
+              <StatusSelect
+                value={fgProjectStatus(fg, projectStatuses)}
+                statuses={middleProjectStatuses(
+                  projectStatuses,
+                  fgProjectStatus(fg, projectStatuses),
+                )}
+                projectColors
+                disabled={fg.productionStartedAt === undefined}
+                title={
+                  fg.productionStartedAt === undefined
+                    ? "Start production to change the status"
+                    : "Change the status"
+                }
+                onChange={(status) => void changeFgStatus(fg, status)}
+              />
               <ProductionButton fg={fg} jobId={job._id} hideStatusPill />
               <RemoveFromProductionButton
                 kind="product"
