@@ -1324,6 +1324,7 @@ export default function SalesPanel({
         onRemove={async (id) => {
           await dropCustomer({ id: id as Id<"customers"> });
         }}
+        openMode="form"
       />
       {ledgerCustomer !== null && (
         <CustomerLedgerDialog

@@ -192,6 +192,7 @@ export default function ContactDialog({
   onPick,
   editTarget,
   balanceOf,
+  openMode = "list",
 }: {
   kind: Kind;
   open: boolean;
@@ -211,6 +212,13 @@ export default function ContactDialog({
   balanceOf?: (
     id: string,
   ) => { outstanding: number; documents: number } | undefined;
+  /**
+   * Which view to land on when the dialog opens: the searchable list of
+   * everyone saved, or straight onto the blank create form. "form" is for a
+   * caller whose open button means "new record" — the list stays reachable
+   * via the form's Back button. Pickers keep the default "list".
+   */
+  openMode?: "list" | "form";
 }) {
   const label = kind === "vendor" ? "vendor" : "customer";
   const plural = kind === "vendor" ? "Vendors" : "Customers";
@@ -277,6 +285,14 @@ export default function ContactDialog({
   if (prefillTargetId !== prefilledId) {
     setPrefilledId(prefillTargetId);
     if (editTarget) openForm(editTarget);
+  }
+
+  // an open button that means "new record" skips the list and lands on the
+  // blank form; an edit (editTarget above) still wins and fills the form in
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open && openMode === "form" && editTarget == null) openForm();
   }
 
   const close = (next: boolean) => {

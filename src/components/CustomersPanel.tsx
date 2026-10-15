@@ -318,6 +318,7 @@ export default function CustomersPanel({
           await removeCustomer({ id: id as Id<"customers"> });
         }}
         onPick={(contact) => onPick?.(contact.name)}
+        openMode="form"
       />
     </section>
   );
