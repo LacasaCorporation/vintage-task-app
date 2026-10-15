@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   AlertTriangle,
   ArrowDownLeft,
+  ArrowLeft,
   ArrowUpRight,
   Boxes,
   CheckCircle2,
@@ -27,7 +28,9 @@ import {
   Plus,
   Printer,
   RefreshCw,
+  Save,
   Search,
+  Sparkles,
   Trash2,
   Warehouse,
   X,
@@ -58,6 +61,9 @@ type IssueLineDraft = {
   currentStock?: number;
 };
 
+const FIELD =
+  "h-9 w-full rounded-lg border bg-background px-3 text-xs text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20";
+
 export default function StorePanel({
   materials = [],
   finishedGoods = [],
@@ -70,7 +76,12 @@ export default function StorePanel({
   const { format: money } = useWorkspaceCurrency();
   const { confirm } = useAppDialogs();
 
-  // Active view tab
+  // Mode: register dashboard vs wide standalone form
+  const [viewMode, setViewMode] = useState<"register" | "issue-form" | "receipt-form">(
+    "register",
+  );
+
+  // Active view tab inside register
   const [activeTab, setActiveTab] = useState<"issues" | "receipts">("issues");
 
   // Backend queries
@@ -94,9 +105,10 @@ export default function StorePanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
+  // Filter products: only show in production or flagged (hide unflagged by default)
+  const [onlyFlaggedOrInProd, setOnlyFlaggedOrInProd] = useState(true);
+
   // Modals state
-  const [issueDialogOpen, setIssueDialogOpen] = useState(false);
-  const [receiptDialogOpen, setReceiptDialogOpen] = useState(false);
   const [viewVoucher, setViewVoucher] = useState<{
     type: "issue" | "receipt";
     data: Doc<"storeIssues"> | Doc<"storeReceipts">;
@@ -111,7 +123,6 @@ export default function StorePanel({
   const [issuedBy, setIssuedBy] = useState("");
   const [issueLines, setIssueLines] = useState<IssueLineDraft[]>([]);
   const [editingIssueId, setEditingIssueId] = useState<Id<"storeIssues"> | null>(null);
-  const [loadingCosting, setLoadingCosting] = useState(false);
   const [submittingIssue, setSubmittingIssue] = useState(false);
 
   // Receipt form state
@@ -127,9 +138,7 @@ export default function StorePanel({
   const [receivedBy, setReceivedBy] = useState("");
   const [submittingReceipt, setSubmittingReceipt] = useState(false);
 
-  // Filter products: only show in production or flagged (hide unflagged by default)
-  const [onlyFlaggedOrInProd, setOnlyFlaggedOrInProd] = useState(true);
-
+  // Filter helper: in production or flagged
   const isFgInProdOrFlagged = (fg: FgDoc) => {
     const inProd =
       (fg.inProduction ?? 0) > 0 ||
@@ -161,7 +170,7 @@ export default function StorePanel({
     selectedFgId ? { fgId: selectedFgId as Id<"finishedGoods"> } : "skip",
   );
 
-  // Handle product selection in Issue modal: auto-populate recipe lines and project/job
+  // Handle product selection in Issue form: auto-populate recipe lines and project/job
   const handleSelectIssueFg = (fgId: Id<"finishedGoods"> | "") => {
     setSelectedFgId(fgId);
     if (!fgId) {
@@ -245,8 +254,8 @@ export default function StorePanel({
     return issueLines.reduce((sum, l) => sum + (l.qty || 0) * (l.unitCost || 0), 0);
   }, [issueLines]);
 
-  // Open Issue Dialog for new issue
-  const openNewIssueDialog = () => {
+  // Open Standalone Issue Form
+  const openNewIssueForm = () => {
     setEditingIssueId(null);
     setIssueDate(toLocalInput(new Date()));
     setSelectedFgId("");
@@ -255,7 +264,33 @@ export default function StorePanel({
     setIssueNote("");
     setIssuedBy("");
     setIssueLines([]);
-    setIssueDialogOpen(true);
+    setViewMode("issue-form");
+  };
+
+  // Open Edit Issue Form
+  const openEditIssueForm = (issue: Doc<"storeIssues">) => {
+    setEditingIssueId(issue._id);
+    setIssueDate(toLocalInput(new Date(issue.issuedAt)));
+    setSelectedFgId(issue.fgId || "");
+    setSelectedJobId(issue.jobId || "");
+    setSelectedProjectId(issue.projectId || "");
+    setIssueNote(issue.note || "");
+    setIssuedBy(issue.issuedBy || "");
+    setIssueLines(
+      issue.lines.map((l) => {
+        const mat = materials.find((m) => m._id === l.materialId);
+        return {
+          materialId: l.materialId,
+          name: l.name,
+          unit: l.unit,
+          budgetedQty: l.budgetedQty || 0,
+          qty: l.qty,
+          unitCost: l.unitCost,
+          currentStock: mat?.stock ?? 0,
+        };
+      }),
+    );
+    setViewMode("issue-form");
   };
 
   // Submit Issue
@@ -319,7 +354,7 @@ export default function StorePanel({
           toast.success("Store issue draft created.");
         }
       }
-      setIssueDialogOpen(false);
+      setViewMode("register");
     } catch (err: any) {
       toast.error(err.message || "Failed to save store issue voucher.");
     } finally {
@@ -380,8 +415,8 @@ export default function StorePanel({
     }
   };
 
-  // Open Receipt Dialog
-  const openNewReceiptDialog = () => {
+  // Open Standalone Receipt Form
+  const openNewReceiptForm = () => {
     setReceiptDate(toLocalInput(new Date()));
     setReceiptFgId("");
     setReceiptJobId("");
@@ -392,10 +427,10 @@ export default function StorePanel({
     setReceiptUnitCost(0);
     setReceiptNote("");
     setReceivedBy("");
-    setReceiptDialogOpen(true);
+    setViewMode("receipt-form");
   };
 
-  // Handle product selection in receipt modal
+  // Handle product selection in receipt form
   const handleSelectReceiptFg = (fgId: Id<"finishedGoods"> | "") => {
     setReceiptFgId(fgId);
     if (!fgId) return;
@@ -404,7 +439,6 @@ export default function StorePanel({
       setReceiptUnit(fg.unit || "pcs");
       setReceiptBudgetedQty(fg.qty || 1);
       setReceiptQty(fg.qty || 1);
-      // Link to job/project if present
       if (fg.jobIds && fg.jobIds.length > 0 && storeOptions?.jobs) {
         const foundJob = storeOptions.jobs.find((j) => fg.jobIds?.includes(j.id));
         if (foundJob) {
@@ -458,7 +492,7 @@ export default function StorePanel({
       } else {
         toast.success("Draft receipt voucher recorded.");
       }
-      setReceiptDialogOpen(false);
+      setViewMode("register");
     } catch (err: any) {
       toast.error(err.message || "Failed to record receipt voucher.");
     } finally {
@@ -541,6 +575,789 @@ export default function StorePanel({
     });
   }, [receipts, statusFilter, searchQuery]);
 
+  /* ══════════════════════════════════════════════════════════════════════
+     STANDALONE FULL-WIDTH VIEW: ISSUE MATERIALS (STORE → FACTORY WIP)
+     ══════════════════════════════════════════════════════════════════════ */
+  if (viewMode === "issue-form") {
+    return (
+      <div className="mx-auto w-full space-y-4">
+        {/* Top Action Ribbon */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card px-5 py-3.5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setViewMode("register")}
+              className="h-8 gap-1.5 rounded-lg text-xs"
+            >
+              <ArrowLeft className="size-3.5" />
+              Back to Store
+            </Button>
+            <div>
+              <h2 className="text-base font-bold text-foreground sm:text-lg">
+                {editingIssueId
+                  ? "Edit Store Issue Voucher"
+                  : "Issue Raw Materials to Factory (WIP)"}
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Move stock from Store inventory to Factory floor as Work-in-Progress.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={submittingIssue}
+              onClick={() => handleSaveIssue(false)}
+              className="h-8.5 gap-1.5 rounded-lg text-xs font-medium"
+            >
+              <Save className="size-3.5 text-muted-foreground" />
+              Save as Draft
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              disabled={submittingIssue}
+              onClick={() => handleSaveIssue(true)}
+              className="h-8.5 gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground shadow hover:bg-primary/90"
+            >
+              {submittingIssue ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Factory className="size-3.5" />
+              )}
+              Dispatch to Factory (WIP)
+            </Button>
+          </div>
+        </div>
+
+        {/* Master Details Card */}
+        <div className="rounded-2xl border bg-card p-5 shadow-xs">
+          <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Production &amp; Destination Details
+          </h3>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {/* Product selection */}
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground">
+                  Budgeted Product <span className="text-destructive">*</span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={onlyFlaggedOrInProd}
+                    onChange={(e) => setOnlyFlaggedOrInProd(e.target.checked)}
+                    className="size-3 rounded border"
+                  />
+                  <span>Flagged / In prod</span>
+                </label>
+              </div>
+
+              <select
+                value={selectedFgId}
+                onChange={(e) =>
+                  handleSelectIssueFg(e.target.value as Id<"finishedGoods"> | "")
+                }
+                className={FIELD}
+              >
+                <option value="">Select a product…</option>
+                {displayedIssueProducts.length === 0 ? (
+                  <option value="" disabled>
+                    No products in production or flagged
+                  </option>
+                ) : (
+                  displayedIssueProducts.map((fg) => {
+                    const tags = [
+                      fg.isFlagged ? "Flagged" : null,
+                      (fg.inProduction ?? 0) > 0 ? "In production" : null,
+                    ].filter(Boolean);
+                    const tagText = tags.length > 0 ? ` (${tags.join(", ")})` : "";
+                    return (
+                      <option key={fg._id} value={fg._id}>
+                        {fg.code ? `[${fg.code}] ` : ""}
+                        {fg.name}
+                        {tagText}
+                      </option>
+                    );
+                  })
+                )}
+              </select>
+            </div>
+
+            {/* Project */}
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                Project (optional)
+              </label>
+              <select
+                value={selectedProjectId}
+                onChange={(e) =>
+                  setSelectedProjectId(e.target.value as Id<"projects"> | "")
+                }
+                className={FIELD}
+              >
+                <option value="">No project link</option>
+                {(storeOptions?.projects || []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Task / Job */}
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                Task / Job (optional)
+              </label>
+              <select
+                value={selectedJobId}
+                onChange={(e) =>
+                  setSelectedJobId(e.target.value as Id<"projectJobs"> | "")
+                }
+                className={FIELD}
+              >
+                <option value="">No job link</option>
+                {(storeOptions?.jobs || [])
+                  .filter((j) => !selectedProjectId || j.projectId === selectedProjectId)
+                  .map((j) => (
+                    <option key={j.id} value={j.id}>
+                      {j.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {/* Issue Date & Issued By */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                  Issue Date
+                </label>
+                <Input
+                  type="date"
+                  value={issueDate}
+                  onChange={(e) => setIssueDate(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                  Issued By
+                </label>
+                <Input
+                  placeholder="Storekeeper"
+                  value={issuedBy}
+                  onChange={(e) => setIssuedBy(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3.5">
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              Voucher Notes / Factory Remarks
+            </label>
+            <Input
+              placeholder="e.g. Batch #01 material dispatch, urgent fabrication release…"
+              value={issueNote}
+              onChange={(e) => setIssueNote(e.target.value)}
+              className="h-9 text-xs"
+            />
+          </div>
+        </div>
+
+        {/* Wide Materials Table Card */}
+        <div className="rounded-2xl border bg-card p-5 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-4">
+            <div>
+              <h3 className="text-sm font-bold text-foreground">
+                Materials to Dispatch to Factory Floor (WIP)
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Raw materials dispatched here will immediately reduce store stock on
+                hand and be accounted for as WIP.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {selectedFgId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLoadBudgetedMaterials}
+                  className="h-8 gap-1.5 rounded-lg border-primary/30 text-xs text-primary hover:bg-primary/5"
+                >
+                  <FileSpreadsheet className="size-3.5" />
+                  Load Recipe / Costing Sheet
+                </Button>
+              )}
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAddIssueLine}
+                className="h-8 gap-1.5 rounded-lg text-xs"
+              >
+                <Plus className="size-3.5" />
+                Add Material Line
+              </Button>
+            </div>
+          </div>
+
+          {issueLines.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
+              <PackageMinus className="mb-2 size-9 opacity-40 text-amber-600" />
+              <p className="text-sm font-semibold text-foreground">No materials listed</p>
+              <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                Click &ldquo;Load Recipe / Costing Sheet&rdquo; to pull the budgeted raw
+                materials from the selected product, or click &ldquo;Add Material Line&rdquo;
+                to add lines manually.
+              </p>
+              <div className="mt-4 flex gap-2">
+                {selectedFgId && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleLoadBudgetedMaterials}
+                    className="h-8 gap-1.5 text-xs"
+                  >
+                    <FileSpreadsheet className="size-3.5" />
+                    Load Recipe
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddIssueLine}
+                  className="h-8 gap-1.5 text-xs"
+                >
+                  <Plus className="size-3.5" />
+                  Add Manual Line
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/20 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <th className="py-2.5 pl-3 pr-2">#</th>
+                    <th className="py-2.5 px-3 min-w-[280px]">Raw Material Item</th>
+                    <th className="py-2.5 px-3 text-center">Store Stock</th>
+                    <th className="py-2.5 px-3 text-center">Budgeted Qty</th>
+                    <th className="py-2.5 px-3 text-center min-w-[110px]">Issue Qty</th>
+                    <th className="py-2.5 px-3">Unit</th>
+                    <th className="py-2.5 px-3 text-right min-w-[110px]">Unit Cost</th>
+                    <th className="py-2.5 px-3 text-right">Line Total</th>
+                    <th className="py-2.5 pl-2 pr-3 w-10 text-center" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {issueLines.map((line, idx) => {
+                    const isShort =
+                      line.currentStock !== undefined && line.currentStock < line.qty;
+                    return (
+                      <tr
+                        key={idx}
+                        className="transition-colors hover:bg-muted/10"
+                      >
+                        <td className="py-2.5 pl-3 pr-2 text-muted-foreground font-mono">
+                          {idx + 1}
+                        </td>
+
+                        {/* Material selector */}
+                        <td className="py-2.5 px-3">
+                          <select
+                            value={line.materialId}
+                            onChange={(e) =>
+                              handleUpdateIssueLine(
+                                idx,
+                                "materialId",
+                                e.target.value as Id<"rawMaterials">,
+                              )
+                            }
+                            className="h-8 w-full rounded-md border bg-background px-2.5 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
+                          >
+                            <option value="">Select a raw material…</option>
+                            {materials.map((m) => (
+                              <option key={m._id} value={m._id}>
+                                {m.code ? `[${m.code}] ` : ""}
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Store Stock */}
+                        <td className="py-2.5 px-3 text-center tabular-nums">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                              isShort
+                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                                : "bg-muted text-foreground",
+                            )}
+                          >
+                            {line.currentStock !== undefined
+                              ? `${line.currentStock} ${line.unit}`
+                              : "—"}
+                          </span>
+                        </td>
+
+                        {/* Budgeted Qty */}
+                        <td className="py-2.5 px-3 text-center tabular-nums text-muted-foreground">
+                          {line.budgetedQty ? `${line.budgetedQty} ${line.unit}` : "—"}
+                        </td>
+
+                        {/* Issue Qty */}
+                        <td className="py-2.5 px-3 text-center">
+                          <Input
+                            type="number"
+                            min="0.001"
+                            step="any"
+                            value={line.qty}
+                            onChange={(e) =>
+                              handleUpdateIssueLine(
+                                idx,
+                                "qty",
+                                parseFloat(e.target.value) || 0,
+                              )
+                            }
+                            className="h-8 w-full text-center text-xs font-bold"
+                          />
+                        </td>
+
+                        {/* Unit */}
+                        <td className="py-2.5 px-3 text-muted-foreground font-medium">
+                          {line.unit}
+                        </td>
+
+                        {/* Unit Cost */}
+                        <td className="py-2.5 px-3 text-right tabular-nums">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={line.unitCost}
+                            onChange={(e) =>
+                              handleUpdateIssueLine(
+                                idx,
+                                "unitCost",
+                                parseFloat(e.target.value) || 0,
+                              )
+                            }
+                            className="h-8 w-full text-right text-xs"
+                          />
+                        </td>
+
+                        {/* Line Total */}
+                        <td className="py-2.5 px-3 text-right font-bold tabular-nums text-foreground">
+                          {money((line.qty || 0) * (line.unitCost || 0))}
+                        </td>
+
+                        {/* Delete line */}
+                        <td className="py-2.5 pl-2 pr-3 text-center">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveIssueLine(idx)}
+                            className="size-7 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {/* Bottom Grand Total Box */}
+              <div className="mt-4 flex flex-col items-end gap-2 border-t pt-4">
+                <div className="flex items-center gap-6 text-sm">
+                  <span className="text-muted-foreground">
+                    Total Lines:{" "}
+                    <strong className="text-foreground">{issueLines.length}</strong>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-muted-foreground">
+                      Total WIP Valuation:
+                    </span>
+                    <span className="text-lg font-black tracking-tight text-primary tabular-nums">
+                      {money(issueTotal)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-2 flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setViewMode("register")}
+                    className="h-9 px-4 text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={submittingIssue}
+                    onClick={() => handleSaveIssue(false)}
+                    className="h-9 gap-1.5 px-4 text-xs font-medium"
+                  >
+                    <Save className="size-3.5" />
+                    Save Draft
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={submittingIssue}
+                    onClick={() => handleSaveIssue(true)}
+                    className="h-9 gap-1.5 bg-primary px-5 text-xs font-semibold text-primary-foreground shadow hover:bg-primary/90"
+                  >
+                    {submittingIssue ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Factory className="size-3.5" />
+                    )}
+                    Dispatch to Factory (WIP)
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     STANDALONE FULL-WIDTH VIEW: STORE RECEIPT (FINISHED GOODS FROM FACTORY)
+     ══════════════════════════════════════════════════════════════════════ */
+  if (viewMode === "receipt-form") {
+    const totalReceiptValue = (receiptQty || 0) * (receiptUnitCost || 0);
+
+    return (
+      <div className="mx-auto w-full max-w-4xl space-y-4">
+        {/* Top Action Ribbon */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card px-5 py-3.5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setViewMode("register")}
+              className="h-8 gap-1.5 rounded-lg text-xs"
+            >
+              <ArrowLeft className="size-3.5" />
+              Back to Store
+            </Button>
+            <div>
+              <h2 className="text-base font-bold text-foreground sm:text-lg">
+                Receive Finished Goods from Factory
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Move completed production batches from factory into finished-goods stock.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={submittingReceipt}
+              onClick={() => handleSaveReceipt(false)}
+              className="h-8.5 gap-1.5 rounded-lg text-xs font-medium"
+            >
+              <Save className="size-3.5 text-muted-foreground" />
+              Save as Draft
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              disabled={submittingReceipt}
+              onClick={() => handleSaveReceipt(true)}
+              className="h-8.5 gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white shadow hover:bg-emerald-700"
+            >
+              {submittingReceipt ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <PackageCheck className="size-3.5" />
+              )}
+              Confirm into Stock
+            </Button>
+          </div>
+        </div>
+
+        {/* Form Details Card */}
+        <div className="rounded-2xl border bg-card p-6 shadow-xs space-y-5">
+          {/* Product and Projects */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-xs font-semibold text-foreground">
+                  Completed Finished Product <span className="text-destructive">*</span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={onlyFlaggedOrInProd}
+                    onChange={(e) => setOnlyFlaggedOrInProd(e.target.checked)}
+                    className="size-3 rounded border"
+                  />
+                  <span>Flagged / In prod</span>
+                </label>
+              </div>
+
+              <select
+                value={receiptFgId}
+                onChange={(e) =>
+                  handleSelectReceiptFg(e.target.value as Id<"finishedGoods"> | "")
+                }
+                className={FIELD}
+              >
+                <option value="">Select completed product…</option>
+                {displayedReceiptProducts.length === 0 ? (
+                  <option value="" disabled>
+                    No products in production or flagged
+                  </option>
+                ) : (
+                  displayedReceiptProducts.map((fg) => {
+                    const tags = [
+                      fg.isFlagged ? "Flagged" : null,
+                      (fg.inProduction ?? 0) > 0 ? "In production" : null,
+                    ].filter(Boolean);
+                    const tagText = tags.length > 0 ? ` (${tags.join(", ")})` : "";
+                    return (
+                      <option key={fg._id} value={fg._id}>
+                        {fg.code ? `[${fg.code}] ` : ""}
+                        {fg.name}
+                        {tagText}
+                      </option>
+                    );
+                  })
+                )}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                  Project (optional)
+                </label>
+                <select
+                  value={receiptProjectId}
+                  onChange={(e) =>
+                    setReceiptProjectId(e.target.value as Id<"projects"> | "")
+                  }
+                  className={FIELD}
+                >
+                  <option value="">No project link</option>
+                  {(storeOptions?.projects || []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                  Job / Task (optional)
+                </label>
+                <select
+                  value={receiptJobId}
+                  onChange={(e) =>
+                    setReceiptJobId(e.target.value as Id<"projectJobs"> | "")
+                  }
+                  className={FIELD}
+                >
+                  <option value="">No job link</option>
+                  {(storeOptions?.jobs || [])
+                    .filter(
+                      (j) => !receiptProjectId || j.projectId === receiptProjectId,
+                    )
+                    .map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {j.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Quantities & Pricing Section */}
+          <div className="rounded-xl border bg-muted/20 p-4">
+            <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Quantity &amp; Valuation
+            </h4>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  Expected / Budgeted Qty
+                </label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={receiptBudgetedQty}
+                  onChange={(e) =>
+                    setReceiptBudgetedQty(parseFloat(e.target.value) || 0)
+                  }
+                  className="h-9 text-center text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-foreground">
+                  Actual Received Qty <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  type="number"
+                  min="0.001"
+                  step="any"
+                  value={receiptQty}
+                  onChange={(e) => setReceiptQty(parseFloat(e.target.value) || 0)}
+                  className="h-9 text-center text-xs font-bold text-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  Unit
+                </label>
+                <Input
+                  value={receiptUnit}
+                  onChange={(e) => setReceiptUnit(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  Unit Cost (Valuation)
+                </label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={receiptUnitCost}
+                  onChange={(e) =>
+                    setReceiptUnitCost(parseFloat(e.target.value) || 0)
+                  }
+                  className="h-9 text-right text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between border-t pt-3">
+              <span className="text-xs font-medium text-muted-foreground">
+                Total Stock Added Value:
+              </span>
+              <span className="text-base font-bold text-foreground">
+                {money(totalReceiptValue)}
+              </span>
+            </div>
+          </div>
+
+          {/* Date, Inspector, Notes */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                Receipt Date
+              </label>
+              <Input
+                type="date"
+                value={receiptDate}
+                onChange={(e) => setReceiptDate(e.target.value)}
+                className="h-9 text-xs"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                Received / Inspected By
+              </label>
+              <Input
+                placeholder="e.g. Quality Inspector or Storekeeper"
+                value={receivedBy}
+                onChange={(e) => setReceivedBy(e.target.value)}
+                className="h-9 text-xs"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              Notes &amp; Quality Inspection Remarks
+            </label>
+            <Textarea
+              placeholder="Optional batch inspection notes, warehouse rack location, packing details…"
+              value={receiptNote}
+              onChange={(e) => setReceiptNote(e.target.value)}
+              className="h-20 text-xs"
+            />
+          </div>
+
+          {/* Footer Buttons */}
+          <div className="flex items-center justify-end gap-2 border-t pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setViewMode("register")}
+              className="h-9 px-4 text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submittingReceipt}
+              onClick={() => handleSaveReceipt(false)}
+              className="h-9 gap-1.5 px-4 text-xs font-medium"
+            >
+              <Save className="size-3.5" />
+              Save Draft
+            </Button>
+            <Button
+              type="button"
+              disabled={submittingReceipt}
+              onClick={() => handleSaveReceipt(true)}
+              className="h-9 gap-1.5 bg-emerald-600 px-5 text-xs font-semibold text-white shadow hover:bg-emerald-700"
+            >
+              {submittingReceipt ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <PackageCheck className="size-3.5" />
+              )}
+              Confirm into Stock
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     DEFAULT REGISTER / DASHBOARD VIEW
+     ══════════════════════════════════════════════════════════════════════ */
   return (
     <div className="space-y-6">
       {/* ── Page Header ────────────────────────────────────────────── */}
@@ -549,7 +1366,7 @@ export default function StorePanel({
           <div className="flex items-center gap-2">
             <Warehouse className="size-6 text-primary" />
             <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              Store & WIP Management
+              Store &amp; WIP Management
             </h1>
           </div>
           <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
@@ -563,8 +1380,8 @@ export default function StorePanel({
             <>
               <Button
                 type="button"
-                onClick={openNewIssueDialog}
-                className="h-9 gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground shadow hover:bg-primary/90"
+                onClick={openNewIssueForm}
+                className="h-9 gap-1.5 rounded-lg bg-primary px-3.5 text-xs font-medium text-primary-foreground shadow hover:bg-primary/90"
               >
                 <PackageMinus className="size-4" />
                 Issue to Factory (WIP)
@@ -573,8 +1390,8 @@ export default function StorePanel({
               <Button
                 type="button"
                 variant="outline"
-                onClick={openNewReceiptDialog}
-                className="h-9 gap-1.5 rounded-lg border px-3 text-xs font-medium shadow-sm hover:bg-accent"
+                onClick={openNewReceiptForm}
+                className="h-9 gap-1.5 rounded-lg border px-3.5 text-xs font-medium shadow-sm hover:bg-accent"
               >
                 <PackagePlus className="size-4 text-emerald-600" />
                 Receive Finished Goods
@@ -727,7 +1544,7 @@ export default function StorePanel({
               </div>
             ) : filteredIssues.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
-                <PackageMinus className="mb-2 size-8 opacity-40" />
+                <PackageMinus className="mb-2 size-8 opacity-40 text-amber-600" />
                 <p className="text-sm font-medium">No store issues found</p>
                 <p className="mt-1 text-xs">
                   Issue raw materials to the factory floor against budgeted products as
@@ -737,7 +1554,7 @@ export default function StorePanel({
                   <Button
                     type="button"
                     size="sm"
-                    onClick={openNewIssueDialog}
+                    onClick={openNewIssueForm}
                     className="mt-4 h-8 gap-1.5 rounded-lg text-xs"
                   >
                     <Plus className="size-3.5" />
@@ -826,6 +1643,17 @@ export default function StorePanel({
                             <>
                               <Button
                                 type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditIssueForm(issue)}
+                                title="Edit voucher"
+                                className="size-7 p-0"
+                              >
+                                <Pencil className="size-3.5" />
+                              </Button>
+
+                              <Button
+                                type="button"
                                 size="sm"
                                 onClick={() => handleDispatchIssue(issue)}
                                 title="Move raw materials to Factory (WIP)"
@@ -889,7 +1717,7 @@ export default function StorePanel({
                   <Button
                     type="button"
                     size="sm"
-                    onClick={openNewReceiptDialog}
+                    onClick={openNewReceiptForm}
                     className="mt-4 h-8 gap-1.5 rounded-lg text-xs"
                   >
                     <Plus className="size-3.5" />
@@ -1016,594 +1844,6 @@ export default function StorePanel({
           </div>
         )}
       </div>
-
-      {/* ── CREATE / EDIT ISSUE DIALOG (WIP) ────────────────────────── */}
-      <Dialog open={issueDialogOpen} onOpenChange={setIssueDialogOpen}>
-        <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
-              <PackageMinus className="size-5 text-amber-600" />
-              {editingIssueId
-                ? "Edit Store Issue Voucher"
-                : "Issue Raw Materials to Factory (WIP)"}
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2 text-xs">
-            {/* Top row: Product, Project, Job */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <label className="font-medium text-muted-foreground">
-                    Budgeted Product (Finished Good)
-                  </label>
-                  <label className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
-                    <input
-                      type="checkbox"
-                      checked={onlyFlaggedOrInProd}
-                      onChange={(e) => setOnlyFlaggedOrInProd(e.target.checked)}
-                      className="size-3 rounded border"
-                    />
-                    <span>Flagged / In production</span>
-                  </label>
-                </div>
-                <select
-                  value={selectedFgId}
-                  onChange={(e) =>
-                    handleSelectIssueFg(e.target.value as Id<"finishedGoods"> | "")
-                  }
-                  className="h-8.5 w-full rounded-lg border bg-background px-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">Select a product…</option>
-                  {displayedIssueProducts.length === 0 ? (
-                    <option value="" disabled>
-                      No products in production or flagged
-                    </option>
-                  ) : (
-                    displayedIssueProducts.map((fg) => {
-                      const tags = [
-                        fg.isFlagged ? "Flagged" : null,
-                        (fg.inProduction ?? 0) > 0 ? "In production" : null,
-                      ].filter(Boolean);
-                      const tagText = tags.length > 0 ? ` (${tags.join(", ")})` : "";
-                      return (
-                        <option key={fg._id} value={fg._id}>
-                          {fg.code ? `[${fg.code}] ` : ""}
-                          {fg.name}
-                          {tagText}
-                        </option>
-                      );
-                    })
-                  )}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Project (optional)
-                </label>
-                <select
-                  value={selectedProjectId}
-                  onChange={(e) =>
-                    setSelectedProjectId(e.target.value as Id<"projects"> | "")
-                  }
-                  className="h-8.5 w-full rounded-lg border bg-background px-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">No project link</option>
-                  {(storeOptions?.projects || []).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Task / Job (optional)
-                </label>
-                <select
-                  value={selectedJobId}
-                  onChange={(e) =>
-                    setSelectedJobId(e.target.value as Id<"projectJobs"> | "")
-                  }
-                  className="h-8.5 w-full rounded-lg border bg-background px-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">No job link</option>
-                  {(storeOptions?.jobs || [])
-                    .filter((j) => !selectedProjectId || j.projectId === selectedProjectId)
-                    .map((j) => (
-                      <option key={j.id} value={j.id}>
-                        {j.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Date and Issuer */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Issue Date
-                </label>
-                <Input
-                  type="date"
-                  value={issueDate}
-                  onChange={(e) => setIssueDate(e.target.value)}
-                  className="h-8.5 text-xs"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Issued By
-                </label>
-                <Input
-                  placeholder="e.g. Storekeeper Name"
-                  value={issuedBy}
-                  onChange={(e) => setIssuedBy(e.target.value)}
-                  className="h-8.5 text-xs"
-                />
-              </div>
-            </div>
-
-            {/* Materials Section */}
-            <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-semibold text-foreground">
-                    Materials to Issue (WIP)
-                  </h4>
-                  <p className="text-[11px] text-muted-foreground">
-                    Dispatched materials will reduce store stock and move to WIP.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {selectedFgId && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={handleLoadBudgetedMaterials}
-                      className="h-7 gap-1 text-[11px]"
-                    >
-                      <FileSpreadsheet className="size-3 text-primary" />
-                      Load Recipe / Costing Sheet
-                    </Button>
-                  )}
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleAddIssueLine}
-                    className="h-7 gap-1 text-[11px]"
-                  >
-                    <Plus className="size-3" />
-                    Add Material
-                  </Button>
-                </div>
-              </div>
-
-              {issueLines.length === 0 ? (
-                <div className="py-6 text-center text-muted-foreground">
-                  No materials added. Click &ldquo;Load Recipe&rdquo; to pull budgeted
-                  materials from the costing sheet or add manually.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b text-[11px] font-medium text-muted-foreground">
-                        <th className="py-1.5">Material</th>
-                        <th className="py-1.5 text-center">In Store</th>
-                        <th className="py-1.5 text-center">Budgeted</th>
-                        <th className="py-1.5 text-center">Issue Qty</th>
-                        <th className="py-1.5">Unit</th>
-                        <th className="py-1.5 text-right">Unit Cost</th>
-                        <th className="py-1.5 text-right">Total</th>
-                        <th className="w-8 py-1.5" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60">
-                      {issueLines.map((line, idx) => {
-                        const isShort =
-                          line.currentStock !== undefined &&
-                          line.currentStock < line.qty;
-                        return (
-                          <tr key={idx}>
-                            <td className="py-2 pr-2 min-w-[180px]">
-                              <select
-                                value={line.materialId}
-                                onChange={(e) =>
-                                  handleUpdateIssueLine(
-                                    idx,
-                                    "materialId",
-                                    e.target.value as Id<"rawMaterials">,
-                                  )
-                                }
-                                className="h-7.5 w-full rounded border bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
-                              >
-                                <option value="">Select material…</option>
-                                {materials.map((m) => (
-                                  <option key={m._id} value={m._id}>
-                                    {m.name}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-
-                            <td className="py-2 text-center tabular-nums">
-                              <span
-                                className={cn(
-                                  "text-[11px] font-medium",
-                                  isShort ? "text-amber-600 font-semibold" : "text-muted-foreground",
-                                )}
-                              >
-                                {line.currentStock ?? "—"}
-                              </span>
-                            </td>
-
-                            <td className="py-2 text-center tabular-nums text-muted-foreground">
-                              {line.budgetedQty || "—"}
-                            </td>
-
-                            <td className="py-2 px-1 text-center w-20">
-                              <Input
-                                type="number"
-                                min="0.001"
-                                step="any"
-                                value={line.qty}
-                                onChange={(e) =>
-                                  handleUpdateIssueLine(
-                                    idx,
-                                    "qty",
-                                    parseFloat(e.target.value) || 0,
-                                  )
-                                }
-                                className="h-7.5 text-center text-xs"
-                              />
-                            </td>
-
-                            <td className="py-2 text-muted-foreground">{line.unit}</td>
-
-                            <td className="py-2 text-right tabular-nums">
-                              <Input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={line.unitCost}
-                                onChange={(e) =>
-                                  handleUpdateIssueLine(
-                                    idx,
-                                    "unitCost",
-                                    parseFloat(e.target.value) || 0,
-                                  )
-                                }
-                                className="h-7.5 w-20 text-right text-xs"
-                              />
-                            </td>
-
-                            <td className="py-2 text-right font-medium tabular-nums text-foreground">
-                              {money((line.qty || 0) * (line.unitCost || 0))}
-                            </td>
-
-                            <td className="py-2 text-right">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleRemoveIssueLine(idx)}
-                                className="size-6 p-0 text-muted-foreground hover:text-destructive"
-                              >
-                                <X className="size-3.5" />
-                              </Button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* Total Row */}
-              <div className="flex items-center justify-between border-t pt-2 text-xs">
-                <span className="font-medium text-muted-foreground">
-                  Total Issue Value (WIP Cost):
-                </span>
-                <span className="text-sm font-bold text-foreground">
-                  {money(issueTotal)}
-                </span>
-              </div>
-            </div>
-
-            {/* Note */}
-            <div>
-              <label className="mb-1 block font-medium text-muted-foreground">
-                Notes / Purpose
-              </label>
-              <Textarea
-                placeholder="Optional notes, batch details, or factory instructions…"
-                value={issueNote}
-                onChange={(e) => setIssueNote(e.target.value)}
-                className="h-16 text-xs"
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2 sm:justify-between">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setIssueDialogOpen(false)}
-              className="text-xs"
-            >
-              Cancel
-            </Button>
-
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={submittingIssue}
-                onClick={() => handleSaveIssue(false)}
-                className="text-xs"
-              >
-                Save as Draft
-              </Button>
-
-              <Button
-                type="button"
-                size="sm"
-                disabled={submittingIssue}
-                onClick={() => handleSaveIssue(true)}
-                className="gap-1.5 bg-primary text-xs font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                {submittingIssue ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Factory className="size-3.5" />
-                )}
-                Dispatch to Factory (WIP)
-              </Button>
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── CREATE STORE RECEIPT DIALOG (Finished Goods) ────────────── */}
-      <Dialog open={receiptDialogOpen} onOpenChange={setReceiptDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
-              <PackagePlus className="size-5 text-emerald-600" />
-              Receive Finished Goods from Factory
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2 text-xs">
-            {/* Product selection */}
-            <div>
-              <div className="mb-1 flex items-center justify-between">
-                <label className="font-medium text-muted-foreground">
-                  Finished Product Completed
-                </label>
-                <label className="flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground">
-                  <input
-                    type="checkbox"
-                    checked={onlyFlaggedOrInProd}
-                    onChange={(e) => setOnlyFlaggedOrInProd(e.target.checked)}
-                    className="size-3 rounded border"
-                  />
-                  <span>Flagged / In production</span>
-                </label>
-              </div>
-              <select
-                value={receiptFgId}
-                onChange={(e) =>
-                  handleSelectReceiptFg(e.target.value as Id<"finishedGoods"> | "")
-                }
-                className="h-8.5 w-full rounded-lg border bg-background px-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option value="">Select completed product…</option>
-                {displayedReceiptProducts.length === 0 ? (
-                  <option value="" disabled>
-                    No products in production or flagged
-                  </option>
-                ) : (
-                  displayedReceiptProducts.map((fg) => {
-                    const tags = [
-                      fg.isFlagged ? "Flagged" : null,
-                      (fg.inProduction ?? 0) > 0 ? "In production" : null,
-                    ].filter(Boolean);
-                    const tagText = tags.length > 0 ? ` (${tags.join(", ")})` : "";
-                    return (
-                      <option key={fg._id} value={fg._id}>
-                        {fg.code ? `[${fg.code}] ` : ""}
-                        {fg.name}
-                        {tagText}
-                      </option>
-                    );
-                  })
-                )}
-              </select>
-            </div>
-
-            {/* Project / Job */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Project (optional)
-                </label>
-                <select
-                  value={receiptProjectId}
-                  onChange={(e) =>
-                    setReceiptProjectId(e.target.value as Id<"projects"> | "")
-                  }
-                  className="h-8.5 w-full rounded-lg border bg-background px-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">No project link</option>
-                  {(storeOptions?.projects || []).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Job / Task (optional)
-                </label>
-                <select
-                  value={receiptJobId}
-                  onChange={(e) =>
-                    setReceiptJobId(e.target.value as Id<"projectJobs"> | "")
-                  }
-                  className="h-8.5 w-full rounded-lg border bg-background px-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-                >
-                  <option value="">No job link</option>
-                  {(storeOptions?.jobs || [])
-                    .filter(
-                      (j) => !receiptProjectId || j.projectId === receiptProjectId,
-                    )
-                    .map((j) => (
-                      <option key={j.id} value={j.id}>
-                        {j.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Quantities & Pricing */}
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Budgeted / Exp Qty
-                </label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={receiptBudgetedQty}
-                  onChange={(e) =>
-                    setReceiptBudgetedQty(parseFloat(e.target.value) || 0)
-                  }
-                  className="h-8.5 text-xs text-center"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Actual Received Qty
-                </label>
-                <Input
-                  type="number"
-                  min="0.001"
-                  step="any"
-                  value={receiptQty}
-                  onChange={(e) => setReceiptQty(parseFloat(e.target.value) || 0)}
-                  className="h-8.5 text-xs text-center font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Unit
-                </label>
-                <Input
-                  value={receiptUnit}
-                  onChange={(e) => setReceiptUnit(e.target.value)}
-                  className="h-8.5 text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Receipt Date
-                </label>
-                <Input
-                  type="date"
-                  value={receiptDate}
-                  onChange={(e) => setReceiptDate(e.target.value)}
-                  className="h-8.5 text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block font-medium text-muted-foreground">
-                  Received By
-                </label>
-                <Input
-                  placeholder="e.g. Storekeeper Name"
-                  value={receivedBy}
-                  onChange={(e) => setReceivedBy(e.target.value)}
-                  className="h-8.5 text-xs"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-1 block font-medium text-muted-foreground">
-                Notes
-              </label>
-              <Textarea
-                placeholder="Optional notes or batch quality check remarks…"
-                value={receiptNote}
-                onChange={(e) => setReceiptNote(e.target.value)}
-                className="h-16 text-xs"
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2 sm:justify-between">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setReceiptDialogOpen(false)}
-              className="text-xs"
-            >
-              Cancel
-            </Button>
-
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={submittingReceipt}
-                onClick={() => handleSaveReceipt(false)}
-                className="text-xs"
-              >
-                Save as Draft
-              </Button>
-
-              <Button
-                type="button"
-                size="sm"
-                disabled={submittingReceipt}
-                onClick={() => handleSaveReceipt(true)}
-                className="gap-1.5 bg-emerald-600 text-xs font-medium text-white hover:bg-emerald-700"
-              >
-                {submittingReceipt ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <PackageCheck className="size-3.5" />
-                )}
-                Confirm into Stock
-              </Button>
-            </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* ── VIEW VOUCHER MODAL (Printable) ─────────────────────────── */}
       {viewVoucher && (
@@ -1741,7 +1981,7 @@ export default function StorePanel({
                   <div className="rounded-lg border p-3">
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-foreground">
-                        Quantity Completed & Received:
+                        Quantity Completed &amp; Received:
                       </span>
                       <span className="text-base font-bold text-emerald-600">
                         {(viewVoucher.data as Doc<"storeReceipts">).qty}{" "}

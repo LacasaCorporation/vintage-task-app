@@ -946,10 +946,10 @@ export default function CostingPanel({
   <style>
     * { box-sizing: border-box; }
     body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #18181b; margin: 40px; }
-    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; border-bottom: 2px solid #4f46e5; padding-bottom: 16px; margin-bottom: 8px; }
+    .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; border-bottom: 2px solid #80426E; padding-bottom: 16px; margin-bottom: 8px; }
     h1 { font-size: 22px; margin: 0 0 4px; }
     .meta { font-size: 12px; color: #52525b; line-height: 1.5; }
-    .brand { font-size: 11px; letter-spacing: 3px; color: #4f46e5; font-weight: 700; margin-bottom: 6px; }
+    .brand { font-size: 11px; letter-spacing: 3px; color: #80426E; font-weight: 700; margin-bottom: 6px; }
     .date { font-size: 12px; color: #52525b; text-align: right; }
     img.photo { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #e4e4e7; }
     table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
@@ -962,7 +962,7 @@ export default function CostingPanel({
     .totals td { border: none; padding: 6px 10px; }
     .totals .lbl { text-align: right; color: #52525b; }
     .totals .val { text-align: right; font-variant-numeric: tabular-nums; }
-    .totals tr.grand td { border-top: 1.5px solid #4f46e5; font-weight: 700; font-size: 15px; color: #4f46e5; padding-top: 10px; }
+    .totals tr.grand td { border-top: 1.5px solid #80426E; font-weight: 700; font-size: 15px; color: #80426E; padding-top: 10px; }
     .note { margin-top: 8px; font-size: 12px; color: #71717a; }
     @page { margin: 14mm; }
     @media print { body { margin: 0; } }
