@@ -4,11 +4,16 @@ import { AppDialogsProvider } from "@/components/AppDialogs";
 import { RequireAuth } from "@/components/RequireAuth";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
+import { applyStoredTheme } from "@/lib/theme";
 import { ConvexReactClient } from "convex/react";
 import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
+
+// Mix the reader's saved brand colour into the tokens before the first paint,
+// so a custom workspace theme never flashes the default one on the way in.
+applyStoredTheme();
 
 // Lazy load route components for better code splitting
 //

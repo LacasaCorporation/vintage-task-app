@@ -400,7 +400,7 @@ export default function PartyLedgerDialog<TId extends string>({
 <style>
   * { box-sizing: border-box; }
   body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #18181b; margin: 40px; }
-  .brand { font-size: 11px; letter-spacing: 3px; color: #80426E; font-weight: 700; }
+  .brand { font-size: 11px; letter-spacing: 3px; color: var(--primary); font-weight: 700; }
   h1 { font-size: 22px; margin: 4px 0 2px; }
   .meta { font-size: 12px; color: #52525b; }
   table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
@@ -409,7 +409,7 @@ export default function PartyLedgerDialog<TId extends string>({
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #52525b; }
   td.strong { font-weight: 600; }
-  tfoot td { border: none; border-top: 1.5px solid #80426E; font-weight: 700; padding-top: 10px; }
+  tfoot td { border: none; border-top: 1.5px solid var(--primary); font-weight: 700; padding-top: 10px; }
   .sum { margin-top: 14px; font-size: 12px; color: #52525b; }
   @page { margin: 14mm; }
 </style></head><body>

@@ -2347,12 +2347,18 @@ function StockReports({ range }: { range: Range }) {
         label="Stock reports"
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Tile
           label="Raw materials"
           value={money(data.materialTotal)}
           tone="text-amber-600 dark:text-amber-400"
           hint="At weighted average cost"
+        />
+        <Tile
+          label="Work in progress"
+          value={money(data.wipTotal ?? 0)}
+          tone="text-violet-600 dark:text-violet-400"
+          hint="Materials in production (WIP)"
         />
         <Tile
           label="Finished goods"
@@ -2363,7 +2369,7 @@ function StockReports({ range }: { range: Range }) {
         <Tile
           label="Stock on hand"
           value={money(data.total)}
-          hint="Both shelves, at cost"
+          hint="Raw, WIP & finished stock"
         />
         <Tile
           label="If it all sold at list"

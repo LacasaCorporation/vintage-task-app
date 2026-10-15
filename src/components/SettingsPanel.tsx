@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import MasterDataManager from "@/components/MasterDataManager";
 import CostingDefaultsCard from "@/components/CostingDefaultsCard";
+import ThemeSettings from "@/components/ThemeSettings";
 import { useAppDialogs } from "@/components/AppDialogs";
 import CurrencyPicker from "@/components/CurrencyPicker";
 import AccountingSettingsPage from "@/components/AccountingSettingsPage";
@@ -52,6 +53,7 @@ import {
   Loader2,
   Mail,
   NotebookPen,
+  Palette,
   Pencil,
   Power,
   RefreshCw,
@@ -176,6 +178,12 @@ const SETTINGS_TABS = [
     label: "Units & categories",
     description: "Shared mastering data",
     icon: Shapes,
+  },
+  {
+    id: "appearance",
+    label: "Appearance",
+    description: "The workspace's colour",
+    icon: Palette,
   },
   {
     id: "data",
@@ -1958,6 +1966,21 @@ export default function SettingsPanel() {
             embedded
           />
         </div>
+      </section>
+
+      {/* appearance — one colour mixed through the whole token set */}
+      <section
+        id="settings-appearance"
+        className="scroll-mt-6 overflow-hidden rounded-2xl border bg-card shadow-sm"
+      >
+        <header className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
+          <Palette className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Appearance</h2>
+          <span className="ml-auto text-xs text-muted-foreground">
+            Saved on this browser
+          </span>
+        </header>
+        <ThemeSettings />
       </section>
 
       {/* backup & restore — export/import all user content */}

@@ -220,7 +220,10 @@
 
 /* CHANGE VALUES FOR THEME — Plum #80426E: warm mauve neutrals with a deep plum accent.
    --primary is the brand colour exactly: oklch(0.471 0.103 339.2) === #80426e,
-   6.88:1 against white — safe for text, borders and solid buttons. */
+   6.88:1 against white — safe for text, borders and solid buttons.
+   These are the defaults a reader gets without touching anything: Settings →
+   Appearance mixes a chosen colour into an override injected at runtime by
+   src/lib/theme.ts, which never edits this file. */
 :root {
   --radius: 0.75rem;
   --background: oklch(0.985 0.004 340);
@@ -330,6 +333,7 @@
 [data-settings-tab="credentials"] > #settings-credentials,
 [data-settings-tab="roles"] > #settings-roles,
 [data-settings-tab="catalog"] > #settings-catalog,
+[data-settings-tab="appearance"] > #settings-appearance,
 [data-settings-tab="data"] > #settings-data,
 [data-settings-tab="accounting"] > #settings-accounting {
   display: block;

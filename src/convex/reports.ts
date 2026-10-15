@@ -1242,6 +1242,7 @@ export type StockAnalysis = {
   materials: ValuationRow[];
   products: ValuationRow[];
   materialTotal: number;
+  wipTotal: number;
   productTotal: number;
   total: number;
   movement: MovementRow[];
@@ -1280,6 +1281,7 @@ export const stockAnalysis = query({
         materials: [],
         products: [],
         materialTotal: 0,
+        wipTotal: 0,
         productTotal: 0,
         total: 0,
         movement: [],
@@ -1500,6 +1502,24 @@ export const stockAnalysis = query({
         }),
     ].sort((a, b) => b.at - a.at);
 
+    const storeIssues = await ctx.db
+      .query("storeIssues")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+
+    const issuedStoreWip = storeIssues
+      .filter((i) => i.status === "issued")
+      .reduce((sum, i) => sum + (i.total || 0), 0);
+
+    const inProductionVal = products.reduce((sum, p) => {
+      const inProdQty = p.inProduction ?? p.productionQty ?? 0;
+      if (inProdQty <= 0) return sum;
+      const cost = sheetCost.get(p._id) ?? lastPrice.get(p._id) ?? 0;
+      return sum + inProdQty * cost;
+    }, 0);
+
+    const wipTotal = round(issuedStoreWip > 0 ? issuedStoreWip : inProductionVal);
+
     const materialTotal = round(
       materialRows.reduce((s, r) => s + r.value, 0),
     );
@@ -1508,8 +1528,9 @@ export const stockAnalysis = query({
       materials: materialRows,
       products: productRows,
       materialTotal,
+      wipTotal,
       productTotal,
-      total: round(materialTotal + productTotal),
+      total: round(materialTotal + wipTotal + productTotal),
       movement,
       movementInValue: round(
         movement
@@ -1521,7 +1542,7 @@ export const stockAnalysis = query({
           .filter((m) => m.direction === "out")
           .reduce((s, m) => s + m.value, 0),
       ),
-      empty: materialRows.length === 0 && productRows.length === 0,
+      empty: materialRows.length === 0 && productRows.length === 0 && wipTotal === 0,
     };
   },
 });
