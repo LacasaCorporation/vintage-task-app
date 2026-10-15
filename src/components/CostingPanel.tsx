@@ -22,9 +22,13 @@ import {
   Plus,
   Printer,
   Save,
+  ShoppingCart,
   Trash2,
   Wrench,
 } from "lucide-react";
+import CreateLpoFromCostingDialog, {
+  type CreateLpoItem,
+} from "@/components/CreateLpoFromCostingDialog";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import ConnectJobDialog from "@/components/ConnectJobDialog";
@@ -324,6 +328,20 @@ export default function CostingPanel({
   /** Whether the labour/expense row is tagged as labour, expense, or plain custom. */
   const [customKind, setCustomKind] = useState<"labour" | "expense" | "custom">("custom");
 
+  // ── LPO creation dialog & row selection state ──────────────────────
+  const [lpoDialogOpen, setLpoDialogOpen] = useState(false);
+  const [lpoItems, setLpoItems] = useState<CreateLpoItem[]>([]);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<Id<"costingItems">>>(new Set());
+
+  const openLpoForItems = (itemsToOrder: CreateLpoItem[]) => {
+    if (itemsToOrder.length === 0) {
+      toast.error("No raw materials selected to order.");
+      return;
+    }
+    setLpoItems(itemsToOrder);
+    setLpoDialogOpen(true);
+  };
+
   // Draft state — edits stay local until "Save" is pressed.
   const [drafts, setDrafts] = useState<
     {
@@ -429,6 +447,70 @@ export default function CostingPanel({
   const selectedMaterialStock = selectedMaterial?.stock ?? 0;
   const isMaterialStockShort =
     selectedMaterial !== undefined && selectedMaterialStock < selectedMaterialQty;
+
+  const allRecipeMaterials = useMemo<CreateLpoItem[]>(() => {
+    const list: CreateLpoItem[] = [];
+    rows.forEach((r) => {
+      if (!r.materialId) return;
+      const mat = materials.find((m) => m._id === r.materialId);
+      if (!mat) return;
+      list.push({
+        materialId: mat._id,
+        name: mat.name,
+        unit: mat.unit || "",
+        qty: r.qty,
+        unitCost: mat.pricePerUnit ?? r.unitPrice,
+        stock: mat.stock ?? 0,
+      });
+    });
+    return list;
+  }, [rows, materials]);
+
+  const shortageMaterials = useMemo<CreateLpoItem[]>(() => {
+    const list: CreateLpoItem[] = [];
+    rows.forEach((r) => {
+      if (!r.materialId) return;
+      const mat = materials.find((m) => m._id === r.materialId);
+      if (!mat) return;
+      const needed = r.qty;
+      const onHand = mat.stock ?? 0;
+      if (onHand < needed) {
+        const deficit = Math.max(1, needed - Math.max(0, onHand));
+        list.push({
+          materialId: mat._id,
+          name: mat.name,
+          unit: mat.unit || "",
+          qty: deficit,
+          unitCost: mat.pricePerUnit ?? r.unitPrice,
+          stock: onHand,
+        });
+      }
+    });
+    return list;
+  }, [rows, materials]);
+
+  const selectedRecipeMaterials = useMemo<CreateLpoItem[]>(() => {
+    return allRecipeMaterials.filter((item) => {
+      const match = rows.find((r) => r.materialId === item.materialId);
+      return match && selectedRowIds.has(match._id);
+    });
+  }, [allRecipeMaterials, rows, selectedRowIds]);
+
+  const rawMaterialRows = useMemo(
+    () => rows.filter((r) => r.materialId !== undefined),
+    [rows],
+  );
+  const allRawMaterialsSelected =
+    rawMaterialRows.length > 0 &&
+    rawMaterialRows.every((r) => selectedRowIds.has(r._id));
+
+  const toggleSelectAllRawMaterials = () => {
+    if (allRawMaterialsSelected) {
+      setSelectedRowIds(new Set());
+    } else {
+      setSelectedRowIds(new Set(rawMaterialRows.map((r) => r._id)));
+    }
+  };
 
   // Collapse duplicate rows (same description/price/unit) once per sheet open.
   useEffect(() => {
@@ -1279,6 +1361,31 @@ export default function CostingPanel({
                   Add Material
                 </Button>
 
+                {selectedMaterial && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2.5 shrink-0 rounded-lg text-xs font-medium gap-1 text-sky-700 dark:text-sky-300 border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20"
+                    onClick={() =>
+                      openLpoForItems([
+                        {
+                          materialId: selectedMaterial._id,
+                          name: selectedMaterial.name,
+                          unit: selectedMaterial.unit || "",
+                          qty: selectedMaterialQty || 1,
+                          unitCost: selectedMaterialRate,
+                          stock: selectedMaterialStock,
+                        },
+                      ])
+                    }
+                    title="Create an LPO purchase order for this selected raw material"
+                  >
+                    <ShoppingCart className="size-3.5" />
+                    Create LPO
+                  </Button>
+                )}
+
                 {materials.length === 0 && (
                   <button
                     type="button"
@@ -1396,19 +1503,60 @@ export default function CostingPanel({
 
           {/* what the sheet is asking to be checked before it is saved */}
           {warnings.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-2.5 py-1 text-[11px] text-amber-800 dark:text-amber-300">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-800 dark:text-amber-300">
               <span className="flex shrink-0 items-center gap-1 font-semibold">
-                <AlertTriangle className="size-3" />
+                <AlertTriangle className="size-3.5 text-amber-500" />
                 {warnings.length} to check
               </span>
-              {warnings.slice(0, 3).map((w) => (
-                <span key={w.id} className="opacity-90">
-                  · {w.text}
-                </span>
-              ))}
-              {warnings.length > 3 && (
-                <span className="opacity-70">+{warnings.length - 3} more</span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 min-w-0 flex-1">
+                {warnings.slice(0, 3).map((w) => (
+                  <span key={w.id} className="opacity-90">
+                    · {w.text}
+                  </span>
+                ))}
+                {warnings.length > 3 && (
+                  <span className="opacity-70">+{warnings.length - 3} more</span>
+                )}
+              </div>
+              {shortageMaterials.length > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openLpoForItems(shortageMaterials)}
+                  className="h-6 px-2 text-[10px] font-medium rounded-lg border-amber-500/40 bg-amber-500/15 text-amber-900 dark:text-amber-200 hover:bg-amber-500/25 gap-1 shrink-0"
+                  title="Create an LPO for all short raw materials in this sheet"
+                >
+                  <ShoppingCart className="size-3" />
+                  Create LPO for shortages ({shortageMaterials.length})
+                </Button>
               )}
+            </div>
+          )}
+
+          {/* Selected rows action bar */}
+          {selectedRowIds.size > 0 && (
+            <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs text-sky-900 dark:text-sky-200">
+              <ShoppingCart className="size-3.5 text-sky-600 shrink-0" />
+              <span className="font-semibold tabular-nums">
+                {selectedRowIds.size} raw material{selectedRowIds.size > 1 ? "s" : ""} selected
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => openLpoForItems(selectedRecipeMaterials)}
+                className="h-6 px-2.5 text-[11px] font-medium rounded-lg bg-sky-600 text-white hover:bg-sky-700 gap-1 ml-1"
+              >
+                <ShoppingCart className="size-3" />
+                Create LPO ({selectedRowIds.size})
+              </Button>
+              <button
+                type="button"
+                onClick={() => setSelectedRowIds(new Set())}
+                className="ml-auto text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+              >
+                Clear selection
+              </button>
             </div>
           )}
 
@@ -1418,7 +1566,25 @@ export default function CostingPanel({
               <table className="w-full min-w-[860px] text-sm">
                 <thead>
                   <tr className="border-b border-border/70 bg-muted/40 text-left text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
-                    <th className="w-8 px-2 py-1.5 font-semibold">#</th>
+                    <th className="w-12 px-2 py-1.5 font-semibold">
+                      <div className="flex items-center gap-1.5">
+                        {rawMaterialRows.length > 0 && (
+                          <input
+                            type="checkbox"
+                            checked={allRawMaterialsSelected}
+                            onChange={toggleSelectAllRawMaterials}
+                            className="size-3 rounded border-muted-foreground/40 accent-primary cursor-pointer"
+                            title={
+                              allRawMaterialsSelected
+                                ? "Deselect all raw materials"
+                                : "Select all raw materials"
+                            }
+                            aria-label="Select all raw materials"
+                          />
+                        )}
+                        <span>#</span>
+                      </div>
+                    </th>
                     <th className="px-2 py-1.5 font-semibold">Description</th>
                     <th className="w-[4.25rem] px-2 py-1.5 text-right font-semibold">Qty</th>
                     <th className="w-14 px-2 py-1.5 font-semibold">Unit</th>
@@ -1484,7 +1650,27 @@ export default function CostingPanel({
                           )}
                         >
                           <td className="px-2 py-1 align-top text-[11px] text-muted-foreground tabular-nums">
-                            {i + 1}
+                            <div className="flex items-center gap-1.5">
+                              {row.materialId !== undefined ? (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedRowIds.has(row._id)}
+                                  onChange={() => {
+                                    setSelectedRowIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(row._id)) next.delete(row._id);
+                                      else next.add(row._id);
+                                      return next;
+                                    });
+                                  }}
+                                  className="size-3 rounded border-muted-foreground/40 accent-primary cursor-pointer"
+                                  aria-label={`Select ${row.label}`}
+                                />
+                              ) : (
+                                <span className="w-3 inline-block" />
+                              )}
+                              <span>{i + 1}</span>
+                            </div>
                           </td>
                           <td className="max-w-0 px-2 py-1 align-top">
                             <div className="flex min-w-0 items-center gap-1.5">
@@ -1565,6 +1751,28 @@ export default function CostingPanel({
                             className="hidden items-center gap-0.5 group-hover/row:inline-flex"
                             aria-label={`Actions for ${row.label}`}
                           >
+                            {row.materialId !== undefined && material !== undefined && (
+                              <button
+                                type="button"
+                                aria-label={`Create LPO for ${row.label}`}
+                                title={`Create LPO for ${row.label}`}
+                                className="grid size-6 place-items-center rounded-md text-muted-foreground hover:text-sky-600"
+                                onClick={() =>
+                                  openLpoForItems([
+                                    {
+                                      materialId: material._id,
+                                      name: material.name,
+                                      unit: material.unit || "",
+                                      qty: qty,
+                                      unitCost: material.pricePerUnit ?? rate,
+                                      stock: material.stock ?? 0,
+                                    },
+                                  ])
+                                }
+                              >
+                                <ShoppingCart className="size-3" />
+                              </button>
+                            )}
                             {canCreate && (
                               <button
                                 type="button"
@@ -1758,6 +1966,26 @@ export default function CostingPanel({
 
           {rows.length > 0 && (
             <div className="mt-1.5 flex items-center justify-end gap-1.5">
+              {allRecipeMaterials.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 rounded-lg text-xs text-sky-700 dark:text-sky-300 border-sky-500/30 hover:bg-sky-500/10"
+                  onClick={() =>
+                    openLpoForItems(
+                      selectedRowIds.size > 0
+                        ? selectedRecipeMaterials
+                        : allRecipeMaterials,
+                    )
+                  }
+                  title="Create an LPO for raw materials in this sheet"
+                >
+                  <ShoppingCart className="size-3.5" />
+                  Create LPO
+                  {selectedRowIds.size > 0 ? ` (${selectedRowIds.size})` : ""}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -1824,6 +2052,19 @@ export default function CostingPanel({
               }}
             />
           )}
+
+          <CreateLpoFromCostingDialog
+            open={lpoDialogOpen}
+            onClose={() => setLpoDialogOpen(false)}
+            items={lpoItems}
+            productName={activeFg.name}
+            productCode={activeFg.code}
+            onLpoCreated={() => {
+              if (onSelectView) {
+                onSelectView({ kind: "purchase", tab: "lpo" });
+              }
+            }}
+          />
         </>
   ) : null;
 
