@@ -1554,6 +1554,83 @@ const schema = defineSchema(
       .index("by_owner", ["ownerId"])
       .index("by_notebook", ["notebookId"]),
 
+    /**
+     * A store issue voucher: raw materials released from the store to the
+     * factory floor for production against a specific product / job.
+     * Moving the materials writes a `production` stock-out movement, marking
+     * them as WIP (Work In Progress).
+     */
+    storeIssues: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(),       // auto SI0001, SI0002, …
+      issuedAt: v.number(),     // ms
+      /** The finished-goods product this issue is against (budgeted). */
+      fgId: v.optional(v.id("finishedGoods")),
+      fgName: v.optional(v.string()),
+      /** The job this issue is against, when known. */
+      jobId: v.optional(v.id("projectJobs")),
+      jobName: v.optional(v.string()),
+      /** The project, for display. */
+      projectId: v.optional(v.id("projects")),
+      projectName: v.optional(v.string()),
+      note: v.optional(v.string()),
+      issuedBy: v.optional(v.string()),
+      /** draft = prepared but not dispatched; issued = materials moved to factory */
+      status: v.union(v.literal("draft"), v.literal("issued"), v.literal("cancelled")),
+      lines: v.array(
+        v.object({
+          materialId: v.id("rawMaterials"),
+          name: v.string(),
+          unit: v.string(),
+          /** Budgeted qty (from costing sheet). */
+          budgetedQty: v.optional(v.number()),
+          /** Actual qty being issued. */
+          qty: v.number(),
+          unitCost: v.number(),
+        }),
+      ),
+      total: v.number(),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_fg", ["fgId"])
+      .index("by_job", ["jobId"]),
+
+    /**
+     * A store receipt voucher: finished products received from the factory
+     * into the finished-goods store after production is complete.
+     * Receiving one writes a `production` product-movement in, adding to stock.
+     */
+    storeReceipts: defineTable({
+      ownerId: v.id("users"),
+      number: v.string(),       // auto SR0001, SR0002, …
+      receivedAt: v.number(),   // ms
+      /** The finished-goods product being received. */
+      fgId: v.id("finishedGoods"),
+      fgName: v.string(),
+      /** The job this receipt closes off. */
+      jobId: v.optional(v.id("projectJobs")),
+      jobName: v.optional(v.string()),
+      projectId: v.optional(v.id("projects")),
+      projectName: v.optional(v.string()),
+      note: v.optional(v.string()),
+      receivedBy: v.optional(v.string()),
+      /** Budgeted / expected qty (from job/product). */
+      budgetedQty: v.optional(v.number()),
+      /** Actual qty received from factory. */
+      qty: v.number(),
+      unit: v.optional(v.string()),
+      /** Unit cost at time of receipt (from costing sheet). */
+      unitCost: v.optional(v.number()),
+      total: v.optional(v.number()),
+      /** draft = pending; received = stock updated */
+      status: v.union(v.literal("draft"), v.literal("received"), v.literal("cancelled")),
+      /** The product movement this receipt created. */
+      movementRef: v.optional(v.string()),
+    })
+      .index("by_owner", ["ownerId"])
+      .index("by_fg", ["fgId"])
+      .index("by_job", ["jobId"]),
+
     // add other tables here
 
     settings,

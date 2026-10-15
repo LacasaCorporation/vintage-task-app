@@ -1242,11 +1242,13 @@ const BOARD_CARD =
 function BoardCardView({
   card,
   busyKey,
+  projectStatuses,
   onToggleFg,
   onOpen,
 }: {
   card: BoardCard;
   busyKey: string | null;
+  projectStatuses?: readonly string[];
   onToggleFg: (fg: FgDoc) => void;
   onOpen: (fg: FgDoc) => void;
 }) {
@@ -1492,6 +1494,7 @@ export function FlaggedBoard({
                       <BoardCardView
                         card={card}
                         busyKey={busyKey}
+                        projectStatuses={projectStatuses}
                         onToggleFg={onToggleFg}
                         onOpen={onOpenFg}
                       />

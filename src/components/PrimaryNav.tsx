@@ -12,6 +12,7 @@ import {
   Package,
   Receipt,
   ShoppingCart,
+  Warehouse,
 } from "lucide-react";
 import { useState } from "react";
 import type { CostingView, ReportsArea } from "@/components/CostingSidebar";
@@ -139,6 +140,7 @@ export default function PrimaryNav({
   const [accountsExpanded, setAccountsExpanded] = useState(false);
   const inCosting = section === "costing";
   const onMaterials = view?.kind === "materials";
+  const onStore = view?.kind === "store";
   const onProducts = view?.kind === "products";
   const inAccounting = inCosting && view?.kind === "accounting";
   // the Purchase drill-down works the same way: open whenever you are inside
@@ -528,6 +530,13 @@ export default function PrimaryNav({
                 n={materials.length}
                 sub
                 onClick={() => onSelectView({ kind: "materials" })}
+              />
+              <NavRow
+                label="Store & WIP"
+                Icon={Warehouse}
+                active={inCosting && onStore}
+                sub
+                onClick={() => onSelectView({ kind: "store" })}
               />
               <NavRow
                 label="Products"

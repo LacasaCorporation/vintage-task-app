@@ -332,7 +332,7 @@ export default function ProjectsWorkspace({
           activeView === "kanban" ? (
             <ProjectKanban
               mode="projects"
-              projects={displayedProjects}
+              projects={displayedProjects ?? []}
               jobs={jobs ?? []}
               fgs={fgs ?? []}
               projectStatuses={projectStatuses}
@@ -345,7 +345,7 @@ export default function ProjectsWorkspace({
           ) : activeView === "gantt" ? (
             <ProjectGantt
               mode="projects"
-              projects={displayedProjects}
+              projects={displayedProjects ?? []}
               jobs={jobs ?? []}
               fgs={fgs ?? []}
               projectStatuses={projectStatuses}
@@ -359,7 +359,7 @@ export default function ProjectsWorkspace({
             />
           ) : activeView === "hierarchy" ? (
             <ProjectHierarchy
-              projects={displayedProjects}
+              projects={displayedProjects ?? []}
               jobs={jobs ?? []}
               fgs={fgs ?? []}
               projectStatuses={projectStatuses}
@@ -373,7 +373,7 @@ export default function ProjectsWorkspace({
             />
           ) : (
             <FlaggedProjectsList
-              projects={displayedProjects}
+              projects={displayedProjects ?? []}
               jobs={jobs ?? []}
               fgs={fgs ?? []}
               statusFilter={status}

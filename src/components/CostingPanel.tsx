@@ -61,6 +61,7 @@ const AccountingPanel = lazy(() => import("@/components/AccountingPanel"));
 const ReportsPanel = lazy(() => import("@/components/ReportsPanel"));
 const ProductForm = lazy(() => import("@/components/ProductForm"));
 const ActivePanel = lazy(() => import("@/components/ActivePanel"));
+const StorePanel = lazy(() => import("@/components/StorePanel"));
 
 /** A quiet placeholder for the moment a working area is being fetched. */
 function AreaLoading({ label }: { label: string }) {
@@ -2165,6 +2166,16 @@ export default function CostingPanel({
             canImportExport={canImportExport}
             canImport={canImport}
           />
+          </Suspense>
+        </div>
+      ) : view?.kind === "store" ? (
+        <div className="mt-4">
+          <Suspense fallback={<AreaLoading label="store operations" />}>
+            <StorePanel
+              materials={materials ?? []}
+              finishedGoods={finishedGoods ?? []}
+              canEdit={canEditMaterial}
+            />
           </Suspense>
         </div>
       ) : view === null || view?.kind === "projects" ? (

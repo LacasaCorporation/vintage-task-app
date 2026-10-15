@@ -18,6 +18,8 @@ export type ReportsArea = "financial" | "sales" | "purchase" | "stock";
 /** Reports is now a sub-tabbed area on the Reports page. */
 export type CostingView =
   | { kind: "materials" }
+  /** Store issues (WIP) and store receipts (Finished Goods). */
+  | { kind: "store" }
   /** Everything carrying the Active mark, gathered in one list. */
   | { kind: "active" }
   /** Everything whose Active mark has been taken off. */
