@@ -139,9 +139,13 @@ export function oklchToHex({ l, c, h }: Oklch): string {
   );
 }
 
-/** Compact CSS form of an oklch triple, as used throughout index.css. */
+/**
+ * Compact CSS form of an oklch triple, as used throughout index.css.
+ * Lightness and chroma keep four decimals so a picked colour round-trips back
+ * to the exact same hex — at three, a preset like #0369a1 drifted by a channel.
+ */
 export function oklchCss(l: number, c: number, h: number): string {
-  return `oklch(${round(clamp(l, 0, 1), 3)} ${round(clamp(c, 0, 0.4), 3)} ${round(
+  return `oklch(${round(clamp(l, 0, 1), 4)} ${round(clamp(c, 0, 0.4), 4)} ${round(
     hue(h),
     1,
   )})`;
@@ -195,13 +199,60 @@ function readableInk(bg: Oklch, h: number, c: number) {
     : { ink: inkLight(h, c), ratio: onLight };
 }
 
+/** Light-mode cards are white, so that is the surface the accent must clear. */
+const CARD = "#ffffff";
+const MIN_CONTRAST = 4.5;
+
+/**
+ * The accent a light-mode page can actually use.
+ *
+ * A fixed lightness clamp is not enough, because one colour has to hold two
+ * jobs at once: link text on a white card, and the fill under a button label.
+ * That pair is decided by hue and chroma as much as lightness — a yellow and a
+ * violet at the same lightness sit 1.5 ratios apart — so the picked colour is
+ * kept exactly when it already passes both, and otherwise mixed down until it
+ * does. Mid-tone colours are the awkward ones: they are dark enough for white
+ * ink to fail and light enough for link text to fail, so both are checked on
+ * every step.
+ */
+function primaryForLight(base: Oklch, chroma: number, h: number) {
+  // The floor only stops the walk from reaching zero; a genuinely dark pick is
+  // left dark, because darker is never worse for either role.
+  let candidate: Oklch = { l: clamp(base.l, 0.05, 0.72), c: chroma, h };
+  const evaluate = () => {
+    const ink = readableInk(candidate, h, chroma);
+    return {
+      onWhite: contrastRatio(oklchToHex(candidate), CARD),
+      ink,
+    };
+  };
+
+  let steps = 0;
+  let state = evaluate();
+  while (
+    (state.onWhite < MIN_CONTRAST || state.ink.ratio < MIN_CONTRAST) &&
+    candidate.l > 0.05 &&
+    steps < 160
+  ) {
+    candidate = { ...candidate, l: round(candidate.l - 0.005, 4) };
+    steps += 1;
+    state = evaluate();
+  }
+
+  return {
+    primary: candidate,
+    adjusted: steps > 0 || Math.abs(candidate.l - base.l) > 0.004,
+    ink: state.ink.ink,
+    contrast: state.ink.ratio,
+  };
+}
+
 /**
  * Mix one colour into a complete light + dark token set.
  *
- * The accent lightness is clamped into the band where it can carry its own
- * ink on a button *and* read as a link on a white card — the colour the reader
- * picked is kept exactly whenever it already sits in that band, and reported as
- * `adjusted` when it doesn't.
+ * The accent keeps the colour the reader picked whenever that colour can serve
+ * as both a filled button and link text; when it cannot, it is mixed to the
+ * nearest strength that can, and `adjusted` says so.
  */
 export function mixTheme(input: string | Oklch): MixedTheme | null {
   const base = typeof input === "string" ? hexToOklch(input) : input;
@@ -210,10 +261,13 @@ export function mixTheme(input: string | Oklch): MixedTheme | null {
   const chroma = clamp(base.c, 0, 0.24);
   const h = hue(base.h);
 
-  const primaryLight: Oklch = { l: clamp(base.l, 0.34, 0.62), c: chroma, h };
+  const {
+    primary: primaryLight,
+    adjusted,
+    ink: lightInkInk,
+    contrast: lightInkRatio,
+  } = primaryForLight(base, chroma, h);
   const effective = oklchToHex(primaryLight);
-  const adjusted = Math.abs(primaryLight.l - base.l) > 0.004;
-  const lightInk = readableInk(primaryLight, h, chroma);
 
   const darkChroma = clamp(chroma * 1.1, 0, 0.24);
   const primaryDark: Oklch = {
@@ -264,9 +318,9 @@ export function mixTheme(input: string | Oklch): MixedTheme | null {
     "--popover-foreground": surface(0.19, 0.16),
     "--primary": oklchCss(primaryLight.l, primaryLight.c, h),
     "--primary-foreground": oklchCss(
-      lightInk.ink.l,
-      lightInk.ink.c,
-      lightInk.ink.h,
+      lightInkInk.l,
+      lightInkInk.c,
+      lightInkInk.h,
     ),
     "--secondary": surface(0.965, 0.09),
     "--secondary-foreground": surface(0.28, 0.2),
@@ -286,9 +340,9 @@ export function mixTheme(input: string | Oklch): MixedTheme | null {
     "--sidebar-foreground": surface(0.19, 0.16),
     "--sidebar-primary": oklchCss(primaryLight.l, primaryLight.c, h),
     "--sidebar-primary-foreground": oklchCss(
-      lightInk.ink.l,
-      lightInk.ink.c,
-      lightInk.ink.h,
+      lightInkInk.l,
+      lightInkInk.c,
+      lightInkInk.h,
     ),
     "--sidebar-accent": surface(0.958, 0.13),
     "--sidebar-accent-foreground": surface(0.28, 0.2),
@@ -333,7 +387,7 @@ export function mixTheme(input: string | Oklch): MixedTheme | null {
     base,
     effective,
     adjusted,
-    contrast: lightInk.ratio,
+    contrast: lightInkRatio,
     light,
     dark,
   };

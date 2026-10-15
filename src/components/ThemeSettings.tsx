@@ -1,7 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import {
   DEFAULT_BRAND,
   THEME_PRESETS,
@@ -23,6 +22,57 @@ import { useState } from "react";
 const HUE_STEPS = 12;
 
 const startingBrand = () => readStoredBrand() ?? DEFAULT_BRAND;
+
+/**
+ * A slider whose track is the very ramp being mixed along, so the consequence
+ * of a drag is visible before the drag.
+ */
+function MixRange({
+  id,
+  label,
+  readout,
+  min,
+  max,
+  step,
+  value,
+  gradient,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  readout: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  gradient: string;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <Label htmlFor={id} className="text-xs">
+          {label}
+        </Label>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {readout}
+        </span>
+      </div>
+      <input
+        id={id}
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ backgroundImage: gradient }}
+        className="mt-2 h-2.5 w-full cursor-pointer appearance-none rounded-full border border-border/60 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-primary [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-primary [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-sm"
+      />
+    </div>
+  );
+}
 
 /**
  * Appearance → the workspace's own colour.
@@ -140,45 +190,37 @@ export default function ThemeSettings() {
         </div>
 
         <div className="space-y-4">
-          <div>
-            <div className="flex items-baseline justify-between gap-2">
-              <Label htmlFor="theme-chroma" className="text-xs">
-                Saturation
-              </Label>
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {Math.round(base.c * 100)}%
-              </span>
-            </div>
-            <Slider
-              id="theme-chroma"
-              className="mt-2"
-              min={0}
-              max={24}
-              step={1}
-              value={[Math.round(base.c * 100)]}
-              onValueChange={([next]) => apply({ ...base, c: (next ?? 0) / 100 })}
-            />
-          </div>
+          <MixRange
+            id="theme-chroma"
+            label="Saturation"
+            readout={`${Math.round(base.c * 100)}%`}
+            min={0}
+            max={24}
+            step={1}
+            value={Math.round(base.c * 100)}
+            gradient={`linear-gradient(to right, ${oklchCss(base.l, 0, base.h)}, ${oklchCss(
+              base.l,
+              0.12,
+              base.h,
+            )}, ${oklchCss(base.l, 0.24, base.h)})`}
+            onChange={(next) => apply({ ...base, c: next / 100 })}
+          />
 
-          <div>
-            <div className="flex items-baseline justify-between gap-2">
-              <Label htmlFor="theme-lightness" className="text-xs">
-                Lightness
-              </Label>
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {Math.round(base.l * 100)}%
-              </span>
-            </div>
-            <Slider
-              id="theme-lightness"
-              className="mt-2"
-              min={4}
-              max={100}
-              step={1}
-              value={[Math.round(base.l * 100)]}
-              onValueChange={([next]) => apply({ ...base, l: (next ?? 0) / 100 })}
-            />
-          </div>
+          <MixRange
+            id="theme-lightness"
+            label="Lightness"
+            readout={`${Math.round(base.l * 100)}%`}
+            min={4}
+            max={100}
+            step={1}
+            value={Math.round(base.l * 100)}
+            gradient={`linear-gradient(to right, ${oklchCss(0.08, base.c, base.h)}, ${oklchCss(
+              base.l,
+              base.c,
+              base.h,
+            )}, ${oklchCss(0.98, base.c, base.h)})`}
+            onChange={(next) => apply({ ...base, l: next / 100 })}
+          />
         </div>
 
         <div className="flex flex-wrap items-end gap-3 border-t pt-4">
@@ -333,7 +375,7 @@ export default function ThemeSettings() {
         </dl>
         <p className="mt-2 text-[11px] text-muted-foreground">
           {mixed.adjusted
-            ? "Your lightness sat outside the readable band, so the accent was mixed to the nearest strength that still passes 4.5:1."
+            ? "Mixed to the nearest strength that keeps text readable both on the accent and on a white page — the hue is untouched."
             : isDefault
               ? "This is the colour the workspace ships with."
               : "Kept exactly as picked — it already carries readable text."}

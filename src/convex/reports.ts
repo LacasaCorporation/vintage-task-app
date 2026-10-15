@@ -1238,19 +1238,55 @@ export type MovementRow = {
   value: number;
 };
 
+export type WipMaterialRow = {
+  key: string;
+  name: string;
+  unit: string;
+  qty: number;
+  cost: number;
+  value: number;
+};
+
+export type WipProductRow = {
+  key: string;
+  code: string;
+  name: string;
+  inProduction: number;
+  unit: string;
+  cost: number;
+  value: number;
+};
+
+export type WipIssueRow = {
+  id: string;
+  number: string;
+  issuedAt: number;
+  fgName?: string;
+  projectName?: string;
+  jobName?: string;
+  lineCount: number;
+  total: number;
+  issuedBy?: string;
+  lines: {
+    materialId: string;
+    name: string;
+    unit: string;
+    qty: number;
+    unitCost: number;
+  }[];
+};
+
 export type StockAnalysis = {
   materials: ValuationRow[];
   products: ValuationRow[];
+  wipMaterials: WipMaterialRow[];
+  wipProducts: WipProductRow[];
+  wipIssues: WipIssueRow[];
   materialTotal: number;
   wipTotal: number;
   productTotal: number;
   total: number;
   movement: MovementRow[];
-  /**
-   * Money in and money out over the window. Quantities are deliberately not
-   * totalled: a shelf holds boards, metres and pieces, and adding those
-   * together produces a number that means nothing.
-   */
   movementInValue: number;
   movementOutValue: number;
   empty: boolean;
@@ -1280,6 +1316,9 @@ export const stockAnalysis = query({
       return {
         materials: [],
         products: [],
+        wipMaterials: [],
+        wipProducts: [],
+        wipIssues: [],
         materialTotal: 0,
         wipTotal: 0,
         productTotal: 0,
@@ -1507,18 +1546,47 @@ export const stockAnalysis = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
 
-    const issuedStoreWip = storeIssues
-      .filter((i) => i.status === "issued")
-      .reduce((sum, i) => sum + (i.total || 0), 0);
+    const activeWipIssues = storeIssues.filter((i) => i.status === "issued");
 
-    const inProductionVal = products.reduce((sum, p) => {
-      const inProdQty = p.inProduction ?? p.productionQty ?? 0;
-      if (inProdQty <= 0) return sum;
-      const cost = sheetCost.get(p._id) ?? lastPrice.get(p._id) ?? 0;
-      return sum + inProdQty * cost;
-    }, 0);
+    // Aggregate materials in WIP from active issue vouchers
+    const wipMaterialsMap = new Map<string, WipMaterialRow>();
+    for (const issue of activeWipIssues) {
+      for (const line of issue.lines) {
+        const existing = wipMaterialsMap.get(line.materialId) ?? {
+          key: line.materialId,
+          name: line.name,
+          unit: line.unit,
+          qty: 0,
+          cost: line.unitCost,
+          value: 0,
+        };
+        existing.qty = round(existing.qty + line.qty);
+        existing.value = round(existing.value + line.qty * line.unitCost);
+        wipMaterialsMap.set(line.materialId, existing);
+      }
+    }
+    const wipMaterials = Array.from(wipMaterialsMap.values());
 
-    const wipTotal = round(issuedStoreWip > 0 ? issuedStoreWip : inProductionVal);
+    // Products in production
+    const wipProducts: WipProductRow[] = products
+      .filter((p) => (p.inProduction ?? p.productionQty ?? 0) > 0)
+      .map((p) => {
+        const inProduction = p.inProduction ?? p.productionQty ?? 0;
+        const cost = sheetCost.get(p._id) ?? lastPrice.get(p._id) ?? 0;
+        return {
+          key: p._id,
+          code: p.code ?? "",
+          name: p.name,
+          inProduction,
+          unit: p.unit ?? "pcs",
+          cost,
+          value: round(inProduction * cost),
+        };
+      });
+
+    const issuedStoreWip = activeWipIssues.reduce((sum, i) => sum + (i.total || 0), 0);
+    const prodWipTotal = wipProducts.reduce((sum, p) => sum + p.value, 0);
+    const wipTotal = round(issuedStoreWip > 0 ? issuedStoreWip : prodWipTotal);
 
     const materialTotal = round(
       materialRows.reduce((s, r) => s + r.value, 0),
@@ -1527,6 +1595,26 @@ export const stockAnalysis = query({
     return {
       materials: materialRows,
       products: productRows,
+      wipMaterials,
+      wipProducts,
+      wipIssues: activeWipIssues.map((i) => ({
+        id: i._id,
+        number: i.number,
+        issuedAt: i.issuedAt,
+        fgName: i.fgName,
+        projectName: i.projectName,
+        jobName: i.jobName,
+        lineCount: i.lines.length,
+        total: i.total,
+        issuedBy: i.issuedBy,
+        lines: i.lines.map((l) => ({
+          materialId: l.materialId,
+          name: l.name,
+          unit: l.unit,
+          qty: l.qty,
+          unitCost: l.unitCost,
+        })),
+      })),
       materialTotal,
       wipTotal,
       productTotal,
