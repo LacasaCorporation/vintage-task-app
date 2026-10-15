@@ -26,6 +26,7 @@ import {
   Plus,
   Printer,
   Receipt,
+  Search,
   Send,
   Trash2,
   Truck,
@@ -187,6 +188,8 @@ export default function SalesPanel({
   const [contactOpen, setContactOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [ledgerCustomer, setLedgerCustomer] = useState<CustomerDoc | null>(null);
+  /** Typing in the customers search box narrows the list below it. */
+  const [customerSearch, setCustomerSearch] = useState("");
   /** Fixed for the life of the panel, so a re-render can't reclassify a due date. */
   const [now] = useState(() => Date.now());
 
@@ -268,6 +271,24 @@ export default function SalesPanel({
           : a.name.localeCompare(b.name),
       );
   }, [customers, sales, now]);
+
+  /**
+   * What the search box leaves on the book — matched on the customer name,
+   * the person, the phone and the email, so a row can be found by any way of
+   * naming it. The book totals above stay whole; the box narrows the list.
+   */
+  const filteredCustomers = useMemo(() => {
+    const q = customerSearch.trim().toLowerCase();
+    if (q === "") return customerLedger;
+    return customerLedger.filter((row) =>
+      [
+        row.name,
+        row.customer?.contactName,
+        row.customer?.phone,
+        row.customer?.email,
+      ].some((field) => (field ?? "").toLowerCase().includes(q)),
+    );
+  }, [customerLedger, customerSearch]);
 
   const bookTotal = useMemo(
     () => ({
@@ -883,7 +904,10 @@ export default function SalesPanel({
             <h2 className="text-sm font-semibold">
               Customers
               <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {customerLedger.length} on the book · {money(bookTotal.invoiced)}{" "}
+                {customerSearch.trim() === ""
+                  ? customerLedger.length
+                  : `${filteredCustomers.length} of ${customerLedger.length}`}{" "}
+                on the book · {money(bookTotal.invoiced)}{" "}
                 invoiced · {money(bookTotal.received)} received ·{" "}
                 <span
                   className={cn(
@@ -897,9 +921,22 @@ export default function SalesPanel({
                 </span>
               </span>
             </h2>
-            <span className="hidden text-[11px] text-muted-foreground sm:inline">
-              Click a row for its statement
-            </span>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
+                <input
+                  type="search"
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                  placeholder="Search customers…"
+                  aria-label="Search customers"
+                  className="h-7 w-44 rounded-lg border bg-card pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <span className="hidden text-[11px] text-muted-foreground lg:inline">
+                Click a row for its statement
+              </span>
+            </div>
           </div>
           {customers === undefined || sales === undefined ? (
             <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
@@ -927,6 +964,10 @@ export default function SalesPanel({
                 </Button>
               )}
             </div>
+          ) : filteredCustomers.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+              Nothing matches “{customerSearch.trim()}”.
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">
@@ -942,7 +983,7 @@ export default function SalesPanel({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
-                  {customerLedger.map((row) => {
+                  {filteredCustomers.map((row) => {
                     const saved = row.customer;
                     return (
                       <tr
