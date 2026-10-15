@@ -9,7 +9,7 @@ import {
   unflagProjectTree,
   type RemovedFlags,
 } from "./flagCascade";
-import { stockIn, stockOut } from "./stock";
+
 import { produceStock, reverseProduction } from "./productStock";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
@@ -54,71 +54,21 @@ async function landedThisRun(
 }
 
 /**
- * Re-read a product's costing sheet and move the raw-material stock to match.
- * Used whenever a sheet line is added, edited or deleted while the product is
- * in production, so the running run always reflects the sheet. Stock is
- * allowed to go negative: a shortage is a real state the user needs to see.
+ * Re-read a product's costing sheet — now a no-op for stock movements.
  *
- * The sheet prices ONE product, so a batch of three needs three times the
- * material: the quantities are multiplied by the product's own quantity.
+ * Raw-material allocation for production is now done exclusively through the
+ * Store module's issue vouchers. This function is kept so callers in
+ * costing.ts (sheet edits while in-production) don't break, but it no longer
+ * touches stock levels.
  */
 export async function syncProductionConsumption(
-  ctx: MutationCtx,
-  fg: Doc<"finishedGoods">,
+  _ctx: MutationCtx,
+  _fg: Doc<"finishedGoods">,
 ): Promise<void> {
-  if (fg.productionStartedAt === undefined) return;
-  const lines = await ctx.db
-    .query("costingItems")
-    .withIndex("by_fg", (q) => q.eq("fgId", fg._id))
-    .collect();
-  // a run in progress has its own committed quantity; editing the sheet
-  // mid-run must re-price against that, not the product's default batch.
-  // It is what is still part-made plus what has already landed, so a sheet
-  // edit after a partial finish still prices the whole batch.
-  const make =
-    (fg.productionQty ?? 0) + (await landedThisRun(ctx, fg)) || batchQty(fg);
-  const next = new Map<Id<"rawMaterials">, number>();
-  for (const line of lines) {
-    if (line.materialId === undefined) continue;
-    next.set(
-      line.materialId,
-      (next.get(line.materialId) ?? 0) + (line.qty || 0) * make,
-    );
-  }
-
-  // put back everything the previous run took out
-  for (const used of fg.productionConsumed ?? []) {
-    const material = await ctx.db.get(used.materialId);
-    if (material === null) continue;
-    await stockIn(ctx, {
-      ownerId: fg.ownerId,
-      material,
-      qty: used.qty,
-      source: "production-return",
-      ref: fg.name,
-    });
-  }
-  // then take the amounts the sheet calls for now
-  for (const [materialId, qty] of next) {
-    if (qty <= 0) continue;
-    const material = await ctx.db.get(materialId);
-    if (material === null) continue;
-    await stockOut(ctx, {
-      ownerId: fg.ownerId,
-      material,
-      qty,
-      source: "production",
-      ref: fg.name,
-    });
-  }
-
-  await ctx.db.patch(fg._id, {
-    productionConsumed: [...next.entries()].map(([materialId, qty]) => ({
-      materialId,
-      qty,
-    })),
-  });
+  // Material deduction is now handled by Store issue vouchers.
+  // Nothing to do here.
 }
+
 
 /**
  * Take work off the production board.
@@ -204,31 +154,6 @@ export const start = mutation({
       .withIndex("by_fg", (q) => q.eq("fgId", fgId))
       .collect();
 
-    const needed = new Map<Id<"rawMaterials">, number>();
-    // the sheet covers one product, so the whole batch is produced from it
-    for (const line of lines) {
-      if (line.materialId === undefined) continue;
-      needed.set(
-        line.materialId,
-        (needed.get(line.materialId) ?? 0) + (line.qty || 0) * make,
-      );
-    }
-
-    // a shortage is allowed: the stock simply goes negative so it is visible
-    for (const [materialId, qty] of needed) {
-      if (qty <= 0) continue;
-      const material = await ctx.db.get(materialId);
-      if (material === null || material.ownerId !== userId)
-        throw new Error("A material this product needs no longer exists.");
-      await stockOut(ctx, {
-        ownerId: userId,
-        material,
-        qty,
-        source: "production",
-        ref: fg.name,
-      });
-    }
-
     const flaggedAt = fg.flaggedAt ?? Date.now();
     await ctx.db.patch(fgId, {
       isFlagged: true,
@@ -241,10 +166,9 @@ export const start = mutation({
       // the units are part-made now; they only reach `stock` when it finishes
       productionQty: make,
       inProduction: (fg.inProduction ?? 0) + make,
-      productionConsumed: [...needed.entries()].map(([materialId, qty]) => ({
-        materialId,
-        qty,
-      })),
+      // material allocation is now done via Store issue vouchers — nothing
+      // is deducted from raw-material stock automatically on production start
+      productionConsumed: [],
     });
     // a run in progress is project work like any other flagged product, so the
     // job it belongs to and that job's project carry the flag too: the batch
@@ -276,37 +200,8 @@ export const editConsumption = mutation({
     const next = new Map<Id<"rawMaterials">, number>();
     for (const line of lines) next.set(line.materialId, Math.max(0, line.qty));
 
-    // put back what was consumed, then take the new amounts (stock may go
-    // negative so a shortage stays visible instead of being blocked)
-    for (const used of fg.productionConsumed ?? []) {
-      const material = await ctx.db.get(used.materialId);
-      if (material === null || material.ownerId !== userId) continue;
-      await stockIn(ctx, {
-        ownerId: userId,
-        material,
-        qty: used.qty,
-        source: "production-return",
-        ref: fg.name,
-      });
-    }
-    for (const materialId of next.keys()) {
-      const material = await ctx.db.get(materialId);
-      if (material === null || material.ownerId !== userId)
-        throw new Error("A material this product needs no longer exists.");
-    }
-    for (const [materialId, qty] of next) {
-      if (qty <= 0) continue;
-      const material = await ctx.db.get(materialId);
-      if (material === null) continue;
-      await stockOut(ctx, {
-        ownerId: userId,
-        material,
-        qty,
-        source: "production",
-        ref: fg.name,
-      });
-    }
-
+    // Material allocation is now via Store issue vouchers — no stock movements
+    // here. Just record the updated consumption list for reference.
     await ctx.db.patch(fgId, {
       productionConsumed: [...next.entries()].map(([materialId, qty]) => ({
         materialId,
@@ -371,18 +266,6 @@ export const stop = mutation({
         ownerId: userId,
         product: fg,
         qty: landed,
-        ref: fg.name,
-      });
-    }
-
-    for (const used of fg.productionConsumed ?? []) {
-      const material = await ctx.db.get(used.materialId);
-      if (material === null || material.ownerId !== userId) continue;
-      await stockIn(ctx, {
-        ownerId: userId,
-        material,
-        qty: used.qty,
-        source: "production-return",
         ref: fg.name,
       });
     }
