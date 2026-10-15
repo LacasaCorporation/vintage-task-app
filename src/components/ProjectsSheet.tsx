@@ -6,6 +6,7 @@ import {
   ChevronDown,
   CircleCheck,
   Download,
+  EyeOff,
   Flag,
   Folder,
   Loader2,
@@ -53,6 +54,7 @@ import {
   PROJECT_STATUS_FINISH,
   projectStatusesOrDefaults,
   productLockedReason,
+  isStageDone,
 } from "@/lib/project-statuses";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { isFlaggedProjectWork } from "@/lib/project-work";
@@ -66,13 +68,14 @@ import FilterMenu, { type FilterOption } from "@/components/FilterMenu";
 const ProjectDetailPanel = lazy(() => import("@/components/ProjectDetailPanel"));
 const ProductDetailPanel = lazy(() => import("@/components/ProductDetailPanel"));
 
-type ProjectFilter = "all" | "flagged" | "active" | "inactive";
+type ProjectFilter = "all" | "flagged" | "active" | "inactive" | "completed";
 
 const PROJECT_FILTERS: readonly FilterOption<ProjectFilter>[] = [
   { value: "all", label: "All items", hint: "Every project" },
   { value: "flagged", label: "Flagged", hint: "On the Projects board" },
   { value: "active", label: "Active", hint: "Marked as being worked on" },
   { value: "inactive", label: "Inactive", hint: "Kept back from the list" },
+  { value: "completed", label: "Completed", hint: "Finished projects" },
 ];
 import ProjectsPrintSheet, {
   buildPrintRows,
@@ -193,6 +196,48 @@ type ProjectRow = {
   jobs: JobDoc[];
 };
 
+/**
+ * Check if a project is completed:
+ * - Its status is "completed" or finished stage (and has no open jobs)
+ * - Or all of its jobs are completed
+ * - Or has no jobs and all products are completed
+ */
+function isProjectCompleted(p: ProjectRow, finishedGoods: FgDoc[]): boolean {
+  const detail = p.project;
+  const hasOpenJobs =
+    p.jobs.length > 0 &&
+    p.jobs.some((j) => j.status !== "completed" && !isStageDone(j.projectStatus));
+
+  const isFinishedStage = isStageDone(detail?.projectStatus);
+  const isStatusCompleted = detail?.status === "completed";
+
+  if ((isStatusCompleted || isFinishedStage) && !hasOpenJobs) {
+    return true;
+  }
+
+  if (
+    p.jobs.length > 0 &&
+    p.jobs.every((j) => j.status === "completed" || isStageDone(j.projectStatus))
+  ) {
+    return true;
+  }
+
+  const projectProducts = finishedGoods.filter(
+    (f) => (f.projectName ?? "").trim().toLowerCase() === p.name.trim().toLowerCase(),
+  );
+  if (
+    p.jobs.length === 0 &&
+    projectProducts.length > 0 &&
+    projectProducts.every(
+      (f) => f.isCompleted === true || f.projectStatus === PROJECT_STATUS_FINISH,
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 /** Projects listing sheet — one row per project with its jobs and details. */
 export default function ProjectsSheet({
   finishedGoods,
@@ -217,6 +262,7 @@ export default function ProjectsSheet({
   >("projects");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagFilter, setFlagFilter] = useState<ProjectFilter>("all");
+  const [showCompleted, setShowCompleted] = useState(false);
   const [jobFilter, setJobFilter] = useState<JobFilter>("all");
   const [productFilter, setProductFilter] = useState<ProductFilter>("all");
   const [printing, setPrinting] = useState(false);
@@ -429,6 +475,12 @@ export default function ProjectsSheet({
 
   const filtered = useMemo(() => {
     let list = rows;
+    // hide completed projects unless explicitly requested via toggle or filter
+    if (flagFilter === "completed") {
+      list = list.filter((p) => isProjectCompleted(p, finishedGoods));
+    } else if (!showCompleted) {
+      list = list.filter((p) => !isProjectCompleted(p, finishedGoods));
+    }
     // a project whose Active mark was taken off stays out of the list until
     // the reader asks for it. Name-only groups have no project record to carry
     // a mark, so they are never treated as inactive.
@@ -462,7 +514,11 @@ export default function ProjectsSheet({
         (p.project?.client ?? "").toLowerCase().includes(q) ||
         (p.project?.assignee ?? "").toLowerCase().includes(q),
     );
-  }, [rows, search, flagFilter, finishedGoods]);
+  }, [rows, search, flagFilter, finishedGoods, showCompleted]);
+
+  const completedProjectsCount = useMemo(() => {
+    return rows.filter((p) => isProjectCompleted(p, finishedGoods)).length;
+  }, [rows, finishedGoods]);
 
   const totals = useMemo(
     () => ({
@@ -932,9 +988,36 @@ export default function ProjectsSheet({
             <span className="ml-2 text-xs font-normal text-muted-foreground">
               {filtered.length} project{filtered.length === 1 ? "" : "s"} ·{" "}
               {totals.products} product{totals.products === 1 ? "" : "s"}
+              {!showCompleted && flagFilter !== "completed" && completedProjectsCount > 0 && (
+                <span className="opacity-75">
+                  {" "}· {completedProjectsCount} completed hidden
+                </span>
+              )}
             </span>
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              type="button"
+              variant={showCompleted ? "secondary" : "outline"}
+              size="sm"
+              className={cn(
+                "h-7 gap-1.5 rounded-lg text-xs font-medium transition-colors",
+                showCompleted
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setShowCompleted((v) => !v)}
+              title={showCompleted ? "Hide completed projects" : "Show completed projects"}
+            >
+              {showCompleted ? (
+                <EyeOff className="size-3" />
+              ) : (
+                <CircleCheck className="size-3 text-emerald-600 dark:text-emerald-400" />
+              )}
+              {showCompleted
+                ? "Hide completed"
+                : `Show completed${completedProjectsCount > 0 ? ` (${completedProjectsCount})` : ""}`}
+            </Button>
             {filtered.length > 0 && (
               <Button
                 type="button"
@@ -956,11 +1039,27 @@ export default function ProjectsSheet({
             Loading projects…
           </div>
         ) : filtered.length === 0 ? (
-          <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-            {search
-              ? `Nothing matches “${search}”.`
-              : "No projects yet — use the + button to add one."}
-          </p>
+          <div className="px-4 py-12 text-center text-sm text-muted-foreground space-y-2">
+            <p>
+              {search
+                ? `Nothing matches “${search}”.`
+                : completedProjectsCount > 0 && !showCompleted
+                  ? `All ${completedProjectsCount} project${completedProjectsCount === 1 ? "" : "s"} are completed and hidden.`
+                  : "No projects yet — use the + button to add one."}
+            </p>
+            {completedProjectsCount > 0 && !showCompleted && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCompleted(true)}
+                className="h-7 gap-1.5 text-xs text-primary mx-auto"
+              >
+                <CircleCheck className="size-3 text-emerald-600" />
+                Show {completedProjectsCount} completed project{completedProjectsCount === 1 ? "" : "s"}
+              </Button>
+            )}
+          </div>
         ) : (
           <ul className="divide-y divide-border/60">
             {filtered.map((p) => {
@@ -1886,6 +1985,22 @@ export default function ProjectsSheet({
               title="Total project value — the production cost of every product, quantities included, margin not added"
               className="text-[11px]"
             />
+          </div>
+        )}
+
+        {!showCompleted && flagFilter !== "completed" && completedProjectsCount > 0 && filtered.length > 0 && (
+          <div className="border-t border-border/60 bg-muted/20 px-4 py-1.5 flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              {completedProjectsCount} completed project{completedProjectsCount === 1 ? "" : "s"} hidden
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowCompleted(true)}
+              className="font-medium text-primary hover:underline flex items-center gap-1"
+            >
+              <CircleCheck className="size-3 text-emerald-600" />
+              Show completed
+            </button>
           </div>
         )}
       </section>
