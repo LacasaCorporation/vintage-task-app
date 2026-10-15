@@ -258,7 +258,10 @@ export function mixTheme(input: string | Oklch): MixedTheme | null {
   const base = typeof input === "string" ? hexToOklch(input) : input;
   if (!base) return null;
 
-  const chroma = clamp(base.c, 0, 0.24);
+  // 0.30 is close to the most saturated colour sRGB can hold; capping lower
+  // than that would quietly trim a vivid pick (a violet like #6d28d9 lost a
+  // channel at 0.24) rather than reproduce it.
+  const chroma = clamp(base.c, 0, 0.3);
   const h = hue(base.h);
 
   const {
@@ -269,7 +272,7 @@ export function mixTheme(input: string | Oklch): MixedTheme | null {
   } = primaryForLight(base, chroma, h);
   const effective = oklchToHex(primaryLight);
 
-  const darkChroma = clamp(chroma * 1.1, 0, 0.24);
+  const darkChroma = clamp(chroma * 1.1, 0, 0.3);
   const primaryDark: Oklch = {
     l: clamp(base.l + 0.19, 0.58, 0.82),
     c: darkChroma,

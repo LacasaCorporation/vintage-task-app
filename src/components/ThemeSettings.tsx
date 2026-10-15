@@ -195,14 +195,14 @@ export default function ThemeSettings() {
             label="Saturation"
             readout={`${Math.round(base.c * 100)}%`}
             min={0}
-            max={24}
+            max={30}
             step={1}
             value={Math.round(base.c * 100)}
             gradient={`linear-gradient(to right, ${oklchCss(base.l, 0, base.h)}, ${oklchCss(
               base.l,
-              0.12,
+              0.15,
               base.h,
-            )}, ${oklchCss(base.l, 0.24, base.h)})`}
+            )}, ${oklchCss(base.l, 0.3, base.h)})`}
             onChange={(next) => apply({ ...base, c: next / 100 })}
           />
 
