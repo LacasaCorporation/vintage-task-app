@@ -186,8 +186,12 @@ export default function PrimaryNav({
           type="button"
           onClick={() => setPlanningOpen((v) => !v)}
           aria-expanded={planningOpen}
-          title={planningOpen ? "Hide the three planning pages" : "Show the three planning pages"}
-          aria-label="Planning: Tasks, Notes, Projects"
+          title={
+            planningOpen
+              ? "Hide the planning pages"
+              : "Show the planning pages"
+          }
+          aria-label="Planning: Tasks, Notes, Projects, Reports"
           className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-accent"
         >
           <ChevronDown
@@ -218,31 +222,31 @@ export default function PrimaryNav({
             n={projectCount}
             onClick={() => onSelectView({ kind: "projects" })}
           />
+
+          {/* reports: what the whole set of books says, read four ways */}
+          {canViewAccounting && (
+            <div>
+              <NavRow
+                label="Reports"
+                Icon={FileBarChart}
+                active={inCosting && view?.kind === "reports"}
+                onClick={() => onSelectView({ kind: "reports", area: "financial" })}
+              />
+
+              {inCosting && view?.kind === "reports" && (
+                <div className="ml-2 border-l border-border/60 pl-1">
+                  <ReportsSidebar
+                    area={view.area}
+                    onChange={(area) => onSelectView({ kind: "reports", area })}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="my-2 h-px bg-border/60" />
-
-      {/* reports: what the whole set of books says, read four ways */}
-      {canViewAccounting && (
-        <div>
-          <NavRow
-            label="Reports"
-            Icon={FileBarChart}
-            active={inCosting && view?.kind === "reports"}
-            onClick={() => onSelectView({ kind: "reports", area: "financial" })}
-          />
-
-          {inCosting && view?.kind === "reports" && (
-            <div className="ml-2 border-l border-border/60 pl-1">
-              <ReportsSidebar
-                area={view.area}
-                onChange={(area) => onSelectView({ kind: "reports", area })}
-              />
-            </div>
-          )}
-        </div>
-      )}
 
       {canViewPurchase && (
         <div>
