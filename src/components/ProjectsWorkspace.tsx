@@ -1,8 +1,11 @@
+import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import {
   BarChart3,
   ChartGantt,
+  CircleCheck,
   Columns3,
+  EyeOff,
   Flag,
   List,
   ListTree,
@@ -37,10 +40,15 @@ import {
   type FgDoc,
   type JobDoc,
   type SortMode,
+  projectDocStatus,
+  jobProjectStatus,
 } from "@/components/FlaggedLists";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import {
   STAGE_STATUSES,
+  PROJECT_STATUS_COMPLETED,
+  PROJECT_STATUS_START,
+  isStageDone,
   type ProjectStatusDetail,
 } from "@/lib/project-statuses";
 import { cn } from "@/lib/utils";
@@ -113,6 +121,50 @@ export default function ProjectsWorkspace({
   // The chosen view is only meaningful for the level it belongs to, so a view
   // carried over from another filter falls back to that filter's default.
   const activeView = resolveView(filter, view);
+
+  const [showCompleted, setShowCompleted] = useState(false);
+
+  const isProjectDone = (project: Doc<"projects">) => {
+    const allProjectJobs = (jobs ?? []).filter((j) => j.projectId === project._id);
+    const hasOpenJobs =
+      allProjectJobs.length > 0 &&
+      allProjectJobs.some(
+        (job) => !isStageDone(jobProjectStatus(job, projectStatuses)),
+      );
+    const rawStatus = projectDocStatus(project, projectStatuses);
+    const effStatus =
+      isStageDone(rawStatus) && hasOpenJobs ? PROJECT_STATUS_START : rawStatus;
+    if (isStageDone(effStatus)) return true;
+    if (
+      allProjectJobs.length > 0 &&
+      allProjectJobs.every((j) => isStageDone(jobProjectStatus(j, projectStatuses)))
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  const completedProjectsCount = useMemo(() => {
+    if (!projects) return 0;
+    return projects.filter(isProjectDone).length;
+  }, [projects, jobs, projectStatuses]);
+
+  const displayedProjects = useMemo(() => {
+    if (!projects) return undefined;
+    if (filter !== "projects") return projects;
+    // If user explicitly selected "Completed" in status dropdown, don't hide
+    if (
+      status === PROJECT_STATUS_COMPLETED ||
+      status === "completed" ||
+      status === "done"
+    ) {
+      return projects;
+    }
+    if (showCompleted) {
+      return projects;
+    }
+    return projects.filter((project) => !isProjectDone(project));
+  }, [projects, filter, status, showCompleted, jobs, projectStatuses]);
   return (
     <div className="grid items-start lg:grid-cols-[1fr_auto]">
       <section className="mt-3 overflow-hidden rounded-2xl border bg-card shadow-sm">
@@ -165,6 +217,30 @@ export default function ProjectsWorkspace({
             >
               <Settings2 className="size-3" /> Custom status
             </button>
+            {filter === "projects" && (
+              <button
+                type="button"
+                onClick={() => setShowCompleted((v) => !v)}
+                className={cn(
+                  "ml-1 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                  showCompleted
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20"
+                    : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+                title={showCompleted ? "Hide completed projects" : "Show completed projects"}
+              >
+                {showCompleted ? (
+                  <EyeOff className="size-3" />
+                ) : (
+                  <CircleCheck className="size-3 text-emerald-600 dark:text-emerald-400" />
+                )}
+                <span>
+                  {showCompleted
+                    ? "Hide completed"
+                    : `Show completed${completedProjectsCount > 0 ? ` (${completedProjectsCount})` : ""}`}
+                </span>
+              </button>
+            )}
           </div>
           {statusSettingsOpen && statusDraft !== null && (
             <ProjectStatusSettings
@@ -234,11 +310,29 @@ export default function ProjectsWorkspace({
               Flag a job or product in the Projects page and it will show up here.
             </p>
           </div>
+        ) : filter === "projects" && (displayedProjects?.length ?? 0) === 0 && completedProjectsCount > 0 && !showCompleted ? (
+          <div className="px-6 py-12 text-center space-y-2">
+            <CircleCheck className="mx-auto size-8 text-emerald-500/60" />
+            <p className="font-medium text-foreground">
+              All {completedProjectsCount} project{completedProjectsCount === 1 ? "" : "s"} in production are completed
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Completed projects are hidden by default.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowCompleted(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors mx-auto mt-1"
+            >
+              <CircleCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+              Show {completedProjectsCount} completed project{completedProjectsCount === 1 ? "" : "s"}
+            </button>
+          </div>
         ) : filter === "projects" ? (
           activeView === "kanban" ? (
             <ProjectKanban
               mode="projects"
-              projects={projects}
+              projects={displayedProjects}
               jobs={jobs ?? []}
               fgs={fgs ?? []}
               projectStatuses={projectStatuses}
@@ -251,7 +345,7 @@ export default function ProjectsWorkspace({
           ) : activeView === "gantt" ? (
             <ProjectGantt
               mode="projects"
-              projects={projects}
+              projects={displayedProjects}
               jobs={jobs ?? []}
               fgs={fgs ?? []}
               projectStatuses={projectStatuses}
@@ -265,7 +359,7 @@ export default function ProjectsWorkspace({
             />
           ) : activeView === "hierarchy" ? (
             <ProjectHierarchy
-              projects={projects}
+              projects={displayedProjects}
               jobs={jobs ?? []}
               fgs={fgs ?? []}
               projectStatuses={projectStatuses}
@@ -279,7 +373,7 @@ export default function ProjectsWorkspace({
             />
           ) : (
             <FlaggedProjectsList
-              projects={projects}
+              projects={displayedProjects}
               jobs={jobs ?? []}
               fgs={fgs ?? []}
               statusFilter={status}
@@ -400,6 +494,21 @@ export default function ProjectsWorkspace({
             projectStatuses={projectStatuses}
             statusFilter={status}
           />
+        )}
+        {filter === "projects" && !showCompleted && completedProjectsCount > 0 && (displayedProjects?.length ?? 0) > 0 && (
+          <div className="border-t border-border/60 bg-muted/20 px-4 py-1.5 flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              {completedProjectsCount} completed project{completedProjectsCount === 1 ? "" : "s"} hidden
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowCompleted(true)}
+              className="font-medium text-primary hover:underline flex items-center gap-1"
+            >
+              <CircleCheck className="size-3 text-emerald-600" />
+              Show completed
+            </button>
+          </div>
         )}
       </section>
       {selection && jobs !== undefined && fgs !== undefined && (
