@@ -45,6 +45,24 @@ const num = (value: string): number | undefined =>
   value.trim() === "" ? undefined : Number.isFinite(Number(value)) ? Number(value) : undefined;
 
 /**
+ * What these fields keep while you type.
+ *
+ * They are plain text with a decimal keypad rather than `type="number"`,
+ * because a number input reports any half-typed amount — "12.", "1,5",
+ * "1e3" — as an empty string, so a controlled field wipes the digits you
+ * just typed the moment you press the decimal point. This keeps digits and
+ * a single decimal point, everything a price, a quantity or a rate can be,
+ * and nothing else.
+ */
+const decimalOnly = (value: string): string => {
+  const cleaned = value.replace(/[^0-9.]/g, "");
+  const firstDot = cleaned.indexOf(".");
+  return firstDot === -1
+    ? cleaned
+    : cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, "");
+};
+
+/**
  * One field: label, control, and the sentence that explains what the number
  * is for. Grouped into sections so the page reads as a document rather than a
  * wall of boxes.
@@ -254,6 +272,15 @@ export default function MaterialFormPage({
     }
     if (priceNum === undefined || priceNum < 0) {
       toast.error("Enter a valid price per unit.");
+      return;
+    }
+    // the input no longer has a native max, so the 0–100 window the server
+    // enforces is said here first, in words instead of a silent clamp
+    const taxOver = [salesTax, purchaseTax]
+      .map((v) => num(v))
+      .some((v) => v !== undefined && v > 100);
+    if (taxOver) {
+      toast.error("A tax rate can't be more than 100%.");
       return;
     }
     setSaving(true);
@@ -511,21 +538,14 @@ export default function MaterialFormPage({
                 required
                 hint="The master cost every costing sheet prices this material at."
               >
-                <div className="relative">
-                  <Input
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    placeholder="0.00"
-                    aria-label="Price per unit"
-                    className={cn(inputCls, "pr-12 text-right tabular-nums")}
-                  />
-                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">
-                    {unit.trim() === "" ? "per unit" : `per ${unit.trim()}`}
-                  </span>
-                </div>
+                <Input
+                  inputMode="decimal"
+                  value={price}
+                  onChange={(e) => setPrice(decimalOnly(e.target.value))}
+                  placeholder="0.00"
+                  aria-label="Price per unit"
+                  className={cn(inputCls, "text-right tabular-nums")}
+                />
               </Field>
             </Section>
 
@@ -541,11 +561,9 @@ export default function MaterialFormPage({
                 hint="Below this the material counts as short. Advisory — it never blocks a bill."
               >
                 <Input
-                  type="number"
-                  min={0}
-                  step="any"
+                  inputMode="decimal"
                   value={minStock}
-                  onChange={(e) => setMinStock(e.target.value)}
+                  onChange={(e) => setMinStock(decimalOnly(e.target.value))}
                   placeholder="0"
                   aria-label="Minimum stock"
                   className={cn(inputCls, "text-right tabular-nums")}
@@ -557,11 +575,9 @@ export default function MaterialFormPage({
                 hint="The quantity worth raising a purchase order for."
               >
                 <Input
-                  type="number"
-                  min={0}
-                  step="any"
+                  inputMode="decimal"
                   value={reorderLevel}
-                  onChange={(e) => setReorderLevel(e.target.value)}
+                  onChange={(e) => setReorderLevel(decimalOnly(e.target.value))}
                   placeholder="0"
                   aria-label="Reorder level"
                   className={cn(inputCls, "text-right tabular-nums")}
@@ -583,12 +599,9 @@ export default function MaterialFormPage({
                 >
                   <div className="relative">
                     <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step="any"
+                      inputMode="decimal"
                       value={salesTax}
-                      onChange={(e) => setSalesTax(e.target.value)}
+                      onChange={(e) => setSalesTax(decimalOnly(e.target.value))}
                       placeholder="0"
                       aria-label="Default sales tax percent"
                       className={cn(inputCls, "pr-9 text-right tabular-nums")}
@@ -608,12 +621,9 @@ export default function MaterialFormPage({
                 >
                   <div className="relative">
                     <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step="any"
+                      inputMode="decimal"
                       value={purchaseTax}
-                      onChange={(e) => setPurchaseTax(e.target.value)}
+                      onChange={(e) => setPurchaseTax(decimalOnly(e.target.value))}
                       placeholder="0"
                       aria-label="Default purchase tax percent"
                       className={cn(inputCls, "pr-9 text-right tabular-nums")}
