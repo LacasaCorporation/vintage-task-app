@@ -86,8 +86,13 @@ export default function StockMovementList({
   emptyLabel?: string;
   noun?: string;
 }) {
-  const into = row.movements.filter((m) => m.direction === "in");
-  const outOf = row.movements.filter((m) => m.direction === "out");
+  // Corrections are folded into the opening figure rather than the In / Out
+  // columns: a hand-count or a reversed document moves stock without being
+  // trade, so listing it under In or Out would make the rows disagree with the
+  // totals printed beside them.
+  const counted = row.movements.filter((m) => m.source !== "adjustment");
+  const into = counted.filter((m) => m.direction === "in");
+  const outOf = counted.filter((m) => m.direction === "out");
 
   return (
     <div className="border-t border-border/60 bg-muted/20 px-4 py-3">

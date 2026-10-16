@@ -8,6 +8,26 @@ import type { MovementDirection, StockRow } from "../lib/stock-types";
 /** The movement sources the table allows, read from the schema itself. */
 type MaterialSource = Doc<"stockMovements">["source"];
 
+/**
+ * The voucher numbers the ledger should still trust.
+ *
+ * A goods-received voucher leaves its movement behind even after the voucher
+ * itself has been deleted, and a deleted voucher hands its goods straight back
+ * out again through an `adjustment`. Counting that orphaned movement as income
+ * then invents stock that is no longer on the shelves, so income reads a
+ * delivery only while the voucher that recorded it still exists.
+ */
+async function liveGrvNumbers(
+  ctx: QueryCtx,
+  ownerId: Id<"users">,
+): Promise<Set<string>> {
+  const vouchers = await ctx.db
+    .query("grvs")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+    .collect();
+  return new Set(vouchers.map((voucher) => voucher.number));
+}
+
 export type { StockRow };
 
 /** Quantities are user-entered, so trim float noise off the ledger. */
@@ -112,6 +132,7 @@ async function ledgerTotals(
   materialId: Id<"rawMaterials">,
 ): Promise<{ income: number; outgoing: number }> {
   const billedGrvs = await billedGrvNumbers(ctx, ownerId);
+  const liveGrvs = await liveGrvNumbers(ctx, ownerId);
   let income = 0;
   const lines = await ctx.db
     .query("purchaseLines")
@@ -130,7 +151,7 @@ async function ledgerTotals(
     if (
       m.source === "grv" &&
       m.direction === "in" &&
-      !billedGrvs.has(m.ref ?? "")
+      liveGrvs.has(m.ref ?? "") && !billedGrvs.has(m.ref ?? "")
     ) {
       income += m.qty;
     }
@@ -210,6 +231,7 @@ export const report = query({
     }
 
     const billedGrvs = await billedGrvNumbers(ctx, userId);
+    const liveGrvs = await liveGrvNumbers(ctx, userId);
     const allMovements = await ctx.db
       .query("stockMovements")
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
@@ -235,7 +257,7 @@ export const report = query({
       if (
         m.source === "grv" &&
         m.direction === "in" &&
-        !billedGrvs.has(m.ref ?? "")
+        liveGrvs.has(m.ref ?? "") && !billedGrvs.has(m.ref ?? "")
       ) {
         entry.lpoIncome += m.qty;
       }
@@ -275,10 +297,15 @@ export const report = query({
         income: incomeQty,
         outgoing,
         balance,
-        // a stored opening is what the user typed and always wins; older
-        // materials fall back to the residual the ledger can explain
+        // The opening shown is the figure that makes the ledger's own sum
+        // hold: a stored opening is kept only while it still reconciles.
         opening: round(
-          material.opening ?? balance - incomeQty + outgoing,
+          // The ledger's own sum has to hold: opening + income − outgoing =
+          // balance. A figure set by hand is honoured only while it still
+          // reconciles; once a correction or a reversed document has moved
+          // stock without touching the trade columns, the opening that makes
+          // the arithmetic true is the honest figure to show.
+          balance - incomeQty + outgoing,
         ),
         movements: (entry?.movements ?? [])
           .sort((a, b) => b.at - a.at)
