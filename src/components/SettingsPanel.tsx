@@ -79,6 +79,7 @@ import { toast } from "@/lib/toast";
 import FirmLogoPicker from "@/components/FirmLogoPicker";
 import UserGroupsSettings from "@/components/UserGroupsSettings";
 import ClearTransactionsCard from "@/components/ClearTransactionsCard";
+import DeleteMasterRecordsCard from "@/components/DeleteMasterRecordsCard";
 
 type Role = "super" | "admin" | "user" | "member";
 type AssignableRole = Exclude<Role, "super">;
@@ -2053,6 +2054,7 @@ export default function SettingsPanel() {
             </Button>
           </div>
           <ClearTransactionsCard />
+          <DeleteMasterRecordsCard />
         </div>
       </section>
 
