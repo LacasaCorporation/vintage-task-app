@@ -1255,6 +1255,21 @@ export type WipProductRow = {
   unit: string;
   cost: number;
   value: number;
+  /** Actual materials issued to this product, one line per material. */
+  lines: {
+    materialId: string;
+    name: string;
+    unit: string;
+    qty: number;
+    unitCost: number;
+  }[];
+  /** The dispatched vouchers those lines came off. */
+  vouchers: {
+    id: string;
+    number: string;
+    issuedAt: number;
+    projectName?: string;
+  }[];
 };
 
 export type WipIssueRow = {
@@ -1578,28 +1593,82 @@ export const stockAnalysis = query({
      * a product issued more or less than its budget carries the real figure.
      */
     const wipProductMap = new Map<string, WipProductRow>();
+    // The recipe per product, aggregated across every dispatched voucher so a
+    // material issued twice appears once with the total quantity actually spent.
+    type WipRecipeLine = {
+      materialId: string;
+      name: string;
+      unit: string;
+      qty: number;
+      value: number;
+    };
+    const wipRecipeMap = new Map<string, Map<string, WipRecipeLine>>();
     for (const issue of activeWipIssues) {
-      if (issue.fgId === undefined) continue;
-      const product = productById.get(issue.fgId);
-      const existing = wipProductMap.get(issue.fgId) ?? {
-        key: issue.fgId,
+      // Issues without a product (a project or job straight to the factory)
+      // still belong in WIP, so they sit under one unassigned line rather than
+      // disappearing from the report.
+      const key = issue.fgId ?? "__unallocated__";
+      const product =
+        issue.fgId === undefined ? undefined : productById.get(issue.fgId);
+      const existing = wipProductMap.get(key) ?? {
+        key,
         code: product?.code ?? "",
-        name: product?.name ?? issue.fgName ?? "Unnamed product",
+        name:
+          product?.name ??
+          (issue.fgId === undefined
+            ? "Unassigned production"
+            : issue.fgName ?? "Unnamed product"),
         inProduction: round(product?.inProduction ?? product?.productionQty ?? 0),
         unit: product?.unit ?? "pcs",
         cost: 0,
         value: 0,
+        lines: [],
+        vouchers: [],
       };
       existing.value = round(existing.value + (issue.total || 0));
-      wipProductMap.set(issue.fgId, existing);
+      existing.vouchers.push({
+        id: issue._id,
+        number: issue.number,
+        issuedAt: issue.issuedAt,
+        projectName: issue.projectName,
+      });
+      wipProductMap.set(key, existing);
+
+      const recipe = wipRecipeMap.get(key) ?? new Map<string, WipRecipeLine>();
+      for (const line of issue.lines) {
+        const found = recipe.get(line.materialId) ?? {
+          materialId: line.materialId,
+          name: line.name,
+          unit: line.unit,
+          qty: 0,
+          value: 0,
+        };
+        found.qty = round(found.qty + line.qty);
+        found.value = round(found.value + line.qty * line.unitCost);
+        recipe.set(line.materialId, found);
+      }
+      wipRecipeMap.set(key, recipe);
     }
     const wipProducts: WipProductRow[] = Array.from(wipProductMap.values())
       .map((p) => ({
         ...p,
+        lines: Array.from(wipRecipeMap.get(p.key)?.values() ?? []).map((l) => ({
+          materialId: l.materialId,
+          name: l.name,
+          unit: l.unit,
+          qty: l.qty,
+          // the actual average rate those issues carried
+          unitCost: l.qty > 0 ? round(l.value / l.qty) : 0,
+        })),
         // actual cost per unit being produced, never the sheet's budget
         cost: p.inProduction > 0 ? round(p.value / p.inProduction) : 0,
       }))
-      .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
+      .sort((a, b) => {
+        // unassigned material is a fallback line, so it sits last
+        if (a.key === "__unallocated__") return 1;
+        if (b.key === "__unallocated__") return -1;
+        return b.value - a.value || a.name.localeCompare(b.name);
+      });
 
     // WIP is only ever what left the store on a dispatched issue voucher. The
     // costing sheet contributes nothing to it, however far production has run.

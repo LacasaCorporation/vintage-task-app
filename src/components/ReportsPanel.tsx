@@ -2312,84 +2312,130 @@ function MovementTable({
   );
 }
 
-/** Expandable row for a single WIP issue voucher */
-function WipIssueRowItem({
-  issue,
+/** One product's WIP, with its actual recipe folded underneath. */
+function WipProductRowItem({
+  product,
   money,
 }: {
-  issue: {
-    id: string;
-    number: string;
-    issuedAt: number;
-    fgName?: string;
-    projectName?: string;
-    jobName?: string;
-    lineCount: number;
-    total: number;
-    issuedBy?: string;
-    lines: { materialId: string; name: string; unit: string; qty: number; unitCost: number }[];
+  product: {
+    key: string;
+    code: string;
+    name: string;
+    inProduction: number;
+    unit: string;
+    cost: number;
+    value: number;
+    lines: {
+      materialId: string;
+      name: string;
+      unit: string;
+      qty: number;
+      unitCost: number;
+    }[];
+    vouchers: {
+      id: string;
+      number: string;
+      issuedAt: number;
+      projectName?: string;
+    }[];
   };
   money: (n: number) => string;
 }) {
   const [open, setOpen] = useState(false);
+  const unassigned = product.key === "__unallocated__";
+  const lastIssued =
+    product.vouchers.length > 0
+      ? product.vouchers.reduce((latest, v) => Math.max(latest, v.issuedAt), 0)
+      : undefined;
+  const only = product.vouchers.length === 1 ? product.vouchers[0] : undefined;
+
   return (
     <>
       <tr
         className={cn(ROW, "cursor-pointer hover:bg-muted/60")}
         onClick={() => setOpen((o) => !o)}
       >
-        <td className={CELL_LEFT}>
-          <span className="flex items-center gap-1.5">
+        <td className="w-8 px-2 py-2">
+          <span className="grid size-5 place-items-center rounded-md text-muted-foreground">
             {open ? (
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              <ChevronDown className="size-3.5" />
             ) : (
-              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              <ChevronRight className="size-3.5" />
             )}
-            <span className="font-mono text-xs text-muted-foreground">{issue.number}</span>
           </span>
         </td>
-        <td className={CELL_LEFT}>{dayLabel(issue.issuedAt)}</td>
+        <td className={`${CELL_LEFT} font-mono text-muted-foreground`}>
+          {product.code || "—"}
+        </td>
         <td className={CELL_LEFT}>
-          <span className="font-medium">{issue.fgName ?? "—"}</span>
-          {issue.projectName && (
-            <span className="ml-2 text-[11px] text-muted-foreground">{issue.projectName}</span>
+          <span className="font-medium">{product.name}</span>
+          {unassigned && (
+            <span className="ml-2 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              no product
+            </span>
           )}
         </td>
         <td className={CELL_LEFT}>
-          {issue.issuedBy ?? <span className="text-muted-foreground">—</span>}
+          {lastIssued === undefined ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
+            dayLabel(lastIssued)
+          )}
         </td>
-        <td className={CELL}>{issue.lineCount}</td>
-        <td className={cn(CELL, "font-medium text-violet-700 dark:text-violet-400")}>
-          {money(issue.total)}
+        <td className={CELL}>
+          {product.inProduction > 0
+            ? `${product.inProduction} ${product.unit}`
+            : "—"}
+        </td>
+        <td className={CELL}>
+          {product.cost > 0 ? money(product.cost) : "—"}
+        </td>
+        <td
+          className={cn(
+            CELL,
+            "font-medium text-violet-700 dark:text-violet-400",
+          )}
+        >
+          {money(product.value)}
         </td>
       </tr>
       {open && (
         <tr className="bg-muted/30">
-          <td colSpan={6} className="px-6 py-3">
-            <table className="w-full text-[12px]">
-              <thead>
-                <tr className="border-b border-border/60">
-                  <th className={CELL_LEFT}>Material</th>
-                  <th className={TH_R}>Qty</th>
-                  <th className={TH_R}>Unit cost</th>
-                  <th className={TH_R}>Line value</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {issue.lines.map((l, i) => (
-                  <tr key={i}>
-                    <td className={CELL_LEFT}>{l.name}</td>
-                    <td className={CELL}>
-                      {l.qty} {l.unit}
-                    </td>
-                    <td className={CELL}>{money(l.unitCost)}</td>
-                    <td className={cn(CELL, "font-medium")}>
+          <td colSpan={7} className="px-6 py-2">
+            <p className="mb-1 text-[11px] text-muted-foreground">
+              {only !== undefined
+                ? `Issued on ${only.number} · ${dayLabel(only.issuedAt)}${
+                    only.projectName ? ` · ${only.projectName}` : ""
+                  }`
+                : `${product.vouchers.length} issue vouchers · actual materials`}
+            </p>
+            {product.lines.length === 0 ? (
+              <p className="py-1 text-[11px] text-muted-foreground">
+                No material lines were recorded on these issues.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border/40">
+                {product.lines.map((l) => (
+                  <li
+                    key={l.materialId}
+                    className="flex items-center gap-2 py-1 text-[12px]"
+                  >
+                    <span className="grid size-5 shrink-0 place-items-center rounded-md bg-violet-500/10 text-violet-700 dark:text-violet-400">
+                      <Package className="size-2.5" />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {l.name}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">
+                      {l.qty} {l.unit} × {money(l.unitCost)}
+                    </span>
+                    <span className="w-20 shrink-0 text-right font-medium tabular-nums">
                       {money(l.qty * l.unitCost)}
-                    </td>
-                  </tr>
+                    </span>
+                  </li>
                 ))}
-              </tbody>
-            </table>
+              </ul>
+            )}
           </td>
         </tr>
       )}
@@ -2402,30 +2448,46 @@ function WipTab({
   money,
 }: {
   data: {
-    wipMaterials: { key: string; name: string; unit: string; qty: number; cost: number; value: number }[];
-    wipProducts: { key: string; code: string; name: string; inProduction: number; unit: string; cost: number; value: number }[];
-    wipIssues: {
-      id: string;
-      number: string;
-      issuedAt: number;
-      fgName?: string;
-      projectName?: string;
-      jobName?: string;
-      lineCount: number;
-      total: number;
-      issuedBy?: string;
-      lines: { materialId: string; name: string; unit: string; qty: number; unitCost: number }[];
+    wipMaterials: {
+      key: string;
+      name: string;
+      unit: string;
+      qty: number;
+      cost: number;
+      value: number;
+    }[];
+    wipProducts: {
+      key: string;
+      code: string;
+      name: string;
+      inProduction: number;
+      unit: string;
+      cost: number;
+      value: number;
+      lines: {
+        materialId: string;
+        name: string;
+        unit: string;
+        qty: number;
+        unitCost: number;
+      }[];
+      vouchers: {
+        id: string;
+        number: string;
+        issuedAt: number;
+        projectName?: string;
+      }[];
     }[];
     wipTotal: number;
   };
   money: (n: number) => string;
 }) {
-  const hasIssues = data.wipIssues.length > 0;
   const hasProducts = data.wipProducts.length > 0;
-  const hasMaterials = data.wipMaterials.length > 0;
-  const hasAny = hasIssues || hasProducts || hasMaterials;
+  const productCount = data.wipProducts.filter(
+    (p) => p.key !== "__unallocated__",
+  ).length;
 
-  if (!hasAny) {
+  if (!hasProducts) {
     return (
       <Panel title="Work in Progress" count="No active WIP">
         <Empty>
@@ -2448,7 +2510,7 @@ function WipTab({
         />
         <Tile
           label="Products in production"
-          value={String(data.wipProducts.length)}
+          value={String(productCount)}
           tone="text-violet-600 dark:text-violet-400"
           hint="Products with materials issued to the factory"
         />
@@ -2460,204 +2522,111 @@ function WipTab({
         />
       </div>
 
-      {/* Issue vouchers table */}
-      {hasIssues && (
-        <Panel
-          title="Active issue vouchers"
-          count={`${data.wipIssues.length} open · click a row to see material lines`}
-          actions={
-            <CsvButton
-              what="WIP issues"
-              onClick={() =>
-                downloadCsv("wip-issues.csv", [
-                  ["Voucher", "Issued", "Product", "Project", "Lines", "Total", "Issued by"],
-                  ...data.wipIssues.map((i) => [
-                    i.number,
-                    toInput(i.issuedAt),
-                    i.fgName ?? "",
-                    i.projectName ?? "",
-                    String(i.lineCount),
-                    num(i.total),
-                    i.issuedBy ?? "",
-                  ]),
-                ])
-              }
-            />
-          }
-        >
-          <TableWrap>
-            <thead>
-              <tr className={HEAD}>
-                <th className={CELL_LEFT}>Voucher</th>
-                <th className={CELL_LEFT}>Date</th>
-                <th className={CELL_LEFT}>For product</th>
-                <th className={CELL_LEFT}>Issued by</th>
-                <th className={TH_R}>Lines</th>
-                <th className={TH_R}>Value</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60">
-              {data.wipIssues.map((issue) => (
-                <WipIssueRowItem key={issue.id} issue={issue} money={money} />
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className={TOTAL}>
-                <td className={CELL_LEFT} colSpan={5}>Total open WIP</td>
-                <td className={cn(CELL, "font-bold text-violet-700 dark:text-violet-400")}>
-                  {money(data.wipIssues.reduce((s, i) => s + i.total, 0))}
-                </td>
-              </tr>
-            </tfoot>
-          </TableWrap>
-        </Panel>
-      )}
-
-      {/* Materials in WIP */}
-      {hasMaterials && (
-        <Panel
-          title="Materials in WIP"
-          count={`${data.wipMaterials.length} materials · aggregated from open issues`}
-          actions={
-            <CsvButton
-              what="WIP materials"
-              onClick={() =>
-                downloadCsv("wip-materials.csv", [
-                  ["Material", "Qty", "Unit", "Avg unit cost", "Value"],
-                  ...data.wipMaterials.map((m) => [
-                    m.name,
-                    num(m.qty),
-                    m.unit,
-                    num(m.cost),
-                    num(m.value),
-                  ]),
-                ])
-              }
-            />
-          }
-        >
-          <TableWrap>
-            <thead>
-              <tr className={HEAD}>
-                <th className={CELL_LEFT}>Material</th>
-                <th className={TH_R}>Qty in WIP</th>
-                <th className={TH_R}>Avg unit cost</th>
-                <th className={TH_R}>Value</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60">
-              {data.wipMaterials.map((m) => (
-                <tr key={m.key} className={ROW}>
-                  <td className={CELL_LEFT}>
-                    <span className="font-medium">{m.name}</span>
-                  </td>
-                  <td className={CELL}>
-                    {m.qty} {m.unit}
-                  </td>
-                  <td className={CELL}>{money(m.cost)}</td>
-                  <td className={cn(CELL, "font-medium")}>{money(m.value)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className={TOTAL}>
-                <td className={CELL_LEFT} colSpan={3}>Total material value in WIP</td>
-                <td className={cn(CELL, "font-bold")}>
-                  {money(data.wipMaterials.reduce((s, m) => s + m.value, 0))}
-                </td>
-              </tr>
-            </tfoot>
-          </TableWrap>
-        </Panel>
-      )}
-
-      {/* Products in production */}
-      {hasProducts && (
-        <Panel
-          title="Products in production"
-          count={`${data.wipProducts.length} products · with materials issued`}
-          actions={
-            <CsvButton
-              what="products in production"
-              onClick={() =>
-                downloadCsv("wip-products.csv", [
-                  [
-                    "Code",
-                    "Product",
-                    "In production",
-                    "Unit",
-                    "Actual unit cost",
-                    "Actual WIP value",
-                  ],
-                  ...data.wipProducts.map((p) => [
-                    p.code,
-                    p.name,
-                    num(p.inProduction),
-                    p.unit,
-                    num(p.cost),
-                    num(p.value),
-                  ]),
-                ])
-              }
-            />
-          }
-        >
-          <TableWrap>
-            <thead>
-              <tr className={HEAD}>
-                <th className={CELL_LEFT}>Code</th>
-                <th className={CELL_LEFT}>Product</th>
-                <th className={TH_R}>In production</th>
-                <th
-                  className={TH_R}
-                  title="Actual material cost dispatched per unit being produced"
-                >
-                  Actual unit cost
-                </th>
-                <th
-                  className={TH_R}
-                  title="Actual cost of materials dispatched to the factory"
-                >
-                  Actual WIP value
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60">
-              {data.wipProducts.map((p) => (
-                <tr key={p.key} className={ROW}>
-                  <td className={`${CELL_LEFT} font-mono text-muted-foreground`}>
-                    {p.code || "—"}
-                  </td>
-                  <td className={CELL_LEFT}>
-                    <span className="font-medium">{p.name}</span>
-                  </td>
-                  <td className={CELL}>
-                    {p.inProduction} {p.unit}
-                  </td>
-                  <td className={CELL}>{p.cost > 0 ? money(p.cost) : "—"}</td>
-                  <td className={cn(CELL, "font-medium text-violet-700 dark:text-violet-400")}>
-                    {p.value > 0 ? money(p.value) : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className={TOTAL}>
-                <td className={CELL_LEFT} colSpan={4}>Total products WIP value</td>
-                <td className={cn(CELL, "font-bold text-violet-700 dark:text-violet-400")}>
-                  {money(data.wipProducts.reduce((s, p) => s + p.value, 0))}
-                </td>
-              </tr>
-            </tfoot>
-          </TableWrap>
-          <p className="border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground">
-            A product appears here only once materials have actually been
-            transferred to the factory on a dispatched store issue. Its WIP
-            value is the actual cost of those issues. The costing sheet is a
-            budget and is never treated as WIP.
-          </p>
-        </Panel>
-      )}
+      {/* One line per product, with the actual recipe in the dropdown */}
+      <Panel
+        title="Products in production"
+        count={`${data.wipProducts.length} lines · click a row to see the recipe`}
+        actions={
+          <CsvButton
+            what="products in production"
+            onClick={() =>
+              downloadCsv("wip-products.csv", [
+                [
+                  "Code",
+                  "Product",
+                  "Last issued",
+                  "In production",
+                  "Unit",
+                  "Actual unit cost",
+                  "Actual WIP value",
+                  "Materials issued",
+                ],
+                ...data.wipProducts.map((p) => [
+                  p.code,
+                  p.name,
+                  p.vouchers.length > 0
+                    ? toInput(
+                        p.vouchers.reduce(
+                          (latest, v) => Math.max(latest, v.issuedAt),
+                          0,
+                        ),
+                      )
+                    : "",
+                  num(p.inProduction),
+                  p.unit,
+                  num(p.cost),
+                  num(p.value),
+                  p.lines
+                    .map(
+                      (l) => `${l.name} ${l.qty} ${l.unit} @ ${num(l.unitCost)}`,
+                    )
+                    .join(" | "),
+                ]),
+                [
+                  "",
+                  "Total WIP value",
+                  "",
+                  "",
+                  "",
+                  "",
+                  num(data.wipTotal),
+                  "",
+                ],
+              ])
+            }
+          />
+        }
+      >
+        <TableWrap>
+          <thead>
+            <tr className={HEAD}>
+              <th className="w-8 px-2 py-2" />
+              <th className={CELL_LEFT}>Code</th>
+              <th className={CELL_LEFT}>Product</th>
+              <th className={CELL_LEFT}>Last issued</th>
+              <th className={TH_R}>In production</th>
+              <th
+                className={TH_R}
+                title="Actual material cost dispatched per unit being produced"
+              >
+                Actual unit cost
+              </th>
+              <th
+                className={TH_R}
+                title="Actual cost of materials dispatched to the factory"
+              >
+                Actual WIP value
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/60">
+            {data.wipProducts.map((p) => (
+              <WipProductRowItem key={p.key} product={p} money={money} />
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className={TOTAL}>
+              <td className={CELL_LEFT} colSpan={6}>
+                Total WIP value
+              </td>
+              <td
+                className={cn(
+                  CELL,
+                  "font-bold text-violet-700 dark:text-violet-400",
+                )}
+              >
+                {money(data.wipTotal)}
+              </td>
+            </tr>
+          </tfoot>
+        </TableWrap>
+        <p className="border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground">
+          A product appears here only once materials have actually been
+          transferred to the factory on a dispatched store issue. Its WIP value
+          is the actual cost of those issues. The costing sheet is a budget and
+          is never treated as WIP.
+        </p>
+      </Panel>
     </div>
   );
 }
