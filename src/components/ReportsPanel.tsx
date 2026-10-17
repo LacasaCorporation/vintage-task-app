@@ -4,14 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   AlertTriangle,
-  ArrowLeftRight,
   BookOpen,
   Boxes,
   Check,
   ChevronDown,
   ChevronRight,
   Download,
-  Factory,
   FileBarChart,
   Hammer,
   Loader2,
@@ -2452,13 +2450,13 @@ function WipTab({
           label="Products in production"
           value={String(data.wipProducts.length)}
           tone="text-violet-600 dark:text-violet-400"
-          hint="Finished goods currently on the factory floor"
+          hint="Products with materials issued to the factory"
         />
         <Tile
           label="Total WIP value"
           value={money(data.wipTotal)}
           tone="text-emerald-600 dark:text-emerald-400"
-          hint="From active store issue vouchers"
+          hint="Actual cost of dispatched store issues"
         />
       </div>
 
@@ -2577,13 +2575,20 @@ function WipTab({
       {hasProducts && (
         <Panel
           title="Products in production"
-          count={`${data.wipProducts.length} products · currently on the factory floor`}
+          count={`${data.wipProducts.length} products · with materials issued`}
           actions={
             <CsvButton
               what="products in production"
               onClick={() =>
                 downloadCsv("wip-products.csv", [
-                  ["Code", "Product", "In production", "Unit", "Unit cost", "WIP value"],
+                  [
+                    "Code",
+                    "Product",
+                    "In production",
+                    "Unit",
+                    "Actual unit cost",
+                    "Actual WIP value",
+                  ],
                   ...data.wipProducts.map((p) => [
                     p.code,
                     p.name,
@@ -2603,8 +2608,18 @@ function WipTab({
                 <th className={CELL_LEFT}>Code</th>
                 <th className={CELL_LEFT}>Product</th>
                 <th className={TH_R}>In production</th>
-                <th className={TH_R}>Unit cost</th>
-                <th className={TH_R}>WIP value</th>
+                <th
+                  className={TH_R}
+                  title="Actual material cost dispatched per unit being produced"
+                >
+                  Actual unit cost
+                </th>
+                <th
+                  className={TH_R}
+                  title="Actual cost of materials dispatched to the factory"
+                >
+                  Actual WIP value
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
@@ -2636,9 +2651,10 @@ function WipTab({
             </tfoot>
           </TableWrap>
           <p className="border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground">
-            Products are flagged as in-production in the Finished Goods screen.
-            Their WIP value is their costing-sheet cost multiplied by the
-            quantity currently on the factory floor.
+            A product appears here only once materials have actually been
+            transferred to the factory on a dispatched store issue. Its WIP
+            value is the actual cost of those issues. The costing sheet is a
+            budget and is never treated as WIP.
           </p>
         </Panel>
       )}
@@ -2696,7 +2712,7 @@ function StockReports({ range }: { range: Range }) {
           label="Work in progress"
           value={money(data.wipTotal ?? 0)}
           tone="text-violet-600 dark:text-violet-400"
-          hint="Materials in production (WIP)"
+          hint="Actual materials issued to production"
         />
         <Tile
           label="Finished goods"

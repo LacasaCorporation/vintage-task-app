@@ -1567,26 +1567,45 @@ export const stockAnalysis = query({
     }
     const wipMaterials = Array.from(wipMaterialsMap.values());
 
-    // Products in production
-    const wipProducts: WipProductRow[] = products
-      .filter((p) => (p.inProduction ?? p.productionQty ?? 0) > 0)
-      .map((p) => {
-        const inProduction = p.inProduction ?? p.productionQty ?? 0;
-        const cost = sheetCost.get(p._id) ?? lastPrice.get(p._id) ?? 0;
-        return {
-          key: p._id,
-          code: p.code ?? "",
-          name: p.name,
-          inProduction,
-          unit: p.unit ?? "pcs",
-          cost,
-          value: round(inProduction * cost),
-        };
-      });
+    /**
+     * Products in production, valued on what was actually issued to them.
+     *
+     * The costing sheet is a budget: it says what a product is expected to
+     * cost, not what has been spent on it. WIP is the cost that has actually
+     * left the store, so a product only appears here once an issue voucher for
+     * it has been dispatched. Nothing is valued from the sheet — a product
+     * flagged for production with no material transferred is not WIP yet, and
+     * a product issued more or less than its budget carries the real figure.
+     */
+    const wipProductMap = new Map<string, WipProductRow>();
+    for (const issue of activeWipIssues) {
+      if (issue.fgId === undefined) continue;
+      const product = productById.get(issue.fgId);
+      const existing = wipProductMap.get(issue.fgId) ?? {
+        key: issue.fgId,
+        code: product?.code ?? "",
+        name: product?.name ?? issue.fgName ?? "Unnamed product",
+        inProduction: round(product?.inProduction ?? product?.productionQty ?? 0),
+        unit: product?.unit ?? "pcs",
+        cost: 0,
+        value: 0,
+      };
+      existing.value = round(existing.value + (issue.total || 0));
+      wipProductMap.set(issue.fgId, existing);
+    }
+    const wipProducts: WipProductRow[] = Array.from(wipProductMap.values())
+      .map((p) => ({
+        ...p,
+        // actual cost per unit being produced, never the sheet's budget
+        cost: p.inProduction > 0 ? round(p.value / p.inProduction) : 0,
+      }))
+      .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
 
-    const issuedStoreWip = activeWipIssues.reduce((sum, i) => sum + (i.total || 0), 0);
-    const prodWipTotal = wipProducts.reduce((sum, p) => sum + p.value, 0);
-    const wipTotal = round(issuedStoreWip > 0 ? issuedStoreWip : prodWipTotal);
+    // WIP is only ever what left the store on a dispatched issue voucher. The
+    // costing sheet contributes nothing to it, however far production has run.
+    const wipTotal = round(
+      activeWipIssues.reduce((sum, i) => sum + (i.total || 0), 0),
+    );
 
     const materialTotal = round(
       materialRows.reduce((s, r) => s + r.value, 0),
