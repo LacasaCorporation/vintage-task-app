@@ -5,6 +5,7 @@ import ProductQtyInline from "@/components/ProductQtyInline";
 import ProductQtyStepper from "@/components/ProductQtyStepper";
 import ProductCodeInline from "@/components/ProductCodeInline";
 import ProductTagsInline from "@/components/ProductTagsInline";
+import IssueInline from "@/components/IssueInline";
 import PriorityChip from "@/components/PriorityChip";
 import StatusSelect from "@/components/StatusSelect";
 import AssigneeChip from "@/components/AssigneeChip";
@@ -507,6 +508,7 @@ export function FlaggedItemsList({
                       <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
                         <span className="min-w-0 truncate">{fg.name}</span>
                         <ProductCodeInline code={fg.code} />
+                        <IssueInline fgId={fg._id} />
                         <ProductTagsInline tags={fg.tags} />
                       </span>
                       {fg.note && (
@@ -938,6 +940,7 @@ export function FlaggedProductsList({
             <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
               <span className="min-w-0 truncate">{fg.name}</span>
               <ProductCodeInline code={fg.code} />
+              <IssueInline fgId={fg._id} />
               <ProductQtyInline qty={fg.qty} unit={fg.unit} />
               <ProductTagsInline tags={fg.tags} />
             </span>

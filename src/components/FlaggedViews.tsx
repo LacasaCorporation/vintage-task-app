@@ -2,6 +2,7 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Checkbox } from "@/components/ui/checkbox";
 import ProductQtyStepper from "@/components/ProductQtyStepper";
 import ProductCodeInline from "@/components/ProductCodeInline";
+import IssueInline from "@/components/IssueInline";
 import ProductTagsInline from "@/components/ProductTagsInline";
 import PriorityChip from "@/components/PriorityChip";
 import StatusSelect from "@/components/StatusSelect";
@@ -564,6 +565,7 @@ function JobRow({
                 <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
                   <span className="min-w-0 truncate">{fg.name}</span>
                   <ProductCodeInline code={fg.code} />
+                  <IssueInline fgId={fg._id} />
                   <ProductTagsInline tags={fg.tags} />
                 </span>
                 {fg.note && (

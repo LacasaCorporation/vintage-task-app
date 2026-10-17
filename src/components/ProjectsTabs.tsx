@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 import ActiveToggle from "@/components/ActiveToggle";
+import IssueInline from "@/components/IssueInline";
 import type { FilterOption } from "@/components/FilterMenu";
 import { useWorkspaceCurrency } from "@/lib/useWorkspaceCurrency";
 import { cn } from "@/lib/utils";
@@ -427,6 +428,7 @@ export function ProductsList({
                           {fg.code}
                         </span>
                       )}
+                      <IssueInline fgId={fg._id} />
                       <ActiveToggle
                         target={{ kind: "product", id: fg._id }}
                         active={fg.isActive === true}
