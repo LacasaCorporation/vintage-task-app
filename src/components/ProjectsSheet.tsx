@@ -105,6 +105,17 @@ function productCostLabel(
 type ProjectDoc = Doc<"projects">;
 type JobDoc = Doc<"projectJobs">;
 
+/**
+ * The one node the side panel is showing — a project, a job or a product.
+ *
+ * Shared with the pages that link back into this list, so a costing sheet can
+ * say "open this job" in the same words the sheet itself uses.
+ */
+export type ProjectsPane = {
+  kind: "project" | "job" | "product";
+  id: string;
+};
+
 const STATUS_META: Record<
   string,
   { label: string; chip: string }
@@ -247,6 +258,7 @@ export default function ProjectsSheet({
   onEditProject,
   onDeleteProject,
   onOpenProduct,
+  initialPane,
 }: {
   finishedGoods: FgDoc[];
   loading: boolean;
@@ -255,11 +267,25 @@ export default function ProjectsSheet({
   onEditProject?: (project: ProjectDoc) => void;
   onDeleteProject?: (project: ProjectDoc) => void;
   onOpenProduct?: (fgId: Id<"finishedGoods">) => void;
+  /**
+   * The node to open on arrival. A product's costing sheet links back to the
+   * job it is costed for, and the job has to be open — not merely listed — or
+   * the user lands on a list they did not ask for.
+   */
+  initialPane?: ProjectsPane | null;
 }) {
   const [search, setSearch] = useState("");
+  // one list per level of the hierarchy, so arriving at a job opens the Jobs
+  // tab rather than leaving it behind the Projects one
   const [tab, setTab] = useState<
     "projects" | "jobs" | "products" | "customers" | "productions"
-  >("projects");
+  >(() =>
+    initialPane?.kind === "job"
+      ? "jobs"
+      : initialPane?.kind === "product"
+        ? "products"
+        : "projects",
+  );
   const [expanded, setExpanded] = useState<string | null>(null);
   const [flagFilter, setFlagFilter] = useState<ProjectFilter>("all");
   const [showCompleted, setShowCompleted] = useState(false);
@@ -330,10 +356,7 @@ export default function ProjectsSheet({
    * or a product — exactly as the Tasks page does with its task and subtask
    * panels. Clicking whatever is already open closes it again.
    */
-  const [pane, setPane] = useState<{
-    kind: "project" | "job" | "product";
-    id: string;
-  } | null>(null);
+  const [pane, setPane] = useState<ProjectsPane | null>(initialPane ?? null);
   const openNode = useCallback(
     (kind: "project" | "job" | "product", id: string) =>
       setPane((current) =>

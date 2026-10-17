@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import ItemPicker, { type PickerItem } from "@/components/ItemPicker";
 import type { CostingView } from "@/components/CostingSidebar";
+import type { ProjectsPane } from "@/components/ProjectsSheet";
 import {
   ArrowLeft,
   ChevronDown,
@@ -209,6 +210,7 @@ export default function CostingPanel({
    */
   layout = "dialog",
   returnTo,
+  initialPane,
 }: {
   materials: MaterialDoc[];
   finishedGoods: FgDoc[];
@@ -243,6 +245,8 @@ export default function CostingPanel({
   layout?: "dialog" | "page";
   /** Where the back button returns to when the sheet is rendered as a page. */
   returnTo?: string;
+  /** A job (or project) the projects view should open its side panel on. */
+  initialPane?: ProjectsPane | null;
 }) {
   const navigate = useNavigate();
   const [projectFocus, setProjectFocus] = useState<string | null>(null);
@@ -416,6 +420,23 @@ export default function CostingPanel({
     return ids
       .map((id) => (allJobs ?? []).find((j) => j._id === id)?.name)
       .filter((name): name is string => name !== undefined);
+  }, [activeFg, allJobs]);
+
+  /**
+   * The job this product is costed for, when it serves one.
+   *
+   * A product is costed so a job can be priced, and the sheet is reached from
+   * that job — so back has to lead there again. A product serving several jobs
+   * returns to the first, which is the one it was entered from.
+   */
+  const parentJob = useMemo(() => {
+    if (activeFg === null) return undefined;
+    const ids =
+      activeFg.jobIds ?? (activeFg.jobId !== undefined ? [activeFg.jobId] : []);
+    const first = ids[0];
+    return first === undefined
+      ? undefined
+      : (allJobs ?? []).find((j) => j._id === first);
   }, [activeFg, allJobs]);
 
   /** Every job in the firm, as the connect dialog's options. */
@@ -1078,6 +1099,43 @@ export default function CostingPanel({
     }
     setSheetId(null);
     if (view?.kind === "fg") onSelectView(null);
+  };
+
+  /**
+   * Open the projects view on one node — a job or a project.
+   *
+   * The view reads the address, so the node arrives with its side panel
+   * already open: the user lands back on the very job they left, not on a
+   * list of every job in the firm.
+   */
+  const openProjectsPane = (kind: "job" | "project", id: string) => {
+    navigate(`/dashboard?section=costing&view=projects&${kind}=${id}`);
+  };
+
+  /**
+   * Back, once the sheet is a page of its own.
+   *
+   * A product that serves a job was costed for that job, so back means the job
+   * — opened in the projects view with its side panel already showing — rather
+   * than the products list, which loses the user's place. Only a standalone
+   * product falls back to the list (or to wherever the caller came from).
+   */
+  const backFromSheet = () => {
+    // a caller that said where it came from is never overruled by a guess
+    if (returnTo === undefined && parentJob !== undefined) {
+      openProjectsPane("job", parentJob._id);
+      return;
+    }
+    closeSheet();
+  };
+
+  /** The breadcrumb's first crumb names a project, so it opens that project. */
+  const openParentProject = () => {
+    if (parentJob !== undefined) {
+      openProjectsPane("project", parentJob.projectId);
+      return;
+    }
+    closeSheet();
   };
 
   /**
@@ -2184,6 +2242,7 @@ export default function CostingPanel({
           <ProjectsSheet
             finishedGoods={finishedGoods}
             loading={loading}
+            initialPane={initialPane}
             onOpenProject={(name) => {
               setProjectFocus(name);
               onSelectView({ kind: "products" });
@@ -2206,15 +2265,24 @@ export default function CostingPanel({
           <div className="min-h-screen bg-background">
             <header className="sticky top-0 z-30 border-b bg-card/95 backdrop-blur">
               <div className="mx-auto flex h-12 max-w-[1320px] items-center gap-2 px-3">
+                {/* back leads to the job this product is costed for, and only
+                    to the products list when it serves no job at all */}
                 <Button
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="h-8 shrink-0 gap-1.5 rounded-lg text-xs"
-                  onClick={closeSheet}
+                  className="h-8 max-w-[14rem] shrink-0 gap-1.5 rounded-lg text-xs"
+                  onClick={backFromSheet}
+                  title={
+                    parentJob === undefined
+                      ? "Back to the products list"
+                      : `Back to ${parentJob.name} — the job this product is costed for`
+                  }
                 >
-                  <ArrowLeft className="size-3.5" />
-                  Products
+                  <ArrowLeft className="size-3.5 shrink-0" />
+                  <span className="truncate">
+                    {parentJob === undefined ? "Products" : parentJob.name}
+                  </span>
                 </Button>
                 <nav
                   aria-label="Breadcrumb"
@@ -2222,7 +2290,7 @@ export default function CostingPanel({
                 >
                   <button
                     type="button"
-                    onClick={closeSheet}
+                    onClick={openParentProject}
                     className="truncate hover:text-foreground hover:underline"
                   >
                     {activeFg.projectName ?? "Products"}

@@ -10,6 +10,7 @@ import TasksPanel from "@/components/TasksPanel";
 import HomeDashboard from "@/components/HomeDashboard";
 import PrimaryNav, { type PrimarySection } from "@/components/PrimaryNav";
 import type { CostingView } from "@/components/CostingSidebar";
+import type { ProjectsPane } from "@/components/ProjectsSheet";
 import { format } from "date-fns";
 import {
   LogOut,
@@ -539,6 +540,23 @@ export default function Dashboard() {
     if (asked === "products") return { kind: "products" };
     return { kind: "projects" };
   });
+  /**
+   * The job (or project) an address asked to reopen.
+   *
+   * A product's costing sheet goes back to the job it was costed for, so the
+   * projects view opens that job's side panel instead of an unfiltered list.
+   * The focus is consumed by that arrival: picking any area from the menu
+   * clears it, so the panel does not reopen on every later visit.
+   */
+  const [costingPane, setCostingPane] = useState<ProjectsPane | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const job = params.get("job");
+    if (job !== null && job !== "") return { kind: "job", id: job };
+    const project = params.get("project");
+    if (project !== null && project !== "")
+      return { kind: "project", id: project };
+    return null;
+  });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   /**
    * The side panel can be put away to give the working area the full width.
@@ -821,6 +839,7 @@ export default function Dashboard() {
     if (!sectionAllowed("costing")) return;
     setSection("costing");
     setCostingView(next);
+    setCostingPane(null);
     setMobileNavOpen(false);
   };
 
@@ -1211,7 +1230,11 @@ export default function Dashboard() {
                 finishedGoods={finishedGoods ?? []}
                 loading={finishedGoods === undefined}
                 view={costingView}
-                onSelectView={setCostingView}
+                initialPane={costingPane}
+                onSelectView={(next) => {
+                  setCostingPane(null);
+                  setCostingView(next);
+                }}
                 onNewProject={
                   canDoItem("projects", "create")
                     ? () => void handleNewProject()
