@@ -508,7 +508,7 @@ export function FlaggedItemsList({
                       <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
                         <span className="min-w-0 truncate">{fg.name}</span>
                         <ProductCodeInline code={fg.code} />
-                        <IssueInline fgId={fg._id} />
+                        <IssueInline fgId={fg._id} name={fg.name} />
                         <ProductTagsInline tags={fg.tags} />
                       </span>
                       {fg.note && (
@@ -940,7 +940,7 @@ export function FlaggedProductsList({
             <span className="flex min-w-0 max-w-full items-baseline gap-1.5">
               <span className="min-w-0 truncate">{fg.name}</span>
               <ProductCodeInline code={fg.code} />
-              <IssueInline fgId={fg._id} />
+              <IssueInline fgId={fg._id} name={fg.name} />
               <ProductQtyInline qty={fg.qty} unit={fg.unit} />
               <ProductTagsInline tags={fg.tags} />
             </span>

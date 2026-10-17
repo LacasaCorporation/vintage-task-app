@@ -32,7 +32,7 @@ import ActiveToggle from "@/components/ActiveToggle";
 // the same rule the server uses to know which products sit in which job
 import { jobIdsOf } from "@/lib/project-work";
 import ProductCodeInline from "@/components/ProductCodeInline";
-import IssueInline, { IssueProvider } from "@/components/IssueInline";
+import IssueInline from "@/components/IssueInline";
 import ProductQtyStepper from "@/components/ProductQtyStepper";
 import ProductTagsInline from "@/components/ProductTagsInline";
 import { batchCost, batchQty, costByProduct } from "@/lib/product-cost";
@@ -871,7 +871,6 @@ export default function ProjectsSheet({
           : PROJECT_FILTERS.find((o) => o.value === flagFilter)?.label ?? null;
 
   return (
-    <IssueProvider>
     <div className="mt-4 space-y-4">
       {printing && usesSharedSearch && (
         <ProjectsPrintSheet
@@ -1759,7 +1758,7 @@ export default function ProjectsSheet({
                                           {fg.name}
                                         </span>
                                         <ProductCodeInline code={fg.code} />
-                                        <IssueInline fgId={fg._id} />
+                                        <IssueInline fgId={fg._id} name={fg.name} />
                                         <MoneyBracket
                                           amount={productCostLabel(fg, costByFg.get(fg._id) ?? 0, money)}
                                           tone="cost"
@@ -1899,7 +1898,7 @@ export default function ProjectsSheet({
                                   {fg.name}
                                 </span>
                                 <ProductCodeInline code={fg.code} />
-                                <IssueInline fgId={fg._id} />
+                                <IssueInline fgId={fg._id} name={fg.name} />
                                 <MoneyBracket
                                   amount={productCostLabel(fg, costByFg.get(fg._id) ?? 0, money)}
                                   tone="cost"
@@ -2101,6 +2100,5 @@ export default function ProjectsSheet({
         />
       )}
     </div>
-    </IssueProvider>
   );
 }

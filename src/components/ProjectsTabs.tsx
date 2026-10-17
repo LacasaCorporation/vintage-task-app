@@ -428,7 +428,7 @@ export function ProductsList({
                           {fg.code}
                         </span>
                       )}
-                      <IssueInline fgId={fg._id} />
+                      <IssueInline fgId={fg._id} name={fg.name} />
                       <ActiveToggle
                         target={{ kind: "product", id: fg._id }}
                         active={fg.isActive === true}

@@ -8,6 +8,7 @@ import TasksSidebar from "@/components/TasksSidebar";
 import type { ActiveTaskView } from "@/components/TasksSidebar";
 import TasksPanel from "@/components/TasksPanel";
 import HomeDashboard from "@/components/HomeDashboard";
+import { IssueProvider } from "@/components/IssueInline";
 import PrimaryNav, { type PrimarySection } from "@/components/PrimaryNav";
 import type { CostingView } from "@/components/CostingSidebar";
 import type { ProjectsPane } from "@/components/ProjectsSheet";
@@ -890,6 +891,7 @@ export default function Dashboard() {
   );
 
   return (
+    <IssueProvider>
     <div className="flex min-h-screen bg-background text-foreground">
       {/* ── Side menu ───────────────────────────────────────────────── */}
       <aside
@@ -1295,5 +1297,6 @@ export default function Dashboard() {
         </p>
       </div>
     </div>
+    </IssueProvider>
   );
 }
